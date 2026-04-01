@@ -75,26 +75,26 @@ Which phases cover which requirements. Updated during roadmap creation.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| AUTH-01 | TBD | Pending |
-| AUTH-02 | TBD | Pending |
-| AUTH-03 | TBD | Pending |
-| STRM-01 | TBD | Pending |
-| STRM-02 | TBD | Pending |
-| BGND-01 | TBD | Pending |
-| BGND-02 | TBD | Pending |
-| BGND-03 | TBD | Pending |
-| RELY-01 | TBD | Pending |
-| RELY-02 | TBD | Pending |
-| RELY-03 | TBD | Pending |
-| MNTR-01 | TBD | Pending |
-| PLAT-01 | TBD | Pending |
-| PLAT-02 | TBD | Pending |
+| AUTH-01 | Phase 1 | Pending |
+| AUTH-02 | Phase 1 | Pending |
+| AUTH-03 | Phase 1 | Pending |
+| PLAT-01 | Phase 1 | Pending |
+| STRM-01 | Phase 2 | Pending |
+| STRM-02 | Phase 2 | Pending |
+| BGND-01 | Phase 3 | Pending |
+| BGND-02 | Phase 3 | Pending |
+| BGND-03 | Phase 3 | Pending |
+| PLAT-02 | Phase 3 | Pending |
+| RELY-01 | Phase 4 | Pending |
+| RELY-02 | Phase 4 | Pending |
+| RELY-03 | Phase 4 | Pending |
+| MNTR-01 | Phase 4 | Pending |
 
 **Coverage:**
 - v1 requirements: 14 total
-- Mapped to phases: 0
-- Unmapped: 14
+- Mapped to phases: 14
+- Unmapped: 0
 
 ---
 *Requirements defined: 2026-04-01*
-*Last updated: 2026-04-01 after initial definition*
+*Last updated: 2026-04-01 after roadmap creation*
