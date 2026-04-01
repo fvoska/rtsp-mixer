@@ -28,7 +28,11 @@ Decimal phases appear between their surrounding integers in numeric order.
   2. User can see a list of discovered cameras and select 2 for monitoring
   3. App remembers credentials and auto-connects on next launch without re-entering them
   4. App builds and runs on macOS desktop for development iteration
-**Plans**: TBD
+**Plans**: 3 plans
+Plans:
+- [ ] 01-01-PLAN.md -- Flutter project scaffolding, dependencies, macOS config, Wave 0 test stubs
+- [ ] 01-02-PLAN.md -- Protect API client (auth + bootstrap), camera data models, login screen UI
+- [ ] 01-03-PLAN.md -- Secure storage, auth/camera providers, camera list screen, GoRouter, full wiring
 **UI hint**: yes
 
 ### Phase 2: RTSP Audio Streaming
@@ -72,7 +76,7 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. Protect API + Project Foundation | 0/TBD | Not started | - |
+| 1. Protect API + Project Foundation | 0/3 | Planned | - |
 | 2. RTSP Audio Streaming | 0/TBD | Not started | - |
 | 3. Android Background Operation | 0/TBD | Not started | - |
 | 4. Reliability + Overnight Monitoring | 0/TBD | Not started | - |
