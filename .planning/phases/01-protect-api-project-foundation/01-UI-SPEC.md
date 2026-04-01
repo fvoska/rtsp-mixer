@@ -5,6 +5,7 @@ status: draft
 shadcn_initialized: false
 preset: none
 created: 2026-04-01
+revised: 2026-04-01
 ---
 
 # Phase 1 — UI Design Contract
@@ -64,13 +65,15 @@ abstract final class Spacing {
 | Role | Size | Weight | Line Height | Usage in Phase 1 |
 |------|------|--------|-------------|-------------------|
 | Body | 16px | 400 (regular) | 1.5 | Form field input text, camera names, status text, error messages |
-| Label | 14px | 500 (medium) | 1.4 | Form field labels, helper text, camera online/offline badge |
+| Label | 14px | 400 (regular) | 1.4 | Form field labels, helper text, camera online/offline badge |
 | Heading | 24px | 600 (semibold) | 1.2 | Screen titles: "Connect to Protect", "Select Cameras" |
 | Display | 20px | 600 (semibold) | 1.3 | Not used in Phase 1 (reserved for Phase 2 monitoring view) |
 
+**Weights used:** 2 total -- 400 (regular) for body and label text, 600 (semibold) for headings and display. No medium weight.
+
 **Implementation:** Use Material 3 `TextTheme` with these overrides in the dark theme:
 - `bodyLarge` = Body (16/400/1.5)
-- `labelLarge` = Label (14/500/1.4)
+- `labelLarge` = Label (14/400/1.4)
 - `headlineMedium` = Heading (24/600/1.2)
 - `titleLarge` = Display (20/600/1.3)
 
@@ -90,7 +93,7 @@ Using Material 3 `ColorScheme.fromSeed()` with a deep blue seed for a calm night
 **Seed color:** `Color(0xFF5C6BC0)` (Indigo 400). Calming blue-purple, not stimulating. Good contrast on dark backgrounds.
 
 **Accent reserved for (exhaustive list):**
-- "Connect" button on login screen (D-01)
+- "Connect to Console" button on login screen (D-01)
 - "Start Monitoring" button on camera list screen (D-06)
 - Selected camera checkboxes (D-04)
 - Connection success indicator dot
@@ -106,13 +109,15 @@ Using Material 3 `ColorScheme.fromSeed()` with a deep blue seed for a calm night
 
 ### Screen: Login (D-01, D-02, D-03)
 
+**Focal point:** The "Connect to Console" button is the primary visual anchor. It is the only accent-colored element on the screen and sits at the bottom of the form, drawing the eye downward through the fields toward the action.
+
 | Component | Material 3 Widget | Spec |
 |-----------|-------------------|------|
 | Screen title | Text with `headlineMedium` | "Connect to Protect" |
 | Console IP field | `TextFormField` with `OutlinedInputBorder` | Label: "Console IP Address", hint: "192.168.1.1", keyboardType: url |
 | Username field | `TextFormField` with `OutlinedInputBorder` | Label: "Username" |
 | Password field | `TextFormField` with `OutlinedInputBorder` | Label: "Password", obscureText: true, suffix: visibility toggle icon |
-| Connect button | `FilledButton` (full width) | Label: "Connect", height: 48px, accent color |
+| Connect button | `FilledButton` (full width) | Label: "Connect to Console", height: 48px, accent color |
 | Inline error | `TextFormField` errorText | Red text below the relevant field (D-03) |
 | Loading state | `CircularProgressIndicator` inside Connect button | Replace button text with spinner while authenticating |
 | SSL warning | `AlertDialog` | One-time prompt on first connection (D-02) |
@@ -120,6 +125,8 @@ Using Material 3 `ColorScheme.fromSeed()` with a deep blue seed for a calm night
 **Layout:** Single column, centered, max width 400px (for macOS desktop -- prevents stretched form on wide screens). Vertical spacing between fields: 16px (md). Screen horizontal padding: 24px (lg). Top padding: 48px (2xl).
 
 ### Screen: Camera List (D-04, D-05, D-06)
+
+**Focal point:** The "Start Monitoring" button pinned at the bottom of the screen is the primary visual anchor. It is the only accent-colored element when no cameras are selected (disabled state uses muted accent). When cameras are checked, the accent checkboxes create a secondary visual line leading the eye down to the button.
 
 | Component | Material 3 Widget | Spec |
 |-----------|-------------------|------|
@@ -130,7 +137,7 @@ Using Material 3 `ColorScheme.fromSeed()` with a deep blue seed for a calm night
 | Offline indicator | `Container` (circle) | 8px diameter, red 300, right-aligned |
 | Start Monitoring button | `FilledButton` (full width) | Label: "Start Monitoring", height: 48px, disabled when 0 or 3+ cameras selected (D-06) |
 | Disabled button state | `FilledButton` with null onPressed | Muted accent, no interaction |
-| Settings/logout | `IconButton` in AppBar | Icons.logout, top-right, clears credentials and returns to login |
+| Settings/logout | `IconButton` in AppBar | Icons.logout, top-right, tooltip: "Sign out", clears credentials and returns to login |
 
 **Layout:** AppBar with title + logout action. ListView of camera rows below. Fixed bottom area with Start Monitoring button, padded 24px (lg) from edges, 16px (md) above bottom safe area.
 
@@ -158,7 +165,7 @@ Using Material 3 `ColorScheme.fromSeed()` with a deep blue seed for a calm night
 
 | Element | Copy |
 |---------|------|
-| Primary CTA (login) | "Connect" |
+| Primary CTA (login) | "Connect to Console" |
 | Primary CTA (cameras) | "Start Monitoring" |
 | Empty state heading | "No Cameras Found" |
 | Empty state body | "No cameras were discovered on this Protect console. Check that your cameras are adopted and RTSP is enabled in each camera's advanced settings." |
@@ -167,7 +174,7 @@ Using Material 3 `ColorScheme.fromSeed()` with a deep blue seed for a calm night
 | Error: auto-connect failed | "Could not reconnect. Please sign in again." |
 | Error: SSL rejected | "Connection cancelled. The console uses a certificate that was not trusted." |
 | Error: no RTSP cameras | "None of your cameras have RTSP enabled. Enable RTSP in Protect under each camera's Advanced settings." |
-| Destructive: logout | No confirmation dialog. Logout is a single tap on the logout icon. Credentials are cleared immediately. Low-risk action (user can re-enter credentials in 10 seconds). |
+| Destructive: logout | No confirmation dialog. Logout is a single tap on the logout icon (tooltip: "Sign out"). Credentials are cleared immediately. Low-risk action (user can re-enter credentials in 10 seconds). |
 | Disabled button hint | "Select 1 or 2 cameras" (shown as helper text below the disabled Start Monitoring button) |
 
 ---
@@ -175,7 +182,7 @@ Using Material 3 `ColorScheme.fromSeed()` with a deep blue seed for a calm night
 ## Interaction Contracts
 
 ### Login Form Validation
-- **When:** On submit (not on every keystroke). Field-level validation when user taps Connect.
+- **When:** On submit (not on every keystroke). Field-level validation when user taps Connect to Console.
 - **IP field:** Required. Show "Console IP address is required" if empty.
 - **Username:** Required. Show "Username is required" if empty.
 - **Password:** Required. Show "Password is required" if empty.
@@ -198,7 +205,7 @@ App Launch
   |      |
   |      No --> Login Screen
   |
-Login Screen --> Connect --> Success --> Camera List
+Login Screen --> Connect to Console --> Success --> Camera List
   |
 Camera List --> Start Monitoring --> Monitoring Screen (Phase 2 placeholder)
 ```
