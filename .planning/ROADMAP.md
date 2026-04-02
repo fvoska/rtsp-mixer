@@ -38,11 +38,12 @@ Plans:
 ### Phase 2: RTSP Audio Streaming
 **Goal**: User can hear audio from two baby rooms simultaneously with independent volume control
 **Depends on**: Phase 1
-**Requirements**: STRM-01, STRM-02
+**Requirements**: STRM-01, STRM-02, STRM-03
 **Success Criteria** (what must be TRUE):
   1. User hears audio from both selected cameras playing simultaneously through phone speaker
   2. User can adjust volume independently per camera using sliders, including muting one while the other plays
-  3. No video is decoded -- only audio data is processed (verifiable via CPU/battery usage staying low)
+  3. User can pan each camera's audio left/right (e.g. nursery in left ear, bedroom in right) — works with volume control
+  4. No video is decoded -- only audio data is processed (verifiable via CPU/battery usage staying low)
 **Plans**: TBD
 **UI hint**: yes
 
