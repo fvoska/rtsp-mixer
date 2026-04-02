@@ -30,6 +30,10 @@ class ProtectApiClient {
 
   void setApiKey(String key) => _apiKey = key;
 
+  // ignore: use_setters_to_change_properties
+  /// Test-only: replace the Dio instance with a mock.
+  void setDioForTest(Dio dio) => _dio = dio;
+
   String _url(String host, String path) =>
       'https://$host/proxy/protect/integration/v1$path';
 
