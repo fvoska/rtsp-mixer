@@ -1,87 +1,86 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../../../core/api/protect_api_client_provider.dart';
+import '../../../core/api/protect_api_client.dart';
+import '../../../core/logging/app_logger.dart';
 import '../../../core/models/app_error.dart';
-import '../../../core/storage/secure_storage_provider.dart';
+import '../../../core/storage/storage_service.dart';
 import '../models/auth_state.dart';
 
-/// Auth state notifier that handles login, auto-connect (D-07), and logout.
-///
-/// On build, checks for saved credentials and auto-connects.
-/// If auto-connect fails, returns unauthenticated with error message.
+final apiClientProvider = Provider((_) => ProtectApiClient());
+final storageProvider = Provider((_) => StorageService());
+
 class AuthNotifier extends AsyncNotifier<AuthState> {
   @override
   Future<AuthState> build() async {
-    final storage = ref.read(secureStorageProvider);
-    final credentials = await storage.loadCredentials();
-
-    if (credentials == null) {
+    appLog('AUTH', 'build() — checking saved credentials');
+    final storage = ref.read(storageProvider);
+    final creds = await storage.loadCredentials();
+    if (creds == null) {
+      appLog('AUTH', 'No saved credentials');
       return const AuthState.unauthenticated();
     }
-
+    appLog('AUTH', 'Found saved credentials, auto-connecting...');
+    final client = ref.read(apiClientProvider);
+    client.setApiKey(creds.apiKey);
     try {
-      final client = ref.read(protectApiClientProvider);
-      final success = await client.login(
-        credentials.host,
-        credentials.username,
-        credentials.password,
-      );
-
-      if (success) {
-        return AuthState.authenticated(host: credentials.host);
+      final ok = await client.verifyConnection(creds.host);
+      if (ok) {
+        appLog('AUTH', 'Auto-connect succeeded');
+        return AuthState.authenticated(host: creds.host);
       }
+      appLog('AUTH', 'Auto-connect failed (bad key?)');
       return const AuthState.unauthenticated(
-        errorMessage: 'Could not reconnect. Please sign in again.',
+        errorMessage: 'Could not reconnect. Check API key.',
       );
     } catch (e) {
+      appLog('AUTH', 'Auto-connect error: $e');
       return const AuthState.unauthenticated(
-        errorMessage: 'Could not reconnect. Please sign in again.',
+        errorMessage: 'Could not reconnect.',
       );
     }
   }
 
-  /// Attempt login with provided credentials.
-  ///
-  /// On success, saves credentials to secure storage and transitions to
-  /// authenticated state. On failure, sets error state with mapped error.
-  Future<void> login(String host, String username, String password) async {
+  Future<void> login(String host, String apiKey) async {
+    appLog('AUTH', 'login($host, key=${apiKey.length}chars)');
     state = const AsyncLoading();
-
+    final client = ref.read(apiClientProvider);
+    client.setApiKey(apiKey);
     try {
-      final client = ref.read(protectApiClientProvider);
-      final success = await client.login(host, username, password);
-
-      if (success) {
-        final storage = ref.read(secureStorageProvider);
-        await storage.saveCredentials(host, username, password);
+      final ok = await client.verifyConnection(host);
+      if (ok) {
+        appLog('AUTH', 'Login succeeded');
+        final storage = ref.read(storageProvider);
+        await storage.saveCredentials(host, apiKey);
         state = AsyncData(AuthState.authenticated(host: host));
       } else {
+        appLog('AUTH', 'Login failed — bad response');
         state = const AsyncData(AuthState.unauthenticated(
-          errorMessage: 'Invalid username or password.',
+          errorMessage: 'Invalid API key.',
           errorType: AppErrorType.invalidCredentials,
         ));
       }
     } on AppError catch (e) {
+      appLog('AUTH', 'Login AppError: ${e.type} ${e.message}');
       state = AsyncData(AuthState.unauthenticated(
         errorMessage: e.message,
         errorType: e.type,
       ));
     } catch (e) {
+      appLog('AUTH', 'Login unexpected error: $e');
       state = AsyncData(AuthState.unauthenticated(
-        errorMessage: 'An unexpected error occurred.',
+        errorMessage: 'Unexpected error: $e',
         errorType: AppErrorType.unknown,
       ));
     }
   }
 
-  /// Clear credentials and return to unauthenticated state.
   Future<void> logout() async {
-    final storage = ref.read(secureStorageProvider);
-    await storage.clearCredentials();
+    appLog('AUTH', 'Logging out');
+    final storage = ref.read(storageProvider);
+    await storage.clearAll();
     state = const AsyncData(AuthState.unauthenticated());
   }
 }
 
-/// Provider for the auth notifier.
 final authNotifierProvider =
     AsyncNotifierProvider<AuthNotifier, AuthState>(AuthNotifier.new);

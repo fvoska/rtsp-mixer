@@ -1,37 +1,29 @@
-{
-  "cameras": [
-    {
-      "id": "cam-001",
-      "name": "Nursery",
-      "type": "UVC G4 Dome",
-      "state": "CONNECTED",
-      "isConnected": true,
-      "channels": [
-        {"id": 0, "name": "High", "rtspAlias": "nursery_high", "isRtspEnabled": true},
-        {"id": 1, "name": "Medium", "rtspAlias": "nursery_medium", "isRtspEnabled": true},
-        {"id": 2, "name": "Low", "rtspAlias": "nursery_low", "isRtspEnabled": false}
-      ]
-    },
-    {
-      "id": "cam-002",
-      "name": "Bedroom",
-      "type": "UVC G4 Instant",
-      "state": "CONNECTED",
-      "isConnected": true,
-      "channels": [
-        {"id": 0, "name": "High", "rtspAlias": "bedroom_high", "isRtspEnabled": true}
-      ]
-    },
-    {
-      "id": "cam-003",
-      "name": "Garage",
-      "type": "UVC G3 Flex",
-      "state": "DISCONNECTED",
-      "isConnected": false,
-      "channels": [
-        {"id": 0, "name": "High", "rtspAlias": "garage_high", "isRtspEnabled": false}
-      ]
-    }
-  ],
-  "lastUpdateId": "abc123"
-}
+[
+  {
+    "id": "cam-001",
+    "name": "Nursery",
+    "modelKey": "camera",
+    "state": "CONNECTED",
+    "mac": "AA:BB:CC:DD:EE:01",
+    "isMicEnabled": true,
+    "micVolume": 100
+  },
+  {
+    "id": "cam-002",
+    "name": "Bedroom",
+    "modelKey": "camera",
+    "state": "CONNECTED",
+    "mac": "AA:BB:CC:DD:EE:02",
+    "isMicEnabled": true,
+    "micVolume": 80
+  },
+  {
+    "id": "cam-003",
+    "name": "Garage",
+    "modelKey": "camera",
+    "state": "DISCONNECTED",
+    "mac": "AA:BB:CC:DD:EE:03",
+    "isMicEnabled": false,
+    "micVolume": 0
+  }
+]

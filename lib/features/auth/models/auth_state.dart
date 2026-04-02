@@ -12,17 +12,10 @@ class AuthState {
       : status = AuthStatus.unauthenticated,
         host = null;
 
-  const AuthState.authenticating()
-      : status = AuthStatus.authenticating,
-        host = null,
-        errorMessage = null,
-        errorType = null;
-
   const AuthState.authenticated({required this.host})
       : status = AuthStatus.authenticated,
         errorMessage = null,
         errorType = null;
 
   bool get isAuthenticated => status == AuthStatus.authenticated;
-  bool get isAuthenticating => status == AuthStatus.authenticating;
 }
