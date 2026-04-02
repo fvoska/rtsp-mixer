@@ -30,7 +30,7 @@ Decimal phases appear between their surrounding integers in numeric order.
   4. App builds and runs on macOS desktop for development iteration
 **Plans**: 3 plans
 Plans:
-- [ ] 01-01-PLAN.md -- Flutter project scaffolding, dependencies, macOS config, Wave 0 test stubs
+- [x] 01-01-PLAN.md -- Flutter project scaffolding, dependencies, macOS config, Wave 0 test stubs
 - [ ] 01-02-PLAN.md -- Protect API client (auth + bootstrap), camera data models, login screen UI
 - [ ] 01-03-PLAN.md -- Secure storage, auth/camera providers, camera list screen, GoRouter, full wiring
 **UI hint**: yes

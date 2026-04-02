@@ -36,7 +36,7 @@ Requirements for initial release. Each maps to roadmap phases.
 
 ### Platform
 
-- [ ] **PLAT-01**: App builds and runs on macOS desktop for development and rapid iteration
+- [x] **PLAT-01**: App builds and runs on macOS desktop for development and rapid iteration
 - [ ] **PLAT-02**: App builds and runs on physical Android device for real-world overnight testing
 
 ## v2 Requirements
@@ -78,7 +78,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 | AUTH-01 | Phase 1 | Pending |
 | AUTH-02 | Phase 1 | Pending |
 | AUTH-03 | Phase 1 | Pending |
-| PLAT-01 | Phase 1 | Pending |
+| PLAT-01 | Phase 1 | Complete |
 | STRM-01 | Phase 2 | Pending |
 | STRM-02 | Phase 2 | Pending |
 | BGND-01 | Phase 3 | Pending |
