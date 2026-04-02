@@ -12,7 +12,6 @@ import 'protect_auth_interceptor.dart';
 class ProtectApiClient {
   final Dio _dio;
   final ProtectAuthInterceptor _authInterceptor;
-  String? _host;
   String? _lastUpdateId;
 
   ProtectApiClient({
@@ -35,8 +34,6 @@ class ProtectApiClient {
   /// If the initial login returns 403 without a CSRF token, fetches the
   /// base URL first to acquire an initial CSRF token, then retries.
   Future<bool> login(String host, String username, String password) async {
-    _host = host;
-
     try {
       return await _attemptLogin(host, username, password);
     } on DioException catch (e) {
@@ -104,8 +101,6 @@ class ProtectApiClient {
   ///
   /// Requires prior successful [login].
   Future<List<ProtectCamera>> getBootstrap(String host) async {
-    _host = host;
-
     try {
       final response = await _dio.get(
         'https://$host/proxy/protect/api/bootstrap',

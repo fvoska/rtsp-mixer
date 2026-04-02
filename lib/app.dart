@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import 'core/theme/app_theme.dart';
+import 'features/auth/screens/login_screen.dart';
 
 class App extends StatelessWidget {
   const App({super.key});
@@ -11,11 +12,7 @@ class App extends StatelessWidget {
       title: 'RTSP Audio Mixer',
       theme: AppTheme.dark,
       debugShowCheckedModeBanner: false,
-      home: const Scaffold(
-        body: Center(
-          child: Text('RTSP Audio Mixer'),
-        ),
-      ),
+      home: const LoginScreen(),
     );
   }
 }
