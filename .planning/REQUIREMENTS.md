@@ -9,8 +9,8 @@ Requirements for initial release. Each maps to roadmap phases.
 
 ### Authentication
 
-- [ ] **AUTH-01**: User can authenticate with Unifi Protect console using IP address and credentials
-- [ ] **AUTH-02**: User can discover and select 2 cameras from Protect API camera list
+- [x] **AUTH-01**: User can authenticate with Unifi Protect console using IP address and credentials
+- [x] **AUTH-02**: User can discover and select 2 cameras from Protect API camera list
 - [ ] **AUTH-03**: App persists credentials securely and auto-connects on launch
 
 ### Streaming
@@ -75,8 +75,8 @@ Which phases cover which requirements. Updated during roadmap creation.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| AUTH-01 | Phase 1 | Pending |
-| AUTH-02 | Phase 1 | Pending |
+| AUTH-01 | Phase 1 | Complete |
+| AUTH-02 | Phase 1 | Complete |
 | AUTH-03 | Phase 1 | Pending |
 | PLAT-01 | Phase 1 | Complete |
 | STRM-01 | Phase 2 | Pending |
