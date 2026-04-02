@@ -1,40 +1,31 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/models/app_error.dart';
+import '../../../core/storage/secure_storage_provider.dart';
 import '../../../core/theme/spacing.dart';
+import '../../cameras/providers/camera_provider.dart';
+import '../providers/auth_provider.dart';
 
 /// Login screen with Console IP, Username, and Password fields (D-01).
 ///
 /// Displays inline errors under relevant fields (D-03).
 /// Shows SSL certificate warning dialog on first connection (D-02).
-class LoginScreen extends StatefulWidget {
-  /// Callback invoked when the user taps Connect.
-  /// Receives host, username, password, and whether self-signed certs are accepted.
-  /// Should return null on success, or an [AppError] on failure.
-  ///
-  /// TODO: Wire to Riverpod auth provider in Plan 03.
-  final Future<AppError?> Function(
-    String host,
-    String username,
-    String password, {
-    required bool acceptSelfSigned,
-  })? onConnect;
-
-  const LoginScreen({super.key, this.onConnect});
+/// Wired to [authNotifierProvider] for authentication state management.
+class LoginScreen extends ConsumerStatefulWidget {
+  const LoginScreen({super.key});
 
   @override
-  State<LoginScreen> createState() => _LoginScreenState();
+  ConsumerState<LoginScreen> createState() => _LoginScreenState();
 }
 
-class _LoginScreenState extends State<LoginScreen> {
+class _LoginScreenState extends ConsumerState<LoginScreen> {
   final _formKey = GlobalKey<FormState>();
   final _hostController = TextEditingController();
   final _usernameController = TextEditingController();
   final _passwordController = TextEditingController();
 
   bool _isPasswordVisible = false;
-  bool _isAuthenticating = false;
-  bool _hasAcceptedCert = false;
 
   // Server error state for inline display (D-03)
   String? _hostError;
@@ -56,21 +47,23 @@ class _LoginScreenState extends State<LoginScreen> {
   }
 
   /// Map server errors to the relevant field (D-03).
-  void _setServerError(AppError error) {
+  void _setServerError(AppErrorType? errorType, String? message) {
+    if (errorType == null && message == null) return;
     setState(() {
-      switch (error.type) {
+      switch (errorType) {
         case AppErrorType.connectionRefused:
-          _hostError =
+          _hostError = message ??
               'Could not reach the console. Check the IP address and make sure you are on the same network.';
         case AppErrorType.invalidCredentials:
-          _passwordError = 'Invalid username or password.';
+          _passwordError = message ?? 'Invalid username or password.';
         case AppErrorType.sslRejected:
-          _hostError =
+          _hostError = message ??
               'Connection cancelled. The console uses a certificate that was not trusted.';
         case AppErrorType.timeout:
-          _hostError = 'Connection timed out. Please try again.';
+          _hostError = message ?? 'Connection timed out. Please try again.';
         case AppErrorType.unknown:
-          _hostError = error.message;
+        case null:
+          _hostError = message;
       }
     });
   }
@@ -84,30 +77,34 @@ class _LoginScreenState extends State<LoginScreen> {
     final username = _usernameController.text.trim();
     final password = _passwordController.text;
 
-    // Show SSL certificate dialog if not yet accepted (D-02)
-    if (!_hasAcceptedCert) {
+    // Check SSL acceptance (D-02)
+    final storage = ref.read(secureStorageProvider);
+    final sslAccepted = await storage.loadSslAccepted(host);
+
+    if (!sslAccepted) {
       final accepted = await _showCertificateDialog(host);
       if (!accepted) return;
-      _hasAcceptedCert = true;
+      await storage.saveSslAccepted(host, true);
     }
 
-    setState(() => _isAuthenticating = true);
+    // Perform login via auth provider
+    final notifier = ref.read(authNotifierProvider.notifier);
+    await notifier.login(host, username, password);
 
-    try {
-      final error = await widget.onConnect?.call(
-        host,
-        username,
-        password,
-        acceptSelfSigned: _hasAcceptedCert,
+    // Check result and handle errors
+    if (!mounted) return;
+    final authState = ref.read(authNotifierProvider);
+    if (authState.value?.isAuthenticated == true) {
+      // Login succeeded -- load cameras so the list is ready
+      final authHost = authState.value?.host;
+      if (authHost != null) {
+        ref.read(cameraNotifierProvider.notifier).loadCameras(authHost);
+      }
+    } else if (authState.value?.errorMessage != null) {
+      _setServerError(
+        authState.value?.errorType,
+        authState.value?.errorMessage,
       );
-
-      if (error != null) {
-        _setServerError(error);
-      }
-    } finally {
-      if (mounted) {
-        setState(() => _isAuthenticating = false);
-      }
     }
   }
 
@@ -139,6 +136,11 @@ class _LoginScreenState extends State<LoginScreen> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final authState = ref.watch(authNotifierProvider);
+    final isAuthenticating = authState.isLoading;
+
+    // Show auto-connect error banner if present
+    final autoConnectError = authState.value?.errorMessage;
 
     return Scaffold(
       body: SingleChildScrollView(
@@ -158,6 +160,22 @@ class _LoginScreenState extends State<LoginScreen> {
                     'Connect to Protect',
                     style: theme.textTheme.headlineMedium,
                   ),
+                  if (autoConnectError != null && _hostError == null && _passwordError == null) ...[
+                    const SizedBox(height: Spacing.md),
+                    Container(
+                      padding: const EdgeInsets.all(Spacing.md),
+                      decoration: BoxDecoration(
+                        color: theme.colorScheme.errorContainer,
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: Text(
+                        autoConnectError,
+                        style: theme.textTheme.bodyLarge?.copyWith(
+                          color: theme.colorScheme.onErrorContainer,
+                        ),
+                      ),
+                    ),
+                  ],
                   const SizedBox(height: Spacing.xl),
                   Form(
                     key: _formKey,
@@ -232,8 +250,8 @@ class _LoginScreenState extends State<LoginScreen> {
                   SizedBox(
                     height: 48,
                     child: FilledButton(
-                      onPressed: _isAuthenticating ? null : _handleConnect,
-                      child: _isAuthenticating
+                      onPressed: isAuthenticating ? null : _handleConnect,
+                      child: isAuthenticating
                           ? const SizedBox(
                               height: 20,
                               width: 20,
