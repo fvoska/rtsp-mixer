@@ -15,9 +15,9 @@ Requirements for initial release. Each maps to roadmap phases.
 
 ### Streaming
 
-- [ ] **STRM-01**: App extracts and plays audio-only from 2 RTSP streams simultaneously (no video decoding)
-- [ ] **STRM-02**: User can adjust volume independently per camera via sliders
-- [ ] **STRM-03**: User can pan each camera's audio between left/right stereo channels (e.g. nursery in left ear, bedroom in right ear). Works together with volume control.
+- [x] **STRM-01**: App extracts and plays audio-only from 2 RTSP streams simultaneously (no video decoding)
+- [x] **STRM-02**: User can adjust volume independently per camera via sliders
+- [x] **STRM-03**: User can pan each camera's audio between left/right stereo channels (e.g. nursery in left ear, bedroom in right ear). Works together with volume control.
 
 ### Background
 
@@ -80,9 +80,9 @@ Which phases cover which requirements. Updated during roadmap creation.
 | AUTH-02 | Phase 1 | Complete |
 | AUTH-03 | Phase 1 | Pending |
 | PLAT-01 | Phase 1 | Complete |
-| STRM-01 | Phase 2 | Pending |
-| STRM-02 | Phase 2 | Pending |
-| STRM-03 | Phase 2 | Pending |
+| STRM-01 | Phase 2 | Complete |
+| STRM-02 | Phase 2 | Complete |
+| STRM-03 | Phase 2 | Complete |
 | BGND-01 | Phase 3 | Pending |
 | BGND-02 | Phase 3 | Pending |
 | BGND-03 | Phase 3 | Pending |
