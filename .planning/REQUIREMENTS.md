@@ -23,7 +23,7 @@ Requirements for initial release. Each maps to roadmap phases.
 
 - [x] **BGND-01**: App runs as Android foreground service with persistent notification showing monitoring status
 - [x] **BGND-02**: App acquires partial wake lock and high-performance WiFi lock to prevent OS throttling
-- [ ] **BGND-03**: Audio continues playing with screen off and phone charging
+- [x] **BGND-03**: Audio continues playing with screen off and phone charging
 
 ### Reliability
 
@@ -85,7 +85,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 | STRM-03 | Phase 2 | Complete |
 | BGND-01 | Phase 3 | Complete |
 | BGND-02 | Phase 3 | Complete |
-| BGND-03 | Phase 3 | Pending |
+| BGND-03 | Phase 3 | Complete |
 | PLAT-02 | Phase 3 | Complete |
 | RELY-01 | Phase 4 | Pending |
 | RELY-02 | Phase 4 | Pending |

@@ -61,8 +61,8 @@ Plans:
   4. App builds, installs, and runs correctly on a physical Android device
 **Plans**: 2 plans
 Plans:
-- [ ] 03-01-PLAN.md -- Android platform config (minSdk/targetSdk, permissions, manifest), flutter_foreground_task + audio_service deps, foreground service module with TaskHandler
-- [ ] 03-02-PLAN.md -- Wire service to monitoring lifecycle, notification updates, audio_service MediaSession for lock screen controls, physical device verification
+- [x] 03-01-PLAN.md -- Android platform config (minSdk/targetSdk, permissions, manifest), flutter_foreground_task + audio_service deps, foreground service module with TaskHandler
+- [x] 03-02-PLAN.md -- Wire service to monitoring lifecycle, notification updates, audio_service MediaSession for lock screen controls, physical device verification
 
 ### Phase 4: Reliability + Overnight Monitoring
 **Goal**: Parent can trust the app is still listening when they fall asleep -- it recovers from failures and reports overnight health
