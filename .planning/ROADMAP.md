@@ -44,7 +44,10 @@ Plans:
   2. User can adjust volume independently per camera using sliders, including muting one while the other plays
   3. User can pan each camera's audio left/right (e.g. nursery in left ear, bedroom in right) — works with volume control
   4. No video is decoded -- only audio data is processed (verifiable via CPU/battery usage staying low)
-**Plans**: TBD
+**Plans**: 2 plans
+Plans:
+- [ ] 02-01-PLAN.md -- media_kit dependencies, RTSP URL helpers, pan filter math, player state model, Wave 0 tests
+- [ ] 02-02-PLAN.md -- Audio player Riverpod provider, monitoring screen UI with volume/pan/mute controls
 **UI hint**: yes
 
 ### Phase 3: Android Background Operation
@@ -78,6 +81,6 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 1. Protect API + Project Foundation | 0/3 | Planned | - |
-| 2. RTSP Audio Streaming | 0/TBD | Not started | - |
+| 2. RTSP Audio Streaming | 0/2 | Planned | - |
 | 3. Android Background Operation | 0/TBD | Not started | - |
 | 4. Reliability + Overnight Monitoring | 0/TBD | Not started | - |
