@@ -8,6 +8,7 @@ import '../../../core/logging/app_logger.dart';
 import '../../../core/services/foreground_service.dart';
 import '../../../core/theme/spacing.dart';
 import '../providers/audio_player_provider.dart';
+import '../services/audio_handler.dart';
 import '../widgets/camera_audio_card.dart';
 import '../widgets/stop_monitoring_button.dart';
 
@@ -46,6 +47,16 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen>
       if (monState != null && monState.cameras.isNotEmpty) {
         final names = monState.cameras.map((c) => c.cameraName).toList();
         await ForegroundServiceManager.start(names);
+
+        // Initialize audio_service for MediaSession lock screen controls (D-04)
+        try {
+          final handler = await ref.read(audioHandlerProvider.future);
+          handler.setCameraNames(names);
+          handler.setPlaying();
+        } catch (e) {
+          // audio_service is nice-to-have -- don't break monitoring if it fails
+          appLog('AUDIO_SERVICE', 'Failed to init audio handler: $e');
+        }
       }
     });
   }
@@ -92,6 +103,13 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen>
 
   Future<void> _stopAndGoBack() async {
     await ref.read(audioPlayerProvider.notifier).stopMonitoring();
+    // Stop audio_service MediaSession
+    try {
+      final handler = await ref.read(audioHandlerProvider.future);
+      handler.setIdle();
+    } catch (e) {
+      appLog('AUDIO_SERVICE', 'Failed to stop audio handler: $e');
+    }
     await ForegroundServiceManager.stop();
     if (mounted) {
       context.go('/cameras');
