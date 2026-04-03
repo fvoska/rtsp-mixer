@@ -11,7 +11,7 @@ A baby monitor app that connects to Unifi Protect cameras, extracts audio-only f
 
 - **Platform**: Android primary, web nice-to-have — Flutter is the candidate framework
 - **Network**: Same LAN only — no need for cloud relay or remote tunneling
-- **Audio only**: Must not decode video — minimize battery and CPU usage overnight
+- **Audio only by default**: Video decoding disabled at runtime (`vid=no`). Optional video preview toggle available but auto-suspends when app is backgrounded/screen off.
 - **Reliability**: Must survive 8+ hours unattended — auto-reconnect is non-negotiable
 - **Background**: Android must not kill the app — foreground service with persistent notification
 <!-- GSD:project-end -->
@@ -28,8 +28,9 @@ A baby monitor app that connects to Unifi Protect cameras, extracts audio-only f
 ### RTSP Audio Playback
 | Technology | Version | Purpose | Why |
 |------------|---------|---------|-----|
-| media_kit | ^1.2.6 | RTSP stream connection and audio decoding | Built on libmpv (which uses FFmpeg internally). Supports RTSP natively, has explicit audio-only mode via `media_kit_libs_audio`, handles multiple simultaneous Player instances, and provides volume control per-player. This is the core of the app. |
-| media_kit_libs_audio | ^1.0.7 | Audio-only native libraries (no video codecs) | Smaller binary, lower CPU/battery. Excludes video decoding entirely -- critical for overnight battery life. Do NOT mix with media_kit_libs_video. |
+| media_kit | ^1.2.6 | RTSP stream connection and audio decoding | Built on libmpv (which uses FFmpeg internally). Supports RTSP natively, handles multiple simultaneous Player instances, and provides volume control per-player. This is the core of the app. |
+| media_kit_video | ^1.2.6 | Video rendering for optional preview | Provides `Video` widget and `VideoController`. Used for optional video preview toggle — off by default, video disabled via `vid=no` mpv property. |
+| media_kit_libs_video | ^1.0.6 | Full native libraries (FFmpeg with RTSP demuxer) | **Must use video libs, not audio-only.** The `media_kit_libs_audio` build strips the RTSP/RTSPS demuxer (`Unknown lavf format rtsp` error). The video libs include all protocol demuxers. Video decoding is disabled at runtime via `vid=no` to save CPU. |
 ### Background Execution
 | Technology | Version | Purpose | Why |
 |------------|---------|---------|-----|
@@ -40,16 +41,16 @@ A baby monitor app that connects to Unifi Protect cameras, extracts audio-only f
 |------------|---------|---------|-----|
 | dio | ^5.7+ | HTTP client for Protect API | Industry-standard Flutter HTTP client. Supports interceptors for auth token refresh, cookie management, and self-signed certificate handling (Unifi consoles use self-signed certs). |
 | web_socket_channel | ^3.0+ | WebSocket client for real-time events | Dart-native WebSocket implementation. Connects to Protect's `wss://` updates endpoint for smart detection events (baby crying). |
-| flutter_secure_storage | ^9.2+ | Credential storage | Stores Unifi Protect username/password using Android Keystore. Never store credentials in SharedPreferences. |
+| flutter_secure_storage | ^10.0+ | Credential storage | Stores Unifi Protect API key. On macOS without signing, falls back to in-memory storage (see memory note). |
 | Endpoint | Method | Purpose |
 |----------|--------|---------|
-| `/api/auth/login` | POST | Authenticate, get cookie/token |
-| `/proxy/protect/api/bootstrap` | GET | Discover cameras, NVR info, get lastUpdateId |
+| `/proxy/protect/integration/v1/cameras` | GET | List cameras (X-API-Key auth) |
+| `/proxy/protect/integration/v1/cameras/{id}/rtsps-stream` | GET | Get RTSPS URLs per quality (high/medium/low) |
+| `/proxy/protect/api/bootstrap` | GET | Full NVR data — **does NOT work with X-API-Key** (returns 500), needs cookie auth |
 | `wss://.../proxy/protect/ws/updates?lastUpdateId=X` | WS | Real-time smart detection events |
-- RTSPS (encrypted): `rtsps://{nvr_ip}:7441/{camera_id}?enableSrtp`
-- RTSP (unencrypted): `rtsp://{nvr_ip}:7447/{camera_id}`
+- RTSPS URLs use per-channel aliases (e.g. `rtsps://{nvr_ip}:7441/{alias}?enableSrtp`), NOT camera IDs
+- Get aliases from the `/cameras/{id}/rtsps-stream` integration endpoint
 - RTSP must be enabled per-camera in Unifi Protect settings (Advanced > RTSP)
-- The bootstrap JSON contains camera objects with IDs and channel configurations
 ### UI Framework
 | Technology | Version | Purpose | Why |
 |------------|---------|---------|-----|
@@ -61,7 +62,7 @@ A baby monitor app that connects to Unifi Protect cameras, extracts audio-only f
 ### Audio Level Metering
 | Technology | Version | Purpose | Why |
 |------------|---------|---------|-----|
-| Custom implementation via media_kit | -- | Visual audio level meters | media_kit exposes audio data callbacks through libmpv. Use mpv's `af-metadata` or observe the `audio-pts` property. Alternatively, use a lightweight FFT on decoded PCM samples if available. |
+| Bitrate-based activity detection | -- | Visual audio activity indicator | The prebuilt media_kit FFmpeg does NOT include audio analysis filters (`ebur128`, `astats`, `aformat`, `stereotools` all missing). Audio activity is estimated by polling `audio-bitrate` changes via mpv properties. `audio-pts` tracks stream flow (silence detection). |
 ### Supporting Libraries
 | Library | Version | Purpose | When to Use |
 |---------|---------|---------|-------------|
@@ -112,7 +113,28 @@ A baby monitor app that connects to Unifi Protect cameras, extracts audio-only f
 <!-- GSD:conventions-start source:CONVENTIONS.md -->
 ## Conventions
 
-Conventions not yet established. Will populate as patterns emerge during development.
+### Defensive error handling — streams must never break
+
+This is a baby monitor. Parents fall asleep trusting it. **No exception may kill a running audio stream.**
+
+- Wrap all non-critical operations (metadata polling, UI updates, filter setup, property reads) in try/catch. Log the error with `appLog` and continue.
+- Only propagate exceptions that genuinely prevent the stream from functioning (e.g., failed `player.open()`).
+- Never call `setProperty` with a filter/value that hasn't been verified to work on this FFmpeg build. If a filter might not exist, catch the async failure via the error stream and recover.
+- State update failures (e.g., index out of range during a poll) must not bubble up — catch, log, skip.
+- Prefer degraded functionality over crash: if a feature (metering, debug info, video toggle) fails, disable that feature silently and keep audio playing.
+
+### media_kit FFmpeg build limitations
+
+The prebuilt `media_kit_libs_video` (macOS) ships a stripped FFmpeg. These are **known missing**:
+- Audio filters: `ebur128`, `astats`, `aformat`, `stereotools`, `pan` (via lavfi)
+- The `lavfi` wrapper cannot pass `|` characters via `setProperty` — mpv parses them as filter chain separators before FFmpeg sees them. Neither `\|`, `[...]` quoting, nor `graph="..."` quoting works.
+- L/R stereo panning is **not currently implemented** due to the above. Deferred to a future phase (may require custom FFmpeg build).
+
+Do NOT attempt to use lavfi audio filters without first verifying they exist in the build. A failed filter via `setProperty` kills the audio stream asynchronously (mpv error: "Audio filter initialized failed!" → "No video or audio streams selected").
+
+### Authentication
+
+Uses the official Protect integration API with `X-API-Key` header (not cookie/CSRF login). The bootstrap API (`/proxy/protect/api/bootstrap`) does NOT accept API key auth — returns 500.
 <!-- GSD:conventions-end -->
 
 <!-- GSD:architecture-start source:ARCHITECTURE.md -->

@@ -2,16 +2,16 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
-status: verifying
-stopped_at: Completed 02-02-PLAN.md (Task 3 human-verify pending)
-last_updated: "2026-04-03T19:45:13.155Z"
+status: idle
+stopped_at: Phase 2 complete, additional features added (video preview, debug info, activity detection, accessibility)
+last_updated: "2026-04-03T23:15:00.000Z"
 last_activity: 2026-04-03
 progress:
   total_phases: 4
   completed_phases: 2
   total_plans: 5
   completed_plans: 5
-  percent: 0
+  percent: 50
 ---
 
 # Project State
@@ -21,16 +21,16 @@ progress:
 See: .planning/PROJECT.md (updated 2026-04-01)
 
 **Core value:** Reliable overnight audio from two baby cameras that never silently dies
-**Current focus:** Phase 01 — protect-api-project-foundation
+**Current focus:** Phases 1-2 complete. Next: Phase 3 (Android Background Operation)
 
 ## Current Position
 
-Phase: 01 (protect-api-project-foundation) — EXECUTING
-Plan: 3 of 3
-Status: Phase complete — ready for verification
+Phase: 02 (rtsp-audio-streaming) — COMPLETE
+Plan: 2 of 2
+Status: Phases 1 and 2 complete. Ready for Phase 3.
 Last activity: 2026-04-03
 
-Progress: [░░░░░░░░░░] 0%
+Progress: [█████░░░░░] 50%
 
 ## Performance Metrics
 
@@ -84,9 +84,10 @@ None yet.
 
 ### Blockers/Concerns
 
-- Research flags media_kit RTSP audio-only as untested for this use case -- Phase 2 may need a spike/prototype
-- Protect API auth method uncertainty (cookie vs API-key) -- will surface in Phase 1
-- OEM battery optimization killing foreground service -- Phase 3 risk, needs real device testing
+- ~~Research flags media_kit RTSP audio-only as untested~~ — **resolved**: media_kit_libs_audio lacks RTSP demuxer, must use media_kit_libs_video with vid=no
+- ~~Protect API auth method uncertainty~~ — **resolved**: X-API-Key via integration API, bootstrap API does NOT work with API key
+- L/R stereo panning deferred — prebuilt FFmpeg lacks audio filters (ebur128, astats, stereotools, pan all missing)
+- OEM battery optimization killing foreground service — Phase 3 risk, needs real device testing
 
 ## Session Continuity
 

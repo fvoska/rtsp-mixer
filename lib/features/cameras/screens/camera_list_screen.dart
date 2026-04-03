@@ -20,6 +20,16 @@ class CameraListScreen extends ConsumerWidget {
         title: const Text('Select Cameras'),
         actions: [
           IconButton(
+            icon: const Icon(Icons.refresh),
+            tooltip: 'Refresh cameras',
+            onPressed: () {
+              final host = ref.read(authNotifierProvider).value?.host;
+              if (host != null) {
+                ref.read(cameraNotifierProvider.notifier).loadCameras(host);
+              }
+            },
+          ),
+          IconButton(
             icon: const Icon(Icons.logout),
             tooltip: 'Sign out',
             onPressed: () => ref.read(authNotifierProvider.notifier).logout(),

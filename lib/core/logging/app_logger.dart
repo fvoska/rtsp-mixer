@@ -22,12 +22,24 @@ class AppLogger {
   static final instance = AppLogger._();
 
   static const _logFile = '/tmp/rtsp_audio_mixer.log';
-  static const _maxLines = 50;
+  static const _maxLines = 500;
 
   final _buffer = ListQueue<String>();
   final _listeners = <VoidCallback>[];
 
   List<String> get lines => _buffer.toList();
+
+  /// Full log content for export.
+  String get exportText => _buffer.join('\n');
+
+  /// Full log from disk (includes lines that may have rotated out of memory).
+  String get exportFromDisk {
+    try {
+      return File(_logFile).readAsStringSync();
+    } catch (_) {
+      return exportText;
+    }
+  }
 
   void addListener(VoidCallback listener) => _listeners.add(listener);
   void removeListener(VoidCallback listener) => _listeners.remove(listener);

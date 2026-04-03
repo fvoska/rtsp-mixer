@@ -15,11 +15,20 @@ class CameraNotifier extends AsyncNotifier<CameraState> {
       final cameras = await client.getCameras(host);
       appLog('CAM', 'Loaded ${cameras.length} cameras');
 
+      // Fetch all available RTSPS stream URLs for each camera in parallel.
+      final enrichedCameras = await Future.wait(
+        cameras.map((c) async {
+          final urls = await client.getRtspsUrls(host, c.id);
+          return urls.isNotEmpty ? c.copyWith(rtspsStreamUrls: urls) : c;
+        }),
+      );
+      appLog('CAM', 'RTSPS URLs: ${enrichedCameras.where((c) => c.rtspsStreamUrls.isNotEmpty).length}/${cameras.length}');
+
       final storage = ref.read(storageProvider);
       final savedIds = await storage.loadSelectedCameraIds();
-      final validIds = savedIds.where((id) => cameras.any((c) => c.id == id)).toSet();
+      final validIds = savedIds.where((id) => enrichedCameras.any((c) => c.id == id)).toSet();
 
-      state = AsyncData(CameraState(cameras: cameras, selectedIds: validIds));
+      state = AsyncData(CameraState(cameras: enrichedCameras, selectedIds: validIds));
     } catch (e) {
       appLog('CAM', 'Error loading cameras: $e');
       state = AsyncError(e, StackTrace.current);

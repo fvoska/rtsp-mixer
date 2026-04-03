@@ -12,8 +12,8 @@ This roadmap delivers a reliable overnight baby monitor in four phases. We start
 
 Decimal phases appear between their surrounding integers in numeric order.
 
-- [ ] **Phase 1: Protect API + Project Foundation** - Authenticate with Unifi Protect, discover cameras, persist credentials, establish macOS dev target
-- [x] **Phase 2: RTSP Audio Streaming** - Extract audio-only from two RTSP streams simultaneously with per-camera volume control (completed 2026-04-03)
+- [x] **Phase 1: Protect API + Project Foundation** - Authenticate with Unifi Protect, discover cameras, persist credentials, establish macOS dev target (completed 2026-04-03)
+- [x] **Phase 2: RTSP Audio Streaming** - Extract audio-only from two RTSP streams simultaneously with per-camera volume control and monitoring UI (completed 2026-04-03)
 - [ ] **Phase 3: Android Background Operation** - Run as foreground service on physical Android device with screen off overnight
 - [ ] **Phase 4: Reliability + Overnight Monitoring** - Auto-reconnect on stream drops, connection status UI, watchdog, and overnight health summary
 
@@ -32,7 +32,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 Plans:
 - [x] 01-01-PLAN.md -- Flutter project scaffolding, dependencies, macOS config, Wave 0 test stubs
 - [x] 01-02-PLAN.md -- Protect API client (auth + bootstrap), camera data models, login screen UI
-- [ ] 01-03-PLAN.md -- Secure storage, auth/camera providers, camera list screen, GoRouter, full wiring
+- [x] 01-03-PLAN.md -- Secure storage, auth/camera providers, camera list screen, GoRouter, full wiring
 **UI hint**: yes
 
 ### Phase 2: RTSP Audio Streaming
@@ -42,8 +42,8 @@ Plans:
 **Success Criteria** (what must be TRUE):
   1. User hears audio from both selected cameras playing simultaneously through phone speaker
   2. User can adjust volume independently per camera using sliders, including muting one while the other plays
-  3. User can pan each camera's audio left/right (e.g. nursery in left ear, bedroom in right) — works with volume control
-  4. No video is decoded -- only audio data is processed (verifiable via CPU/battery usage staying low)
+  3. ~~User can pan each camera's audio left/right~~ — **deferred** (media_kit prebuilt FFmpeg lacks audio filters; lavfi `|` escaping broken via setProperty)
+  4. No video decoded by default -- `vid=no` set at runtime. Optional video preview toggle available.
 **Plans**: 2 plans
 Plans:
 - [x] 02-01-PLAN.md -- media_kit dependencies, RTSP URL helpers, pan filter math, player state model, Wave 0 tests
@@ -80,7 +80,7 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. Protect API + Project Foundation | 0/3 | Planned | - |
-| 2. RTSP Audio Streaming | 2/2 | Complete   | 2026-04-03 |
+| 1. Protect API + Project Foundation | 3/3 | Complete | 2026-04-03 |
+| 2. RTSP Audio Streaming | 2/2 | Complete | 2026-04-03 |
 | 3. Android Background Operation | 0/TBD | Not started | - |
 | 4. Reliability + Overnight Monitoring | 0/TBD | Not started | - |

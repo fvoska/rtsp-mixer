@@ -103,6 +103,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                         border: const OutlineInputBorder(),
                         errorText: _hostError,
                       ),
+                      textInputAction: TextInputAction.next,
                       validator: (v) => (v == null || v.trim().isEmpty) ? 'Required' : null,
                     ),
                     const SizedBox(height: Spacing.md),
@@ -114,6 +115,8 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                         border: const OutlineInputBorder(),
                         errorText: _apiKeyError,
                       ),
+                      textInputAction: TextInputAction.done,
+                      onFieldSubmitted: (_) => _handleConnect(),
                       validator: (v) => (v == null || v.trim().isEmpty) ? 'Required' : null,
                     ),
                   ]),
@@ -146,7 +149,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                     ),
                     child: SingleChildScrollView(
                       reverse: true,
-                      child: Text(
+                      child: SelectableText(
                         logs.join('\n'),
                         style: const TextStyle(fontFamily: 'monospace', fontSize: 11),
                       ),

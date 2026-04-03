@@ -76,6 +76,30 @@ class ProtectApiClient {
     }
   }
 
+  /// Fetch all available RTSPS stream URLs for a camera from the integration API.
+  /// Returns a map of quality → URL (e.g. {"high": "rtsps://...", "medium": "rtsps://..."}).
+  Future<Map<String, String>> getRtspsUrls(String host, String cameraId) async {
+    final url = _url(host, '/cameras/$cameraId/rtsps-stream');
+    appLog('API', 'GET $url');
+    try {
+      final response = await _dio.get(
+        url,
+        options: Options(headers: {'X-API-Key': _apiKey}),
+      );
+      final data = response.data as Map<String, dynamic>;
+      final urls = <String, String>{};
+      for (final key in ['low', 'medium', 'high']) {
+        final value = data[key] as String?;
+        if (value != null) urls[key] = value;
+      }
+      appLog('API', 'RTSPS URLs for $cameraId: ${urls.keys.join(', ')}');
+      return urls;
+    } on DioException catch (e) {
+      appLog('API', 'Error fetching RTSPS URLs for $cameraId: ${e.type} ${e.message}');
+      return {};
+    }
+  }
+
   AppError _mapError(DioException e) {
     if (e.response?.statusCode == 401 || e.response?.statusCode == 403) {
       return const AppError(
