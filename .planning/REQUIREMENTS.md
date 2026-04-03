@@ -21,8 +21,8 @@ Requirements for initial release. Each maps to roadmap phases.
 
 ### Background
 
-- [ ] **BGND-01**: App runs as Android foreground service with persistent notification showing monitoring status
-- [ ] **BGND-02**: App acquires partial wake lock and high-performance WiFi lock to prevent OS throttling
+- [x] **BGND-01**: App runs as Android foreground service with persistent notification showing monitoring status
+- [x] **BGND-02**: App acquires partial wake lock and high-performance WiFi lock to prevent OS throttling
 - [ ] **BGND-03**: Audio continues playing with screen off and phone charging
 
 ### Reliability
@@ -38,7 +38,7 @@ Requirements for initial release. Each maps to roadmap phases.
 ### Platform
 
 - [x] **PLAT-01**: App builds and runs on macOS desktop for development and rapid iteration
-- [ ] **PLAT-02**: App builds and runs on physical Android device for real-world overnight testing
+- [x] **PLAT-02**: App builds and runs on physical Android device for real-world overnight testing
 
 ## v2 Requirements
 
@@ -83,10 +83,10 @@ Which phases cover which requirements. Updated during roadmap creation.
 | STRM-01 | Phase 2 | Complete |
 | STRM-02 | Phase 2 | Complete |
 | STRM-03 | Phase 2 | Complete |
-| BGND-01 | Phase 3 | Pending |
-| BGND-02 | Phase 3 | Pending |
+| BGND-01 | Phase 3 | Complete |
+| BGND-02 | Phase 3 | Complete |
 | BGND-03 | Phase 3 | Pending |
-| PLAT-02 | Phase 3 | Pending |
+| PLAT-02 | Phase 3 | Complete |
 | RELY-01 | Phase 4 | Pending |
 | RELY-02 | Phase 4 | Pending |
 | RELY-03 | Phase 4 | Pending |
