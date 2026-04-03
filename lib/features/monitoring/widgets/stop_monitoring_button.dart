@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../../core/services/foreground_service.dart';
 import '../../../core/theme/spacing.dart';
 import '../providers/audio_player_provider.dart';
 
@@ -23,6 +24,7 @@ class StopMonitoringButton extends ConsumerWidget {
           child: OutlinedButton(
             onPressed: () async {
               await ref.read(audioPlayerProvider.notifier).stopMonitoring();
+              await ForegroundServiceManager.stop();
               if (context.mounted) context.go('/cameras');
             },
             child: const Text('Stop Monitoring'),

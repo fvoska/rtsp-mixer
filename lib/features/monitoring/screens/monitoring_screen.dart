@@ -1,8 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_foreground_task/flutter_foreground_task.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 
 import '../../../core/logging/app_logger.dart';
+import '../../../core/services/foreground_service.dart';
 import '../../../core/theme/spacing.dart';
 import '../providers/audio_player_provider.dart';
 import '../widgets/camera_audio_card.dart';
@@ -35,15 +38,64 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen>
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
-    Future.microtask(() {
-      ref.read(audioPlayerProvider.notifier).startMonitoring();
+    FlutterForegroundTask.addTaskDataCallback(_receiveTaskData);
+    Future.microtask(() async {
+      await ref.read(audioPlayerProvider.notifier).startMonitoring();
+      // Start foreground service after monitoring is active
+      final monState = ref.read(audioPlayerProvider).value;
+      if (monState != null && monState.cameras.isNotEmpty) {
+        final names = monState.cameras.map((c) => c.cameraName).toList();
+        await ForegroundServiceManager.start(names);
+      }
     });
   }
 
   @override
   void dispose() {
+    FlutterForegroundTask.removeTaskDataCallback(_receiveTaskData);
     WidgetsBinding.instance.removeObserver(this);
+    // Prevent zombie foreground service if user navigates away without pressing Stop
+    ref.read(audioPlayerProvider.notifier).stopMonitoring();
+    ForegroundServiceManager.stop();
     super.dispose();
+  }
+
+  void _receiveTaskData(Object data) {
+    if (data is Map) {
+      final action = data['action'];
+      if (action == 'toggle') {
+        // D-04: play/pause toggle — mute/unmute all cameras
+        appLog('FGS', 'Received toggle action from notification');
+        try {
+          final notifier = ref.read(audioPlayerProvider.notifier);
+          final state = ref.read(audioPlayerProvider).value;
+          if (state != null) {
+            // If any camera is unmuted, mute all (pause). Otherwise unmute all (play).
+            final anyUnmuted = state.cameras.any((c) => !c.isMuted);
+            for (int i = 0; i < state.cameras.length; i++) {
+              if (anyUnmuted && !state.cameras[i].isMuted) {
+                notifier.toggleMute(i);
+              } else if (!anyUnmuted && state.cameras[i].isMuted) {
+                notifier.toggleMute(i);
+              }
+            }
+          }
+        } catch (e) {
+          appLog('FGS', 'Error handling toggle: $e');
+        }
+      } else if (action == 'stop') {
+        appLog('FGS', 'Received stop action from foreground service');
+        _stopAndGoBack();
+      }
+    }
+  }
+
+  Future<void> _stopAndGoBack() async {
+    await ref.read(audioPlayerProvider.notifier).stopMonitoring();
+    await ForegroundServiceManager.stop();
+    if (mounted) {
+      context.go('/cameras');
+    }
   }
 
   bool _isVideoOn(String cameraId) =>
@@ -54,21 +106,27 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen>
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    final notifier = ref.read(audioPlayerProvider.notifier);
-    if (state == AppLifecycleState.inactive ||
-        state == AppLifecycleState.hidden ||
-        state == AppLifecycleState.paused) {
-      if (_anyVideoOn) {
-        appLog('LIFECYCLE', 'App inactive — suspending video decode');
-        _videoSuspendedByLifecycle = true;
-        notifier.setVideoEnabled(false);
+    // D-06: Video preview auto-disables when app is backgrounded or screen turns off.
+    // Re-enables when user returns. Audio continues uninterrupted.
+    try {
+      final notifier = ref.read(audioPlayerProvider.notifier);
+      if (state == AppLifecycleState.inactive ||
+          state == AppLifecycleState.hidden ||
+          state == AppLifecycleState.paused) {
+        if (_anyVideoOn) {
+          appLog('LIFECYCLE', 'App backgrounded — disabling video preview (D-06)');
+          _videoSuspendedByLifecycle = true;
+          notifier.setVideoEnabled(false);
+        }
+      } else if (state == AppLifecycleState.resumed) {
+        if (_videoSuspendedByLifecycle) {
+          appLog('LIFECYCLE', 'App resumed — re-enabling video preview (D-06)');
+          _videoSuspendedByLifecycle = false;
+          _restoreVideoState();
+        }
       }
-    } else if (state == AppLifecycleState.resumed) {
-      if (_videoSuspendedByLifecycle) {
-        appLog('LIFECYCLE', 'App resumed — restoring video decode');
-        _videoSuspendedByLifecycle = false;
-        _restoreVideoState();
-      }
+    } catch (e) {
+      appLog('LIFECYCLE', 'Error toggling video on lifecycle change: $e');
     }
   }
 

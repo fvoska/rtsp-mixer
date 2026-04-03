@@ -5,6 +5,7 @@ import 'package:media_kit/media_kit.dart';
 import 'package:media_kit_video/media_kit_video.dart';
 
 import '../../../core/logging/app_logger.dart';
+import '../../../core/services/foreground_service.dart';
 import '../../cameras/providers/camera_provider.dart';
 import '../models/player_state.dart';
 
@@ -19,6 +20,7 @@ class AudioPlayerNotifier extends AsyncNotifier<MonitoringState> {
   Timer? _levelPollTimer;
   final Map<String, double> _lastAudioPts = {};
   final Map<String, double> _baselineLevel = {};
+  String _lastNotificationText = '';
 
   @override
   Future<MonitoringState> build() async {
@@ -233,6 +235,20 @@ class AudioPlayerNotifier extends AsyncNotifier<MonitoringState> {
     state = AsyncData(MonitoringState(cameras: cameraStates));
     appLog('AUDIO', 'Monitoring started for ${cameraStates.length} cameras');
 
+    // Update foreground notification with camera status
+    try {
+      final statusParts = cameraStates.map((c) {
+        final status = c.connectionStatus == CameraConnectionStatus.playing
+            ? '' : ' (${c.connectionStatus.name})';
+        return '${c.cameraName}$status';
+      }).toList();
+      final text = 'Monitoring: ${statusParts.join(", ")}';
+      _lastNotificationText = text;
+      await ForegroundServiceManager.updateNotification(text: text);
+    } catch (e) {
+      appLog('FGS', 'Failed to update notification: $e');
+    }
+
     // Start polling audio-pts to detect silence / estimate activity.
     _startLevelPolling();
   }
@@ -342,6 +358,20 @@ class AudioPlayerNotifier extends AsyncNotifier<MonitoringState> {
 
     if (changed) {
       state = AsyncData(updated);
+
+      // Update notification if status text changed
+      try {
+        final statusParts = updated.cameras.map((c) {
+          final status = c.connectionStatus == CameraConnectionStatus.playing
+              ? '' : ' (${c.connectionStatus.name})';
+          return '${c.cameraName}$status';
+        }).toList();
+        final newText = 'Monitoring: ${statusParts.join(", ")}';
+        if (newText != _lastNotificationText) {
+          _lastNotificationText = newText;
+          ForegroundServiceManager.updateNotification(text: newText);
+        }
+      } catch (_) {}
     }
   }
 
@@ -500,6 +530,7 @@ class AudioPlayerNotifier extends AsyncNotifier<MonitoringState> {
     _levelPollTimer?.cancel();
     _lastAudioPts.clear();
     _baselineLevel.clear();
+    _lastNotificationText = '';
     for (final sub in _subscriptions) {
       sub.cancel();
     }
