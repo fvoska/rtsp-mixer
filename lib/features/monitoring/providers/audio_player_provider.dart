@@ -261,7 +261,8 @@ class AudioPlayerNotifier extends AsyncNotifier<MonitoringState> {
       try {
         final np = player.platform as NativePlayer;
 
-        // Audio PTS for silence detection.
+        // Audio PTS: tracks whether audio data is flowing per-player.
+        // Not a loudness measurement, but reliably detects silence vs activity.
         final ptsStr = await np.getProperty('audio-pts');
         final pts = double.tryParse(ptsStr) ?? 0.0;
         final lastPts = _lastAudioPts[cam.cameraId] ?? 0.0;
@@ -269,22 +270,18 @@ class AudioPlayerNotifier extends AsyncNotifier<MonitoringState> {
         _lastAudioPts[cam.cameraId] = pts;
 
         final flowing = ptsDelta > 0.01;
+        // Normalize: typical delta at 500ms poll is ~0.5s.
+        final level = flowing ? (ptsDelta / 0.6).clamp(0.2, 1.0) : 0.0;
 
-        // Use audio-bitrate changes as proxy for activity.
-        // Variable bitrate codecs use more bits for louder audio.
-        final brStr = await _tryGetProperty(np, 'audio-bitrate');
-        final br = double.tryParse(brStr ?? '') ?? 0.0;
-        final prevBr = _baselineLevel[cam.cameraId] ?? br;
-        _baselineLevel[cam.cameraId] = prevBr * 0.9 + br * 0.1;
-        final brDelta = (br - prevBr).abs();
-        final rawActivity = (brDelta / 5000.0).clamp(0.0, 1.0);
-        final level = flowing ? 0.2 + rawActivity * 0.8 : 0.0;
-
-        // Smooth activity: instant rise, gradual decay.
+        // Activity: deviation from per-camera baseline.
+        final prevBaseline = _baselineLevel[cam.cameraId] ?? level;
+        final baseline = prevBaseline * 0.95 + level * 0.05;
+        _baselineLevel[cam.cameraId] = baseline;
+        final rawActivity = (level - baseline).clamp(0.0, 1.0);
         final prevActivity = cam.audioActivity;
         final activity = rawActivity > prevActivity
             ? rawActivity
-            : prevActivity * 0.6;
+            : prevActivity * 0.7;
 
         final newSilence = !flowing
             ? cam.silenceDuration + _pollInterval.inMilliseconds / 1000.0
