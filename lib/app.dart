@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_foreground_task/flutter_foreground_task.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'core/router/app_router.dart';
@@ -10,11 +11,13 @@ class App extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final router = ref.watch(appRouterProvider);
-    return MaterialApp.router(
-      title: 'RTSP Audio Mixer',
-      theme: AppTheme.dark,
-      routerConfig: router,
-      debugShowCheckedModeBanner: false,
+    return WithForegroundTask(
+      child: MaterialApp.router(
+        title: 'RTSP Audio Mixer',
+        theme: AppTheme.dark,
+        routerConfig: router,
+        debugShowCheckedModeBanner: false,
+      ),
     );
   }
 }
