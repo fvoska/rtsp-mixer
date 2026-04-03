@@ -43,6 +43,8 @@ dependencies:
   media_kit_video: ^1.2.6
   media_kit_libs_video: ^1.0.6
   media_kit_native_event_loop: ^1.0.9
+  flutter_foreground_task: ^9.2.2
+  audio_service: ^0.18.18
 
 dev_dependencies:
   flutter_test:
