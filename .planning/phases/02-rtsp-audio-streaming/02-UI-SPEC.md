@@ -48,20 +48,22 @@ Exceptions: Touch targets for sliders use Flutter Material 3 defaults (48dp heig
 
 ## Typography
 
-| Role | Size | Weight | Line Height |
-|------|------|--------|-------------|
-| Body | 14px | 400 (regular) | 1.43 (20px) |
-| Label | 12px | 500 (medium) | 1.33 (16px) |
-| Title | 16px | 500 (medium) | 1.5 (24px) |
-| Heading | 28px | 400 (regular) | 1.29 (36px) |
+| Role | Size | Weight | Line Height | Material 3 Token |
+|------|------|--------|-------------|------------------|
+| Label | 12px | 500 (medium) | 1.33 (16px) | `bodySmall` |
+| Body | 14px | 400 (regular) | 1.43 (20px) | `bodyMedium` |
+| Title | 16px | 500 (medium) | 1.5 (24px) | `titleMedium` |
+| Heading | 22px | 400 (regular) | 1.27 (28px) | `titleLarge` |
 
-**Source:** Material 3 `TextTheme` defaults used in existing screens. Phase 1 uses `headlineMedium` (28px), `bodyLarge` (16px), `bodySmall` (12px). Phase 2 continues the same scale. No custom `TextTheme` overrides -- use `theme.textTheme.*` accessors.
+Four sizes total: 12, 14, 16, 22. The 28px `headlineMedium` from Phase 1 is not used in this phase -- Phase 2 has no screen-level display heading that warrants it.
+
+**Source:** Material 3 `TextTheme` defaults. No custom `TextTheme` overrides -- use `theme.textTheme.*` accessors.
 
 Specific usage in this phase:
+- **Screen title (AppBar):** `titleLarge` (22px/400) -- AppBar title "Monitoring"
 - **Camera name:** `titleMedium` (16px/500) -- card header
 - **Volume/pan labels:** `bodySmall` (12px/500) -- "Volume", "L", "R", percentage readout
 - **Status text:** `bodyMedium` (14px/400) -- "Connecting...", "Live", "Error"
-- **Screen title:** AppBar title uses default `titleLarge` (22px/400)
 
 ---
 
@@ -93,6 +95,8 @@ Additional semantic colors (existing, no changes):
 ### MonitoringScreen (replace existing placeholder)
 
 Full-screen scaffold with two `CameraAudioCard` widgets stacked vertically.
+
+**Primary visual anchor:** The two `CameraAudioCard` widgets are the focal point of this screen. All other elements (AppBar, stop button) are secondary navigation chrome.
 
 **Layout:**
 ```
@@ -162,7 +166,7 @@ Bottom-positioned `OutlinedButton` (not filled -- lower visual weight than "Star
 | Live state | "Live" (per-card, next to green status dot) |
 | Error state (stream) | "Stream failed -- check that RTSP is enabled in Protect settings" |
 | Error state (network) | "Connection lost -- check your network" |
-| Mic disabled warning | "Microphone is disabled on this camera" |
+| Mic disabled warning | "Microphone is disabled on this camera -- enable it in Protect camera settings" |
 | Empty state | Not applicable -- screen is only reachable with cameras selected |
 | Stop action | "Stop Monitoring" (bottom button) |
 | Mute toggle tooltip | "Mute" / "Unmute" |
