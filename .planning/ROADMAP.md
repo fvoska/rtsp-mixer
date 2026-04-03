@@ -13,7 +13,7 @@ This roadmap delivers a reliable overnight baby monitor in four phases. We start
 Decimal phases appear between their surrounding integers in numeric order.
 
 - [ ] **Phase 1: Protect API + Project Foundation** - Authenticate with Unifi Protect, discover cameras, persist credentials, establish macOS dev target
-- [ ] **Phase 2: RTSP Audio Streaming** - Extract audio-only from two RTSP streams simultaneously with per-camera volume control
+- [x] **Phase 2: RTSP Audio Streaming** - Extract audio-only from two RTSP streams simultaneously with per-camera volume control (completed 2026-04-03)
 - [ ] **Phase 3: Android Background Operation** - Run as foreground service on physical Android device with screen off overnight
 - [ ] **Phase 4: Reliability + Overnight Monitoring** - Auto-reconnect on stream drops, connection status UI, watchdog, and overnight health summary
 
@@ -46,8 +46,8 @@ Plans:
   4. No video is decoded -- only audio data is processed (verifiable via CPU/battery usage staying low)
 **Plans**: 2 plans
 Plans:
-- [ ] 02-01-PLAN.md -- media_kit dependencies, RTSP URL helpers, pan filter math, player state model, Wave 0 tests
-- [ ] 02-02-PLAN.md -- Audio player Riverpod provider, monitoring screen UI with volume/pan/mute controls
+- [x] 02-01-PLAN.md -- media_kit dependencies, RTSP URL helpers, pan filter math, player state model, Wave 0 tests
+- [x] 02-02-PLAN.md -- Audio player Riverpod provider, monitoring screen UI with volume/pan/mute controls
 **UI hint**: yes
 
 ### Phase 3: Android Background Operation
@@ -81,6 +81,6 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 1. Protect API + Project Foundation | 0/3 | Planned | - |
-| 2. RTSP Audio Streaming | 0/2 | Planned | - |
+| 2. RTSP Audio Streaming | 2/2 | Complete   | 2026-04-03 |
 | 3. Android Background Operation | 0/TBD | Not started | - |
 | 4. Reliability + Overnight Monitoring | 0/TBD | Not started | - |
