@@ -34,6 +34,7 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen>
   final Map<String, bool> _perCameraVideo = {};
 
   bool _videoSuspendedByLifecycle = false;
+  bool _disposed = false;
 
   @override
   void initState() {
@@ -63,15 +64,18 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen>
 
   @override
   void dispose() {
+    _disposed = true;
     FlutterForegroundTask.removeTaskDataCallback(_receiveTaskData);
     WidgetsBinding.instance.removeObserver(this);
-    // Prevent zombie foreground service if user navigates away without pressing Stop
-    ref.read(audioPlayerProvider.notifier).stopMonitoring();
+    // Stop service and players fire-and-forget — state updates will be ignored
+    // since _disposed is true and the widget is defunct.
     ForegroundServiceManager.stop();
+    ref.read(audioPlayerProvider.notifier).stopMonitoring();
     super.dispose();
   }
 
   void _receiveTaskData(Object data) {
+    if (_disposed) return;
     if (data is Map) {
       final action = data['action'];
       if (action == 'toggle') {
@@ -102,6 +106,8 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen>
   }
 
   Future<void> _stopAndGoBack() async {
+    if (_disposed) return;
+    _disposed = true;
     await ref.read(audioPlayerProvider.notifier).stopMonitoring();
     // Stop audio_service MediaSession
     try {
@@ -124,6 +130,7 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen>
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (_disposed) return;
     // D-06: Video preview auto-disables when app is backgrounded or screen turns off.
     // Re-enables when user returns. Audio continues uninterrupted.
     try {
