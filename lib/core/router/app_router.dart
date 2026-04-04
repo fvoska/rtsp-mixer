@@ -14,7 +14,7 @@ final appRouterProvider = Provider<GoRouter>((ref) {
   bool resumeHandled = false;
 
   return GoRouter(
-    initialLocation: '/cameras',
+    initialLocation: '/login',
     refreshListenable: authListenable,
     redirect: (_, state) {
       final auth = ref.read(authNotifierProvider);
