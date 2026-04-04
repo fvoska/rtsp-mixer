@@ -40,8 +40,6 @@ class ForegroundServiceManager {
   }
 
   /// Start the foreground service with camera names in the notification.
-  /// Notification shows "Monitoring: [Camera1], [Camera2]".
-  /// Single play/pause toggle button in notification.
   static Future<void> start(List<String> cameraNames) async {
     init();
     final notificationText = 'Monitoring: ${cameraNames.join(", ")}';
@@ -49,9 +47,6 @@ class ForegroundServiceManager {
       serviceId: 256,
       notificationTitle: 'Baby Monitor Active',
       notificationText: notificationText,
-      notificationButtons: [
-        const NotificationButton(id: 'toggle', text: 'Pause'),
-      ],
       callback: startCallback,
     );
     appLog('FGS', 'Foreground service started: $notificationText');
@@ -93,22 +88,11 @@ class MonitoringTaskHandler extends TaskHandler {
   }
 
   @override
-  void onRepeatEvent(DateTime timestamp) {
-    // Not used — eventAction is nothing().
-  }
+  void onRepeatEvent(DateTime timestamp) {}
 
   @override
   Future<void> onDestroy(DateTime timestamp, bool isTimeout) async {
     print('[FGS] TaskHandler.onDestroy (isTimeout=$isTimeout)');
-    FlutterForegroundTask.sendDataToMain('stop');
-  }
-
-  @override
-  void onNotificationButtonPressed(String id) {
-    print('[FGS] Notification button pressed: $id');
-    if (id == 'toggle') {
-      FlutterForegroundTask.sendDataToMain('toggle');
-    }
   }
 
   @override
