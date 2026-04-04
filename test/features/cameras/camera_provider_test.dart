@@ -19,6 +19,10 @@ class FakeApiClient extends ProtectApiClient {
 
   @override
   Future<List<ProtectCamera>> getCameras(String host) async => cameras;
+
+  @override
+  Future<Map<String, String>> getRtspsUrls(String host, String cameraId) async =>
+      {'low': 'rtsps://fake:7441/$cameraId'};
 }
 
 ProviderContainer createContainer({
