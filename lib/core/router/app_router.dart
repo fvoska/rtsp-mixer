@@ -11,7 +11,7 @@ import '../../features/monitoring/screens/monitoring_screen.dart';
 
 final appRouterProvider = Provider<GoRouter>((ref) {
   final authListenable = _AuthRefreshNotifier(ref);
-  bool resumeHandled = false;
+  bool camerasLoaded = false;
 
   return GoRouter(
     initialLocation: '/login',
@@ -19,23 +19,31 @@ final appRouterProvider = Provider<GoRouter>((ref) {
     redirect: (_, state) {
       final auth = ref.read(authNotifierProvider);
       final authenticated = auth.value?.isAuthenticated ?? false;
-      final onLogin = state.matchedLocation == '/login';
+      final location = state.matchedLocation;
 
+      // Still loading auth — stay where we are
       if (auth.isLoading && !auth.hasValue) return null;
-      if (!authenticated && !onLogin) return '/login';
-      if (authenticated && onLogin) return '/cameras';
 
-      // Auto-resume: load cameras and go straight to monitoring
-      if (authenticated && !resumeHandled) {
-        resumeHandled = true;
+      // Not authenticated — go to login
+      if (!authenticated) {
+        return location == '/login' ? null : '/login';
+      }
+
+      // Authenticated — kick off camera loading once
+      if (!camerasLoaded) {
+        camerasLoaded = true;
         final host = auth.value?.host;
         if (host != null) {
-          // Fire-and-forget camera loading — monitoring screen waits for it
           ref.read(cameraNotifierProvider.notifier).loadCameras(host);
-          if (auth.value?.resumeMonitoring == true) {
-            return '/monitoring';
-          }
         }
+      }
+
+      // If still on login, redirect to the right place
+      if (location == '/login') {
+        if (auth.value?.resumeMonitoring == true) {
+          return '/monitoring';
+        }
+        return '/cameras';
       }
 
       return null;
