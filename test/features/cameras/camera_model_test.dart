@@ -37,13 +37,13 @@ void main() {
       expect(updated.id, 'cam-001');
     });
 
-    test('defaultStreamUrl prefers medium over high', () {
+    test('defaultStreamUrl prefers low over medium and high', () {
       final cam = ProtectCamera(
         id: 'x', state: 'CONNECTED',
         rtspsStreamUrls: {'high': 'h', 'medium': 'm', 'low': 'l'},
       );
-      expect(cam.defaultStreamUrl, 'm');
-      expect(cam.defaultQuality, 'medium');
+      expect(cam.defaultStreamUrl, 'l');
+      expect(cam.defaultQuality, 'low');
     });
 
     test('defaultStreamUrl falls back to high when no medium', () {

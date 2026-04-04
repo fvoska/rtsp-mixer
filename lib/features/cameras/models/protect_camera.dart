@@ -24,17 +24,18 @@ class ProtectCamera {
 
   bool get isConnected => state == 'CONNECTED';
 
-  /// The default stream URL: prefer medium, fall back to high, then low.
+  /// The default stream URL: prefer lowest quality since audio is identical
+  /// across all qualities — no point decoding a larger video mux.
   String? get defaultStreamUrl =>
+      rtspsStreamUrls['low'] ??
       rtspsStreamUrls['medium'] ??
-      rtspsStreamUrls['high'] ??
-      rtspsStreamUrls['low'];
+      rtspsStreamUrls['high'];
 
   /// The default quality key matching defaultStreamUrl.
   String? get defaultQuality {
+    if (rtspsStreamUrls.containsKey('low')) return 'low';
     if (rtspsStreamUrls.containsKey('medium')) return 'medium';
     if (rtspsStreamUrls.containsKey('high')) return 'high';
-    if (rtspsStreamUrls.containsKey('low')) return 'low';
     return null;
   }
 
