@@ -50,6 +50,17 @@ class ProtectCamera {
         rtspsStreamUrls: rtspsStreamUrls ?? this.rtspsStreamUrls,
       );
 
+  Map<String, dynamic> toJson() => {
+        'id': id,
+        'name': name,
+        'state': state,
+        'isMicEnabled': isMicEnabled,
+        'mac': mac,
+        'modelKey': modelKey,
+        'micVolume': micVolume,
+        'rtspsStreamUrls': rtspsStreamUrls,
+      };
+
   factory ProtectCamera.fromJson(Map<String, dynamic> json) => ProtectCamera(
         id: json['id'] as String,
         name: json['name'] as String?,
@@ -58,5 +69,8 @@ class ProtectCamera {
         mac: json['mac'] as String?,
         modelKey: json['modelKey'] as String?,
         micVolume: json['micVolume'] as int?,
+        rtspsStreamUrls: (json['rtspsStreamUrls'] as Map<String, dynamic>?)
+                ?.map((k, v) => MapEntry(k, v as String)) ??
+            const {},
       );
 }

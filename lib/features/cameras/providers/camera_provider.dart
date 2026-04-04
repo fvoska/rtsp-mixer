@@ -1,7 +1,10 @@
+import 'dart:convert';
+
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/logging/app_logger.dart';
 import '../../auth/providers/auth_provider.dart';
+import '../models/protect_camera.dart';
 import 'camera_state.dart';
 
 class CameraNotifier extends AsyncNotifier<CameraState> {
@@ -9,13 +12,26 @@ class CameraNotifier extends AsyncNotifier<CameraState> {
   Future<CameraState> build() async => const CameraState();
 
   Future<void> loadCameras(String host) async {
-    state = const AsyncLoading();
+    final storage = ref.read(storageProvider);
+
+    // Load cached cameras immediately for instant UI
+    final cached = await _loadCachedCameras(storage);
+    final savedIds = await storage.loadSelectedCameraIds();
+
+    if (cached != null && cached.isNotEmpty) {
+      final validIds = savedIds.where((id) => cached.any((c) => c.id == id)).toSet();
+      state = AsyncData(CameraState(cameras: cached, selectedIds: validIds));
+      appLog('CAM', 'Loaded ${cached.length} cameras from cache');
+    } else {
+      state = const AsyncLoading();
+    }
+
+    // Fetch fresh data in background
     try {
       final client = ref.read(apiClientProvider);
       final cameras = await client.getCameras(host);
-      appLog('CAM', 'Loaded ${cameras.length} cameras');
+      appLog('CAM', 'Fetched ${cameras.length} cameras from API');
 
-      // Fetch all available RTSPS stream URLs for each camera in parallel.
       final enrichedCameras = await Future.wait(
         cameras.map((c) async {
           final urls = await client.getRtspsUrls(host, c.id);
@@ -24,14 +40,19 @@ class CameraNotifier extends AsyncNotifier<CameraState> {
       );
       appLog('CAM', 'RTSPS URLs: ${enrichedCameras.where((c) => c.rtspsStreamUrls.isNotEmpty).length}/${cameras.length}');
 
-      final storage = ref.read(storageProvider);
-      final savedIds = await storage.loadSelectedCameraIds();
-      final validIds = savedIds.where((id) => enrichedCameras.any((c) => c.id == id)).toSet();
+      // Save to cache for next startup
+      await _saveCachedCameras(storage, enrichedCameras);
 
+      final validIds = savedIds.where((id) => enrichedCameras.any((c) => c.id == id)).toSet();
       state = AsyncData(CameraState(cameras: enrichedCameras, selectedIds: validIds));
     } catch (e) {
       appLog('CAM', 'Error loading cameras: $e');
-      state = AsyncError(e, StackTrace.current);
+      // If we have cached data, keep showing it instead of error
+      if (state.hasValue && state.value!.cameras.isNotEmpty) {
+        appLog('CAM', 'Keeping cached camera list');
+      } else {
+        state = AsyncError(e, StackTrace.current);
+      }
     }
   }
 
@@ -50,6 +71,26 @@ class CameraNotifier extends AsyncNotifier<CameraState> {
     }
     state = AsyncData(current.copyWith(selectedIds: newIds));
     ref.read(storageProvider).saveSelectedCameraIds(newIds.toList());
+  }
+
+  Future<List<ProtectCamera>?> _loadCachedCameras(dynamic storage) async {
+    try {
+      final raw = await storage.read('cached_cameras');
+      if (raw == null) return null;
+      final list = jsonDecode(raw) as List<dynamic>;
+      return list.map((j) => ProtectCamera.fromJson(j as Map<String, dynamic>)).toList();
+    } catch (e) {
+      appLog('CAM', 'Failed to load camera cache: $e');
+      return null;
+    }
+  }
+
+  Future<void> _saveCachedCameras(dynamic storage, List<ProtectCamera> cameras) async {
+    try {
+      await storage.write('cached_cameras', jsonEncode(cameras.map((c) => c.toJson()).toList()));
+    } catch (e) {
+      appLog('CAM', 'Failed to save camera cache: $e');
+    }
   }
 }
 
