@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:media_kit/media_kit.dart';
@@ -6,6 +7,7 @@ import 'package:media_kit_video/media_kit_video.dart';
 
 import '../../../core/logging/app_logger.dart';
 import '../../../core/services/foreground_service.dart';
+import '../../auth/providers/auth_provider.dart';
 import '../../cameras/providers/camera_provider.dart';
 import '../models/player_state.dart';
 
@@ -232,6 +234,27 @@ class AudioPlayerNotifier extends AsyncNotifier<MonitoringState> {
       cameraStates.add(camState);
     }
 
+    // Restore saved volume/mute state
+    final savedMix = await _loadMixState();
+    for (int i = 0; i < cameraStates.length; i++) {
+      final cam = cameraStates[i];
+      final mix = savedMix[cam.cameraId];
+      if (mix != null) {
+        final volume = (mix['volume'] as num?)?.toDouble() ?? 100.0;
+        final muted = mix['muted'] as bool? ?? false;
+        cameraStates[i] = cam.copyWith(
+          volume: volume,
+          preMuteVolume: volume,
+          isMuted: muted,
+        );
+        final player = _players[cam.cameraId];
+        if (player != null) {
+          player.setVolume(muted ? 0.0 : volume);
+        }
+        appLog('AUDIO', '${cam.cameraName} restored vol=${volume.toStringAsFixed(0)} muted=$muted');
+      }
+    }
+
     state = AsyncData(MonitoringState(cameras: cameraStates));
     appLog('AUDIO', 'Monitoring started for ${cameraStates.length} cameras');
 
@@ -402,6 +425,7 @@ class AudioPlayerNotifier extends AsyncNotifier<MonitoringState> {
         camState.copyWith(volume: volume, preMuteVolume: volume),
       ),
     );
+    _saveMixState();
   }
 
   void toggleMute(int cameraIndex) {
@@ -435,6 +459,7 @@ class AudioPlayerNotifier extends AsyncNotifier<MonitoringState> {
         ),
       );
     }
+    _saveMixState();
   }
 
   /// Enable or disable video decoding on all active players.
@@ -552,5 +577,33 @@ class AudioPlayerNotifier extends AsyncNotifier<MonitoringState> {
     _players.clear();
     state = const AsyncData(MonitoringState());
     appLog('AUDIO', 'All players stopped and disposed');
+  }
+
+  /// Save per-camera volume/mute to secure storage.
+  void _saveMixState() {
+    final current = state.value;
+    if (current == null) return;
+    final map = <String, Map<String, dynamic>>{};
+    for (final cam in current.cameras) {
+      map[cam.cameraId] = {
+        'volume': cam.volume,
+        'muted': cam.isMuted,
+      };
+    }
+    try {
+      ref.read(storageProvider).write('mix_state', jsonEncode(map));
+    } catch (_) {}
+  }
+
+  /// Load per-camera volume/mute from secure storage.
+  Future<Map<String, Map<String, dynamic>>> _loadMixState() async {
+    try {
+      final raw = await ref.read(storageProvider).read('mix_state');
+      if (raw == null) return {};
+      final decoded = jsonDecode(raw) as Map<String, dynamic>;
+      return decoded.map((k, v) => MapEntry(k, v as Map<String, dynamic>));
+    } catch (_) {
+      return {};
+    }
   }
 }
