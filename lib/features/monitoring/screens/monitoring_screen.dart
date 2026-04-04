@@ -7,7 +7,6 @@ import '../../../core/logging/app_logger.dart';
 import '../../../core/services/foreground_service.dart';
 import '../../../core/theme/spacing.dart';
 import '../../auth/providers/auth_provider.dart';
-import '../../cameras/providers/camera_provider.dart';
 import '../providers/audio_player_provider.dart';
 import '../services/audio_handler.dart';
 import '../widgets/camera_audio_card.dart';
@@ -54,32 +53,7 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen>
         await FlutterForegroundTask.requestIgnoreBatteryOptimization();
       }
 
-      // Wait for cameras with RTSPS URLs (loadCameras is async, may not
-      // have finished yet when this microtask runs)
-      appLog('AUDIO', 'Waiting for cameras with RTSPS URLs...');
-      var waitCount = 0;
-      const maxWait = 300; // 30 seconds max
-      await Future.doWhile(() async {
-        await Future.delayed(const Duration(milliseconds: 100));
-        if (_disposed) return false;
-        waitCount++;
-        final prov = ref.read(cameraNotifierProvider);
-        if (prov.hasError) return false;
-        final all = prov.value?.cameras ?? [];
-        final selected = prov.value?.selectedCameras ?? [];
-        if (waitCount % 20 == 0) {
-          appLog('AUDIO', 'Still waiting... cameras=${all.length} selected=${selected.length} '
-              'urls=${selected.where((c) => c.defaultStreamUrl != null).length}');
-        }
-        if (waitCount >= maxWait) {
-          appLog('AUDIO', 'Timeout waiting for cameras, proceeding anyway');
-          return false;
-        }
-        if (selected.isEmpty) return true; // still loading
-        return selected.any((c) => c.defaultStreamUrl == null);
-      });
-      if (_disposed) return;
-
+      // Cameras are already loaded by AuthNotifier before we get here
       await ref.read(audioPlayerProvider.notifier).startMonitoring();
       // Start foreground service after monitoring is active
       final monState = ref.read(audioPlayerProvider).value;

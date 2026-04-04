@@ -4,6 +4,7 @@ import '../../../core/api/protect_api_client.dart';
 import '../../../core/logging/app_logger.dart';
 import '../../../core/models/app_error.dart';
 import '../../../core/storage/storage_service.dart';
+import '../../cameras/providers/camera_provider.dart';
 import '../models/auth_state.dart';
 
 final apiClientProvider = Provider((_) => ProtectApiClient());
@@ -25,7 +26,8 @@ class AuthNotifier extends AsyncNotifier<AuthState> {
     try {
       final ok = await client.verifyConnection(creds.host);
       if (ok) {
-        appLog('AUTH', 'Auto-connect succeeded');
+        appLog('AUTH', 'Auto-connect succeeded, loading cameras...');
+        await ref.read(cameraNotifierProvider.notifier).loadCameras(creds.host);
         final wasMonitoring = await storage.read('was_monitoring') == 'true';
         return AuthState.authenticated(host: creds.host, resumeMonitoring: wasMonitoring);
       }
@@ -49,9 +51,10 @@ class AuthNotifier extends AsyncNotifier<AuthState> {
     try {
       final ok = await client.verifyConnection(host);
       if (ok) {
-        appLog('AUTH', 'Login succeeded');
+        appLog('AUTH', 'Login succeeded, loading cameras...');
         final storage = ref.read(storageProvider);
         await storage.saveCredentials(host, apiKey);
+        await ref.read(cameraNotifierProvider.notifier).loadCameras(host);
         state = AsyncData(AuthState.authenticated(host: host));
       } else {
         appLog('AUTH', 'Login failed — bad response');
