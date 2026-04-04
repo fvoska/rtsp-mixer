@@ -13,8 +13,9 @@ class CameraNotifier extends AsyncNotifier<CameraState> {
   @override
   Future<CameraState> build() async => const CameraState();
 
+  /// Load cameras from cache (fast) then refresh from API (background).
+  /// Returns after cache is loaded so callers don't wait for the network.
   Future<void> loadCameras(String host) async {
-    // Prevent concurrent loads (router + login screen can both trigger)
     if (_loading) {
       appLog('CAM', 'loadCameras already in progress, skipping');
       return;
@@ -22,67 +23,57 @@ class CameraNotifier extends AsyncNotifier<CameraState> {
     _loading = true;
 
     try {
-      await _loadCamerasImpl(host);
-    } finally {
+      final storage = ref.read(storageProvider);
+      final savedIds = await storage.loadSelectedCameraIds();
+
+      // Phase 1: Load from cache — instant UI
+      final cached = await _loadCachedCameras(storage);
+      if (cached != null && cached.isNotEmpty) {
+        final validIds = savedIds.where((id) => cached.any((c) => c.id == id)).toSet();
+        state = AsyncData(CameraState(cameras: cached, selectedIds: validIds));
+        final withUrls = cached.where((c) => c.rtspsStreamUrls.isNotEmpty).length;
+        appLog('CAM', 'Loaded ${cached.length} cameras from cache ($withUrls with RTSPS URLs)');
+      } else {
+        state = const AsyncLoading();
+      }
+
+      // Phase 2: Refresh from API — updates state when done
+      _refreshFromApi(host, savedIds);
+    } catch (e) {
       _loading = false;
+      appLog('CAM', 'Error in loadCameras: $e');
+      if (!state.hasValue || state.value!.cameras.isEmpty) {
+        state = AsyncError(e, StackTrace.current);
+      }
     }
   }
 
-  Future<void> _loadCamerasImpl(String host) async {
-    final storage = ref.read(storageProvider);
-
-    // Load cached cameras immediately for instant UI
-    final cached = await _loadCachedCameras(storage);
-    final savedIds = await storage.loadSelectedCameraIds();
-
-    if (cached != null && cached.isNotEmpty) {
-      final validIds = savedIds.where((id) => cached.any((c) => c.id == id)).toSet();
-      state = AsyncData(CameraState(cameras: cached, selectedIds: validIds));
-      final withUrls = cached.where((c) => c.rtspsStreamUrls.isNotEmpty).length;
-      appLog('CAM', 'Loaded ${cached.length} cameras from cache ($withUrls with RTSPS URLs)');
-    } else {
-      state = const AsyncLoading();
-    }
-
-    // Fetch fresh data in background
+  Future<void> _refreshFromApi(String host, List<String> savedIds) async {
     try {
       final client = ref.read(apiClientProvider);
+      final storage = ref.read(storageProvider);
       final cameras = await client.getCameras(host);
       appLog('CAM', 'Fetched ${cameras.length} cameras from API');
 
-      // Fetch RTSPS URLs sequentially to avoid 429 rate limiting.
-      // Reuse cached URLs when available to reduce API calls.
-      final cachedUrlMap = <String, Map<String, String>>{};
-      if (cached != null) {
-        for (final c in cached) {
-          if (c.rtspsStreamUrls.isNotEmpty) cachedUrlMap[c.id] = c.rtspsStreamUrls;
-        }
-      }
+      // Fetch RTSPS URLs sequentially to avoid 429 rate limiting
       final enrichedCameras = <ProtectCamera>[];
       for (final c in cameras) {
-        final cachedUrls = cachedUrlMap[c.id];
-        if (cachedUrls != null && cachedUrls.isNotEmpty) {
-          enrichedCameras.add(c.copyWith(rtspsStreamUrls: cachedUrls));
-        } else {
-          final urls = await client.getRtspsUrls(host, c.id);
-          enrichedCameras.add(urls.isNotEmpty ? c.copyWith(rtspsStreamUrls: urls) : c);
-        }
+        final urls = await client.getRtspsUrls(host, c.id);
+        enrichedCameras.add(urls.isNotEmpty ? c.copyWith(rtspsStreamUrls: urls) : c);
       }
       appLog('CAM', 'RTSPS URLs: ${enrichedCameras.where((c) => c.rtspsStreamUrls.isNotEmpty).length}/${cameras.length}');
 
-      // Save to cache for next startup
       await _saveCachedCameras(storage, enrichedCameras);
 
       final validIds = savedIds.where((id) => enrichedCameras.any((c) => c.id == id)).toSet();
       state = AsyncData(CameraState(cameras: enrichedCameras, selectedIds: validIds));
     } catch (e) {
-      appLog('CAM', 'Error loading cameras: $e');
-      // If we have cached data, keep showing it instead of error
+      appLog('CAM', 'Error refreshing cameras from API: $e');
       if (state.hasValue && state.value!.cameras.isNotEmpty) {
         appLog('CAM', 'Keeping cached camera list');
-      } else {
-        state = AsyncError(e, StackTrace.current);
       }
+    } finally {
+      _loading = false;
     }
   }
 

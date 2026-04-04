@@ -45,6 +45,20 @@ Future<CameraState> waitForCameras(ProviderContainer c) async {
   throw StateError('CameraNotifier did not settle');
 }
 
+/// Wait for cameras to have RTSPS URLs (background refresh complete).
+Future<CameraState> waitForCamerasWithUrls(ProviderContainer c) async {
+  for (var i = 0; i < 100; i++) {
+    final v = c.read(cameraNotifierProvider);
+    if (v is AsyncData<CameraState> &&
+        v.value!.cameras.isNotEmpty &&
+        v.value!.cameras.every((cam) => cam.rtspsStreamUrls.isNotEmpty)) {
+      return v.value!;
+    }
+    await Future.delayed(const Duration(milliseconds: 10));
+  }
+  throw StateError('Cameras did not get RTSPS URLs');
+}
+
 void main() {
   late StorageService storage;
   late FakeApiClient api;
@@ -61,7 +75,7 @@ void main() {
       await waitForCameras(c);
 
       await c.read(cameraNotifierProvider.notifier).loadCameras('10.0.0.1');
-      final state = await waitForCameras(c);
+      final state = await waitForCamerasWithUrls(c);
       expect(state.cameras, hasLength(3));
       expect(state.cameras[0].name, 'Nursery');
     });
@@ -71,6 +85,7 @@ void main() {
       addTearDown(c.dispose);
       await waitForCameras(c);
       await c.read(cameraNotifierProvider.notifier).loadCameras('h');
+      await waitForCamerasWithUrls(c);
 
       c.read(cameraNotifierProvider.notifier).toggleCamera('c1');
       expect(c.read(cameraNotifierProvider).value!.selectedIds, {'c1'});
@@ -81,6 +96,7 @@ void main() {
       addTearDown(c.dispose);
       await waitForCameras(c);
       await c.read(cameraNotifierProvider.notifier).loadCameras('h');
+      await waitForCamerasWithUrls(c);
 
       final n = c.read(cameraNotifierProvider.notifier);
       n.toggleCamera('c1');
@@ -93,6 +109,7 @@ void main() {
       addTearDown(c.dispose);
       await waitForCameras(c);
       await c.read(cameraNotifierProvider.notifier).loadCameras('h');
+      await waitForCamerasWithUrls(c);
 
       final n = c.read(cameraNotifierProvider.notifier);
       n.toggleCamera('c1');
@@ -108,6 +125,7 @@ void main() {
       addTearDown(c.dispose);
       await waitForCameras(c);
       await c.read(cameraNotifierProvider.notifier).loadCameras('h');
+      await waitForCamerasWithUrls(c);
 
       expect(c.read(cameraNotifierProvider).value!.canStartMonitoring, false);
       c.read(cameraNotifierProvider.notifier).toggleCamera('c1');
@@ -122,8 +140,9 @@ void main() {
       addTearDown(c.dispose);
       await waitForCameras(c);
       await c.read(cameraNotifierProvider.notifier).loadCameras('h');
+      await waitForCamerasWithUrls(c);
 
-      final state = await waitForCameras(c);
+      final state = c.read(cameraNotifierProvider).value!;
       expect(state.selectedIds, containsAll(['c1', 'c2']));
     });
 
@@ -133,8 +152,9 @@ void main() {
       addTearDown(c.dispose);
       await waitForCameras(c);
       await c.read(cameraNotifierProvider.notifier).loadCameras('h');
+      await waitForCamerasWithUrls(c);
 
-      final state = await waitForCameras(c);
+      final state = c.read(cameraNotifierProvider).value!;
       expect(state.selectedIds, {'c1'});
     });
 
@@ -143,6 +163,7 @@ void main() {
       addTearDown(c.dispose);
       await waitForCameras(c);
       await c.read(cameraNotifierProvider.notifier).loadCameras('h');
+      await waitForCamerasWithUrls(c);
 
       c.read(cameraNotifierProvider.notifier).toggleCamera('c1');
       await Future.delayed(const Duration(milliseconds: 50));
