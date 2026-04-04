@@ -106,32 +106,29 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen>
 
   void _receiveTaskData(Object data) {
     if (_disposed) return;
-    if (data is Map) {
-      final action = data['action'];
-      if (action == 'toggle') {
-        // D-04: play/pause toggle — mute/unmute all cameras
-        appLog('FGS', 'Received toggle action from notification');
-        try {
-          final notifier = ref.read(audioPlayerProvider.notifier);
-          final state = ref.read(audioPlayerProvider).value;
-          if (state != null) {
-            // If any camera is unmuted, mute all (pause). Otherwise unmute all (play).
-            final anyUnmuted = state.cameras.any((c) => !c.isMuted);
-            for (int i = 0; i < state.cameras.length; i++) {
-              if (anyUnmuted && !state.cameras[i].isMuted) {
-                notifier.toggleMute(i);
-              } else if (!anyUnmuted && state.cameras[i].isMuted) {
-                notifier.toggleMute(i);
-              }
+    appLog('FGS', 'Received task data: $data (${data.runtimeType})');
+    final action = data is String ? data : (data is Map ? data['action'] : null);
+    if (action == 'toggle') {
+      appLog('FGS', 'Received toggle action from notification');
+      try {
+        final notifier = ref.read(audioPlayerProvider.notifier);
+        final monState = ref.read(audioPlayerProvider).value;
+        if (monState != null) {
+          final anyUnmuted = monState.cameras.any((c) => !c.isMuted);
+          for (int i = 0; i < monState.cameras.length; i++) {
+            if (anyUnmuted && !monState.cameras[i].isMuted) {
+              notifier.toggleMute(i);
+            } else if (!anyUnmuted && monState.cameras[i].isMuted) {
+              notifier.toggleMute(i);
             }
           }
-        } catch (e) {
-          appLog('FGS', 'Error handling toggle: $e');
         }
-      } else if (action == 'stop') {
-        appLog('FGS', 'Received stop action from foreground service');
-        _stopAndGoBack();
+      } catch (e) {
+        appLog('FGS', 'Error handling toggle: $e');
       }
+    } else if (action == 'stop') {
+      appLog('FGS', 'Received stop action from foreground service');
+      _stopAndGoBack();
     }
   }
 

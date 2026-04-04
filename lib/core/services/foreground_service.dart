@@ -1,3 +1,4 @@
+// ignore_for_file: avoid_print
 import 'package:flutter_foreground_task/flutter_foreground_task.dart';
 
 import '../logging/app_logger.dart';
@@ -79,13 +80,16 @@ class ForegroundServiceManager {
       FlutterForegroundTask.isRunningService;
 }
 
-/// TaskHandler callback that runs inside the foreground service.
+/// TaskHandler callback that runs inside the foreground **service isolate**.
 /// Players live in the main isolate — this handler only receives
-/// notification actions and forwards them to the main isolate.
+/// notification actions and forwards them via sendDataToMain.
+///
+/// NOTE: appLog() does NOT work here (different isolate). Use print()
+/// for debugging — visible in `adb logcat -s flutter`.
 class MonitoringTaskHandler extends TaskHandler {
   @override
   Future<void> onStart(DateTime timestamp, TaskStarter starter) async {
-    appLog('FGS', 'TaskHandler.onStart (starter=$starter)');
+    print('[FGS] TaskHandler.onStart (starter=$starter)');
   }
 
   @override
@@ -95,24 +99,20 @@ class MonitoringTaskHandler extends TaskHandler {
 
   @override
   Future<void> onDestroy(DateTime timestamp, bool isTimeout) async {
-    appLog('FGS', 'TaskHandler.onDestroy (isTimeout=$isTimeout)');
-    // Notify main isolate to stop monitoring.
-    FlutterForegroundTask.sendDataToMain({'action': 'stop'});
+    print('[FGS] TaskHandler.onDestroy (isTimeout=$isTimeout)');
+    FlutterForegroundTask.sendDataToMain('stop');
   }
 
   @override
   void onNotificationButtonPressed(String id) {
-    appLog('FGS', 'Notification button pressed: $id');
+    print('[FGS] Notification button pressed: $id');
     if (id == 'toggle') {
-      // Play/pause toggle — mutes/unmutes all cameras.
-      FlutterForegroundTask.sendDataToMain({'action': 'toggle'});
+      FlutterForegroundTask.sendDataToMain('toggle');
     }
   }
 
   @override
   void onNotificationPressed() {
-    // Tapping notification body opens app to monitoring screen.
-    // WithForegroundTask widget handles bring-to-front automatically.
-    appLog('FGS', 'Notification body pressed — app brought to front');
+    print('[FGS] Notification body pressed');
   }
 }
