@@ -8,8 +8,8 @@ import 'core/logging/app_logger.dart';
 import 'core/services/foreground_service.dart';
 
 void main() {
-  FlutterForegroundTask.initCommunicationPort();
   WidgetsFlutterBinding.ensureInitialized();
+  FlutterForegroundTask.initCommunicationPort();
   MediaKit.ensureInitialized();
   AppLogger.instance.init();
   ForegroundServiceManager.init();
