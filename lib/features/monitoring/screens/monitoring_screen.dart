@@ -41,7 +41,6 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen>
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
-    FlutterForegroundTask.addTaskDataCallback(_receiveTaskData);
     Future.microtask(() async {
       // Request notification permission (required on Android 13+)
       final notifPerm = await FlutterForegroundTask.checkNotificationPermission();
@@ -95,60 +94,10 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen>
   void dispose() {
     _disposed = true;
     appLog('UI', 'MonitoringScreen disposing');
-    FlutterForegroundTask.removeTaskDataCallback(_receiveTaskData);
     WidgetsBinding.instance.removeObserver(this);
-    // Stop service and players fire-and-forget — state updates will be ignored
-    // since _disposed is true and the widget is defunct.
-    ForegroundServiceManager.stop();
-    ref.read(audioPlayerProvider.notifier).stopMonitoring();
     super.dispose();
   }
 
-  void _receiveTaskData(Object data) {
-    if (_disposed) return;
-    appLog('FGS', 'Received task data: $data (${data.runtimeType})');
-    final action = data is String ? data : (data is Map ? data['action'] : null);
-    if (action == 'toggle') {
-      appLog('FGS', 'Received toggle action from notification');
-      try {
-        final notifier = ref.read(audioPlayerProvider.notifier);
-        final monState = ref.read(audioPlayerProvider).value;
-        if (monState != null) {
-          final anyUnmuted = monState.cameras.any((c) => !c.isMuted);
-          for (int i = 0; i < monState.cameras.length; i++) {
-            if (anyUnmuted && !monState.cameras[i].isMuted) {
-              notifier.toggleMute(i);
-            } else if (!anyUnmuted && monState.cameras[i].isMuted) {
-              notifier.toggleMute(i);
-            }
-          }
-        }
-      } catch (e) {
-        appLog('FGS', 'Error handling toggle: $e');
-      }
-    } else if (action == 'stop') {
-      appLog('FGS', 'Received stop action from foreground service');
-      _stopAndGoBack();
-    }
-  }
-
-  Future<void> _stopAndGoBack() async {
-    if (_disposed) return;
-    _disposed = true;
-    await ref.read(storageProvider).delete('was_monitoring');
-    await ref.read(audioPlayerProvider.notifier).stopMonitoring();
-    // Stop audio_service MediaSession
-    try {
-      final handler = await ref.read(audioHandlerProvider.future);
-      handler.setIdle();
-    } catch (e) {
-      appLog('AUDIO_SERVICE', 'Failed to stop audio handler: $e');
-    }
-    await ForegroundServiceManager.stop();
-    if (mounted) {
-      context.go('/cameras');
-    }
-  }
 
   bool _isVideoOn(String cameraId) =>
       _perCameraVideo[cameraId] ?? _globalVideo;

@@ -4,6 +4,7 @@ import 'package:go_router/go_router.dart';
 
 import '../../../core/services/foreground_service.dart';
 import '../../../core/theme/spacing.dart';
+import '../../auth/providers/auth_provider.dart';
 import '../providers/audio_player_provider.dart';
 
 /// Bottom button that stops all players and navigates back to the camera list.
@@ -23,6 +24,7 @@ class StopMonitoringButton extends ConsumerWidget {
           height: 48,
           child: OutlinedButton(
             onPressed: () async {
+              await ref.read(storageProvider).delete('was_monitoring');
               await ref.read(audioPlayerProvider.notifier).stopMonitoring();
               await ForegroundServiceManager.stop();
               if (context.mounted) context.go('/cameras');
