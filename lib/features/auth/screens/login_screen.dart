@@ -4,7 +4,6 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../core/logging/app_logger.dart';
 import '../../../core/models/app_error.dart';
 import '../../../core/theme/spacing.dart';
-import '../../cameras/providers/camera_provider.dart';
 import '../providers/auth_provider.dart';
 
 class LoginScreen extends ConsumerStatefulWidget {
@@ -67,8 +66,8 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
     if (!mounted) return;
     final authState = ref.read(authNotifierProvider);
     if (authState.value?.isAuthenticated == true) {
-      appLog('UI', 'Authenticated — loading cameras');
-      ref.read(cameraNotifierProvider.notifier).loadCameras(host);
+      appLog('UI', 'Authenticated — router will load cameras');
+      // Camera loading is triggered by the router redirect on auth state change
     } else if (authState.value?.errorMessage != null) {
       _setError(authState.value?.errorType, authState.value?.errorMessage);
     }

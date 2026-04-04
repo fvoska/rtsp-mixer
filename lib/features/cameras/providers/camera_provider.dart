@@ -8,10 +8,27 @@ import '../models/protect_camera.dart';
 import 'camera_state.dart';
 
 class CameraNotifier extends AsyncNotifier<CameraState> {
+  bool _loading = false;
+
   @override
   Future<CameraState> build() async => const CameraState();
 
   Future<void> loadCameras(String host) async {
+    // Prevent concurrent loads (router + login screen can both trigger)
+    if (_loading) {
+      appLog('CAM', 'loadCameras already in progress, skipping');
+      return;
+    }
+    _loading = true;
+
+    try {
+      await _loadCamerasImpl(host);
+    } finally {
+      _loading = false;
+    }
+  }
+
+  Future<void> _loadCamerasImpl(String host) async {
     final storage = ref.read(storageProvider);
 
     // Load cached cameras immediately for instant UI
@@ -33,12 +50,12 @@ class CameraNotifier extends AsyncNotifier<CameraState> {
       final cameras = await client.getCameras(host);
       appLog('CAM', 'Fetched ${cameras.length} cameras from API');
 
-      final enrichedCameras = await Future.wait(
-        cameras.map((c) async {
-          final urls = await client.getRtspsUrls(host, c.id);
-          return urls.isNotEmpty ? c.copyWith(rtspsStreamUrls: urls) : c;
-        }),
-      );
+      // Fetch RTSPS URLs sequentially to avoid 429 rate limiting
+      final enrichedCameras = <ProtectCamera>[];
+      for (final c in cameras) {
+        final urls = await client.getRtspsUrls(host, c.id);
+        enrichedCameras.add(urls.isNotEmpty ? c.copyWith(rtspsStreamUrls: urls) : c);
+      }
       appLog('CAM', 'RTSPS URLs: ${enrichedCameras.where((c) => c.rtspsStreamUrls.isNotEmpty).length}/${cameras.length}');
 
       // Save to cache for next startup
