@@ -462,6 +462,50 @@ class AudioPlayerNotifier extends AsyncNotifier<MonitoringState> {
     _saveMixState();
   }
 
+  /// Mute all cameras in a single atomic state update.
+  void muteAll() {
+    final current = state.value;
+    if (current == null) return;
+    var updated = current;
+    for (int i = 0; i < updated.cameras.length; i++) {
+      final cam = updated.cameras[i];
+      if (!cam.isMuted) {
+        _players[cam.cameraId]?.setVolume(0.0);
+        updated = updated.copyWithCamera(i, cam.copyWith(
+          isMuted: true,
+          preMuteVolume: cam.volume,
+        ));
+      }
+    }
+    state = AsyncData(updated);
+    appLog('AUDIO', 'All cameras muted');
+    _saveMixState();
+  }
+
+  /// Unmute all cameras in a single atomic state update.
+  void unmuteAll() {
+    final current = state.value;
+    if (current == null) return;
+    var updated = current;
+    for (int i = 0; i < updated.cameras.length; i++) {
+      final cam = updated.cameras[i];
+      if (cam.isMuted) {
+        _players[cam.cameraId]?.setVolume(cam.preMuteVolume);
+        updated = updated.copyWithCamera(i, cam.copyWith(isMuted: false));
+      }
+    }
+    state = AsyncData(updated);
+    appLog('AUDIO', 'All cameras unmuted');
+    _saveMixState();
+  }
+
+  /// Whether all cameras are currently muted.
+  bool get isAllMuted {
+    final current = state.value;
+    if (current == null || current.cameras.isEmpty) return false;
+    return current.cameras.every((c) => c.isMuted);
+  }
+
   /// Enable or disable video decoding on all active players.
   Future<void> setVideoEnabled(bool enabled) async {
     final value = enabled ? 'auto' : 'no';

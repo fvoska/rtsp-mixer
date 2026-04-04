@@ -47,6 +47,9 @@ class ForegroundServiceManager {
       serviceId: 256,
       notificationTitle: 'Baby Monitor Active',
       notificationText: notificationText,
+      notificationButtons: [
+        const NotificationButton(id: 'pause', text: 'Pause'),
+      ],
       callback: startCallback,
     );
     appLog('FGS', 'Foreground service started: $notificationText');
@@ -93,6 +96,14 @@ class MonitoringTaskHandler extends TaskHandler {
   @override
   Future<void> onDestroy(DateTime timestamp, bool isTimeout) async {
     print('[FGS] TaskHandler.onDestroy (isTimeout=$isTimeout)');
+  }
+
+  @override
+  void onNotificationButtonPressed(String id) {
+    print('[FGS] Notification button pressed: $id');
+    if (id == 'pause') {
+      FlutterForegroundTask.sendDataToMain('pause');
+    }
   }
 
   @override

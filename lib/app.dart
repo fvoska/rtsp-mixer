@@ -2,14 +2,65 @@ import 'package:flutter/material.dart';
 import 'package:flutter_foreground_task/flutter_foreground_task.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import 'core/logging/app_logger.dart';
 import 'core/router/app_router.dart';
+import 'core/services/foreground_service.dart';
 import 'core/theme/app_theme.dart';
+import 'features/monitoring/providers/audio_player_provider.dart';
 
-class App extends ConsumerWidget {
+class App extends ConsumerStatefulWidget {
   const App({super.key});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<App> createState() => _AppState();
+}
+
+class _AppState extends ConsumerState<App> {
+  @override
+  void initState() {
+    super.initState();
+    FlutterForegroundTask.addTaskDataCallback(_onTaskData);
+  }
+
+  @override
+  void dispose() {
+    FlutterForegroundTask.removeTaskDataCallback(_onTaskData);
+    super.dispose();
+  }
+
+  void _onTaskData(Object data) {
+    appLog('FGS', 'Received task data: $data (${data.runtimeType})');
+    if (data == 'pause') {
+      final notifier = ref.read(audioPlayerProvider.notifier);
+      try {
+        if (notifier.isAllMuted) {
+          notifier.unmuteAll();
+          ForegroundServiceManager.updateNotification(
+            title: 'Baby Monitor Active',
+            text: _currentNotificationText(),
+          );
+        } else {
+          notifier.muteAll();
+          ForegroundServiceManager.updateNotification(
+            title: 'Baby Monitor — Paused',
+            text: 'All cameras muted',
+          );
+        }
+      } catch (e) {
+        appLog('FGS', 'Error handling pause: $e');
+      }
+    }
+  }
+
+  String _currentNotificationText() {
+    final monState = ref.read(audioPlayerProvider).value;
+    if (monState == null) return 'Monitoring';
+    final names = monState.cameras.map((c) => c.cameraName).join(', ');
+    return 'Monitoring: $names';
+  }
+
+  @override
+  Widget build(BuildContext context) {
     final router = ref.watch(appRouterProvider);
     return WithForegroundTask(
       child: MaterialApp.router(
