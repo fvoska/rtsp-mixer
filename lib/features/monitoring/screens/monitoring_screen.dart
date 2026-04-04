@@ -42,6 +42,18 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen>
     WidgetsBinding.instance.addObserver(this);
     FlutterForegroundTask.addTaskDataCallback(_receiveTaskData);
     Future.microtask(() async {
+      // Request notification permission (required on Android 13+)
+      final notifPerm = await FlutterForegroundTask.checkNotificationPermission();
+      if (notifPerm != NotificationPermission.granted) {
+        appLog('FGS', 'Requesting notification permission');
+        await FlutterForegroundTask.requestNotificationPermission();
+      }
+      // Request battery optimization exemption for overnight reliability
+      if (!await FlutterForegroundTask.isIgnoringBatteryOptimizations) {
+        appLog('FGS', 'Requesting battery optimization exemption');
+        await FlutterForegroundTask.requestIgnoreBatteryOptimization();
+      }
+
       await ref.read(audioPlayerProvider.notifier).startMonitoring();
       // Start foreground service after monitoring is active
       final monState = ref.read(audioPlayerProvider).value;
