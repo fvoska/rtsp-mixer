@@ -21,7 +21,8 @@ class CameraNotifier extends AsyncNotifier<CameraState> {
     if (cached != null && cached.isNotEmpty) {
       final validIds = savedIds.where((id) => cached.any((c) => c.id == id)).toSet();
       state = AsyncData(CameraState(cameras: cached, selectedIds: validIds));
-      appLog('CAM', 'Loaded ${cached.length} cameras from cache');
+      final withUrls = cached.where((c) => c.rtspsStreamUrls.isNotEmpty).length;
+      appLog('CAM', 'Loaded ${cached.length} cameras from cache ($withUrls with RTSPS URLs)');
     } else {
       state = const AsyncLoading();
     }
