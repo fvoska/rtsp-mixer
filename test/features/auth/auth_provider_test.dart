@@ -19,6 +19,9 @@ class FakeApiClient extends ProtectApiClient {
 
   @override
   Future<List<ProtectCamera>> getCameras(String host) async => [];
+
+  @override
+  Future<Map<String, String>> getRtspsUrls(String host, String cameraId) async => {};
 }
 
 ProviderContainer createContainer({
@@ -68,23 +71,29 @@ void main() {
       expect(state.host, '10.0.0.1');
     });
 
-    test('falls back to unauthenticated on auto-connect failure', () async {
+    test('returns authenticated from cache then background validation revokes on failure', () async {
       await storage.saveCredentials('10.0.0.1', 'key');
       api.verifyResult = false;
       final c = createContainer(storage: storage, api: api);
       addTearDown(c.dispose);
+      // Initial state: authenticated from cache
       final state = await waitForAuth(c);
-      expect(state.isAuthenticated, false);
-      expect(state.errorMessage, isNotNull);
+      expect(state.isAuthenticated, true);
+      // Background validation runs after 2s delay and revokes
+      await Future.delayed(const Duration(seconds: 3));
+      expect(c.read(authNotifierProvider).value?.isAuthenticated, false);
     });
 
-    test('falls back to unauthenticated on auto-connect exception', () async {
+    test('stays authenticated from cache on network error', () async {
       await storage.saveCredentials('10.0.0.1', 'key');
       api.verifyError = const AppError(type: AppErrorType.connectionRefused, message: 'fail');
       final c = createContainer(storage: storage, api: api);
       addTearDown(c.dispose);
       final state = await waitForAuth(c);
-      expect(state.isAuthenticated, false);
+      expect(state.isAuthenticated, true);
+      // Background validation fails but doesn't kick user out (network error)
+      await Future.delayed(const Duration(seconds: 3));
+      expect(c.read(authNotifierProvider).value?.isAuthenticated, true);
     });
 
     test('login saves credentials on success', () async {

@@ -20,27 +20,43 @@ class AuthNotifier extends AsyncNotifier<AuthState> {
       appLog('AUTH', 'No saved credentials');
       return const AuthState.unauthenticated();
     }
-    appLog('AUTH', 'Found saved credentials, auto-connecting...');
+
+    // Set API key immediately so camera loading can use it
     final client = ref.read(apiClientProvider);
     client.setApiKey(creds.apiKey);
-    try {
-      final ok = await client.verifyConnection(creds.host);
-      if (ok) {
-        appLog('AUTH', 'Auto-connect succeeded, loading cameras...');
-        await ref.read(cameraNotifierProvider.notifier).loadCameras(creds.host);
-        final wasMonitoring = await storage.read('was_monitoring') == 'true';
-        return AuthState.authenticated(host: creds.host, resumeMonitoring: wasMonitoring);
+
+    // Load cached cameras (instant, no network)
+    await ref.read(cameraNotifierProvider.notifier).loadCameras(creds.host);
+
+    final wasMonitoring = await storage.read('was_monitoring') == 'true';
+    appLog('AUTH', 'Cached credentials found (wasMonitoring=$wasMonitoring), validating in background...');
+
+    // Validate credentials in background — interrupt if invalid
+    _validateInBackground(creds.host, creds.apiKey);
+
+    return AuthState.authenticated(host: creds.host, resumeMonitoring: wasMonitoring);
+  }
+
+  void _validateInBackground(String host, String apiKey) {
+    Future(() async {
+      // Let the UI settle with cached state before potentially revoking
+      await Future.delayed(const Duration(seconds: 2));
+      try {
+        final client = ref.read(apiClientProvider);
+        final ok = await client.verifyConnection(host);
+        if (!ok) {
+          appLog('AUTH', 'Background validation failed — credentials invalid');
+          state = const AsyncData(AuthState.unauthenticated(
+            errorMessage: 'API key is no longer valid. Please re-enter.',
+          ));
+        } else {
+          appLog('AUTH', 'Background validation succeeded');
+        }
+      } catch (e) {
+        appLog('AUTH', 'Background validation error: $e');
+        // Network error — don't kick user out, cached state is fine
       }
-      appLog('AUTH', 'Auto-connect failed (bad key?)');
-      return const AuthState.unauthenticated(
-        errorMessage: 'Could not reconnect. Check API key.',
-      );
-    } catch (e) {
-      appLog('AUTH', 'Auto-connect error: $e');
-      return const AuthState.unauthenticated(
-        errorMessage: 'Could not reconnect.',
-      );
-    }
+    });
   }
 
   Future<void> login(String host, String apiKey) async {
@@ -51,7 +67,7 @@ class AuthNotifier extends AsyncNotifier<AuthState> {
     try {
       final ok = await client.verifyConnection(host);
       if (ok) {
-        appLog('AUTH', 'Login succeeded, loading cameras...');
+        appLog('AUTH', 'Login succeeded');
         final storage = ref.read(storageProvider);
         await storage.saveCredentials(host, apiKey);
         await ref.read(cameraNotifierProvider.notifier).loadCameras(host);
