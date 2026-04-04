@@ -56,16 +56,19 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen>
         await FlutterForegroundTask.requestIgnoreBatteryOptimization();
       }
 
-      // Wait for cameras to be loaded (may be loading async on auto-resume)
-      var cameraProv = ref.read(cameraNotifierProvider);
-      if (cameraProv.isLoading || (!cameraProv.hasValue && !cameraProv.hasError)) {
-        appLog('AUDIO', 'Waiting for cameras to load...');
-        await Future.doWhile(() async {
-          await Future.delayed(const Duration(milliseconds: 100));
-          cameraProv = ref.read(cameraNotifierProvider);
-          return cameraProv.isLoading;
-        });
-      }
+      // Wait for cameras with RTSPS URLs (cache may load without URLs,
+      // background API refresh adds them shortly after)
+      appLog('AUDIO', 'Waiting for cameras with RTSPS URLs...');
+      await Future.doWhile(() async {
+        await Future.delayed(const Duration(milliseconds: 100));
+        if (_disposed) return false;
+        final prov = ref.read(cameraNotifierProvider);
+        if (prov.hasError) return false;
+        final selected = prov.value?.selectedCameras ?? [];
+        if (selected.isEmpty) return true; // still loading
+        return selected.any((c) => c.defaultStreamUrl == null);
+      });
+      if (_disposed) return;
 
       await ref.read(audioPlayerProvider.notifier).startMonitoring();
       // Start foreground service after monitoring is active
