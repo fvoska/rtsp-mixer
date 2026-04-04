@@ -1,11 +1,11 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:rtsp_audio_mixer/core/api/protect_api_client.dart';
-import 'package:rtsp_audio_mixer/core/storage/storage_service.dart';
-import 'package:rtsp_audio_mixer/features/auth/providers/auth_provider.dart';
-import 'package:rtsp_audio_mixer/features/cameras/models/protect_camera.dart';
-import 'package:rtsp_audio_mixer/features/cameras/providers/camera_provider.dart';
-import 'package:rtsp_audio_mixer/features/cameras/providers/camera_state.dart';
+import 'package:rtsp_mixer/core/api/protect_api_client.dart';
+import 'package:rtsp_mixer/core/storage/storage_service.dart';
+import 'package:rtsp_mixer/features/auth/providers/auth_provider.dart';
+import 'package:rtsp_mixer/features/cameras/models/protect_camera.dart';
+import 'package:rtsp_mixer/features/cameras/providers/camera_provider.dart';
+import 'package:rtsp_mixer/features/cameras/providers/camera_state.dart';
 
 class FakeApiClient extends ProtectApiClient {
   List<ProtectCamera> cameras = const [

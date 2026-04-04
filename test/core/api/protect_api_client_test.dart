@@ -2,8 +2,8 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
-import 'package:rtsp_audio_mixer/core/api/protect_api_client.dart';
-import 'package:rtsp_audio_mixer/features/cameras/models/protect_camera.dart';
+import 'package:rtsp_mixer/core/api/protect_api_client.dart';
+import 'package:rtsp_mixer/features/cameras/models/protect_camera.dart';
 
 void main() {
   group('ProtectApiClient', () {

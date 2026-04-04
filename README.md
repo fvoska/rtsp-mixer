@@ -1,16 +1,3 @@
-# rtsp_audio_mixer
+# RTSP Mixer
 
-A new Flutter project.
-
-## Getting Started
-
-This project is a starting point for a Flutter application.
-
-A few resources to get you started if this is your first Flutter project:
-
-- [Lab: Write your first Flutter app](https://docs.flutter.dev/get-started/codelab)
-- [Cookbook: Useful Flutter samples](https://docs.flutter.dev/cookbook)
-
-For help getting started with Flutter development, view the
-[online documentation](https://docs.flutter.dev/), which offers tutorials,
-samples, guidance on mobile development, and a full API reference.
+A baby monitor app that connects to Unifi Protect cameras, extracts audio from RTSP streams, and lets a parent listen to two rooms simultaneously with per-camera volume mixing. Designed to run reliably overnight on Android with the screen off.

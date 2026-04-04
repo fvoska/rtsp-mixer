@@ -5,7 +5,7 @@ import 'package:flutter/foundation.dart';
 
 /// Simple app-wide logger that writes to:
 /// 1. debugPrint (visible in `flutter run` terminal output)
-/// 2. A file at /tmp/rtsp_audio_mixer.log (readable from disk)
+/// 2. A file at /tmp/rtsp_mixer.log (readable from disk)
 /// 3. An in-memory ring buffer (displayed in the app UI)
 ///
 /// ## How to read logs
@@ -15,13 +15,13 @@ import 'package:flutter/foundation.dart';
 /// **In the terminal:** Logs appear as `flutter:` prefixed lines when running
 /// with `flutter run -d macos`. Look for lines starting with the tag.
 ///
-/// **From disk:** `cat /tmp/rtsp_audio_mixer.log` or `tail -f /tmp/rtsp_audio_mixer.log`
+/// **From disk:** `cat /tmp/rtsp_mixer.log` or `tail -f /tmp/rtsp_mixer.log`
 /// The file is cleared on each app start.
 class AppLogger {
   AppLogger._();
   static final instance = AppLogger._();
 
-  static const _logFile = '/tmp/rtsp_audio_mixer.log';
+  static const _logFile = '/tmp/rtsp_mixer.log';
   static const _maxLines = 500;
 
   final _buffer = ListQueue<String>();

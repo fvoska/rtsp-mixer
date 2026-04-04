@@ -1,4 +1,4 @@
-# Requirements: RTSP Audio Mixer
+# Requirements: RTSP Mixer
 
 **Defined:** 2026-04-01
 **Core Value:** Reliable overnight audio from two baby cameras that never silently dies

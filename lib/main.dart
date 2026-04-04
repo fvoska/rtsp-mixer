@@ -13,6 +13,6 @@ void main() {
   MediaKit.ensureInitialized();
   AppLogger.instance.init();
   ForegroundServiceManager.init();
-  appLog('APP', 'Starting RTSP Audio Mixer');
+  appLog('APP', 'Starting RTSP Mixer');
   runApp(const ProviderScope(child: App()));
 }

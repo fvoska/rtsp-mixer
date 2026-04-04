@@ -1,9 +1,9 @@
 <!-- GSD:project-start source:PROJECT.md -->
 ## Project
 
-**RTSP Audio Mixer**
+**RTSP Mixer**
 
-A baby monitor app that connects to Unifi Protect cameras, extracts audio-only from RTSP streams, and lets a parent listen to two rooms simultaneously with per-camera volume mixing. Designed to run reliably overnight on Android with the screen off — something the Unifi app and VLC can't do.
+A baby monitor app that connects to Unifi Protect cameras, extracts audio from RTSP streams, and lets a parent listen to two rooms simultaneously with per-camera volume mixing and optional video preview. Designed to run reliably overnight on Android with the screen off — something the Unifi app and VLC can't do.
 
 **Core Value:** Reliable overnight audio from two baby cameras that never silently dies — the parent must be able to trust it's still listening when they fall asleep.
 

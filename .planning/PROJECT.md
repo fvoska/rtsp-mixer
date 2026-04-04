@@ -1,4 +1,4 @@
-# RTSP Audio Mixer
+# RTSP Mixer
 
 ## What This Is
 

@@ -13,7 +13,7 @@ class App extends ConsumerWidget {
     final router = ref.watch(appRouterProvider);
     return WithForegroundTask(
       child: MaterialApp.router(
-        title: 'RTSP Audio Mixer',
+        title: 'RTSP Mixer',
         theme: AppTheme.dark,
         routerConfig: router,
         debugShowCheckedModeBanner: false,

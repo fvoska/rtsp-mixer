@@ -20,7 +20,7 @@ class MonitoringAudioHandler extends BaseAudioHandler {
       id: 'baby_monitor',
       title: 'Baby Monitor Active',
       artist: 'Monitoring: ${cameraNames.join(", ")}',
-      album: 'RTSP Audio Mixer',
+      album: 'RTSP Mixer',
     ));
   }
 

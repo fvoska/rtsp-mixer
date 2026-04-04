@@ -1,5 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:rtsp_audio_mixer/features/monitoring/helpers/pan_filter.dart';
+import 'package:rtsp_mixer/features/monitoring/helpers/pan_filter.dart';
 
 void main() {
   group('buildPanFilter', () {

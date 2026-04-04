@@ -1,4 +1,4 @@
-# Roadmap: RTSP Audio Mixer
+# Roadmap: RTSP Mixer
 
 ## Overview
 

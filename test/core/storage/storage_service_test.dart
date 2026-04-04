@@ -1,5 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:rtsp_audio_mixer/core/storage/storage_service.dart';
+import 'package:rtsp_mixer/core/storage/storage_service.dart';
 
 void main() {
   late StorageService storage;
