@@ -59,11 +59,13 @@ class ForegroundServiceManager {
   static Future<void> updateNotification({
     required String text,
     String title = 'Baby Monitor Active',
+    List<NotificationButton>? notificationButtons,
   }) async {
     appLog('FGS', 'Notification update: $text');
     await FlutterForegroundTask.updateService(
       notificationTitle: title,
       notificationText: text,
+      notificationButtons: notificationButtons,
     );
   }
 

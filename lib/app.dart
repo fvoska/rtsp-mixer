@@ -38,12 +38,18 @@ class _AppState extends ConsumerState<App> {
           ForegroundServiceManager.updateNotification(
             title: 'Baby Monitor Active',
             text: _currentNotificationText(),
+            notificationButtons: [
+              const NotificationButton(id: 'pause', text: 'Pause'),
+            ],
           );
         } else {
           notifier.muteAll();
           ForegroundServiceManager.updateNotification(
             title: 'Baby Monitor — Paused',
             text: 'All cameras muted',
+            notificationButtons: [
+              const NotificationButton(id: 'pause', text: 'Resume'),
+            ],
           );
         }
       } catch (e) {
