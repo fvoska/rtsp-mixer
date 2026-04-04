@@ -26,7 +26,8 @@ class AuthNotifier extends AsyncNotifier<AuthState> {
       final ok = await client.verifyConnection(creds.host);
       if (ok) {
         appLog('AUTH', 'Auto-connect succeeded');
-        return AuthState.authenticated(host: creds.host);
+        final wasMonitoring = await storage.read('was_monitoring') == 'true';
+        return AuthState.authenticated(host: creds.host, resumeMonitoring: wasMonitoring);
       }
       appLog('AUTH', 'Auto-connect failed (bad key?)');
       return const AuthState.unauthenticated(

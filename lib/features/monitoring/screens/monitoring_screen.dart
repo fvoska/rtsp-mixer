@@ -7,6 +7,8 @@ import 'package:go_router/go_router.dart';
 import '../../../core/logging/app_logger.dart';
 import '../../../core/services/foreground_service.dart';
 import '../../../core/theme/spacing.dart';
+import '../../auth/providers/auth_provider.dart';
+import '../../cameras/providers/camera_provider.dart';
 import '../providers/audio_player_provider.dart';
 import '../services/audio_handler.dart';
 import '../widgets/camera_audio_card.dart';
@@ -54,12 +56,25 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen>
         await FlutterForegroundTask.requestIgnoreBatteryOptimization();
       }
 
+      // Wait for cameras to be loaded (may be loading async on auto-resume)
+      var cameraProv = ref.read(cameraNotifierProvider);
+      if (cameraProv.isLoading || (!cameraProv.hasValue && !cameraProv.hasError)) {
+        appLog('AUDIO', 'Waiting for cameras to load...');
+        await Future.doWhile(() async {
+          await Future.delayed(const Duration(milliseconds: 100));
+          cameraProv = ref.read(cameraNotifierProvider);
+          return cameraProv.isLoading;
+        });
+      }
+
       await ref.read(audioPlayerProvider.notifier).startMonitoring();
       // Start foreground service after monitoring is active
       final monState = ref.read(audioPlayerProvider).value;
       if (monState != null && monState.cameras.isNotEmpty) {
         final names = monState.cameras.map((c) => c.cameraName).toList();
         await ForegroundServiceManager.start(names);
+        // Remember monitoring state for auto-resume on app restart
+        await ref.read(storageProvider).write('was_monitoring', 'true');
 
         // Initialize audio_service for MediaSession lock screen controls (D-04)
         try {
@@ -121,6 +136,7 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen>
   Future<void> _stopAndGoBack() async {
     if (_disposed) return;
     _disposed = true;
+    await ref.read(storageProvider).delete('was_monitoring');
     await ref.read(audioPlayerProvider.notifier).stopMonitoring();
     // Stop audio_service MediaSession
     try {

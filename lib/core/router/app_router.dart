@@ -4,11 +4,13 @@ import 'package:go_router/go_router.dart';
 
 import '../../features/auth/providers/auth_provider.dart';
 import '../../features/auth/screens/login_screen.dart';
+import '../../features/cameras/providers/camera_provider.dart';
 import '../../features/cameras/screens/camera_list_screen.dart';
 import '../../features/monitoring/screens/monitoring_screen.dart';
 
 final appRouterProvider = Provider<GoRouter>((ref) {
   final authListenable = _AuthRefreshNotifier(ref);
+  bool resumeHandled = false;
 
   return GoRouter(
     initialLocation: '/cameras',
@@ -21,6 +23,20 @@ final appRouterProvider = Provider<GoRouter>((ref) {
       if (auth.isLoading && !auth.hasValue) return null;
       if (!authenticated && !onLogin) return '/login';
       if (authenticated && onLogin) return '/cameras';
+
+      // Auto-resume: load cameras and go straight to monitoring
+      if (authenticated && !resumeHandled) {
+        resumeHandled = true;
+        final host = auth.value?.host;
+        if (host != null) {
+          // Fire-and-forget camera loading — monitoring screen waits for it
+          ref.read(cameraNotifierProvider.notifier).loadCameras(host);
+          if (auth.value?.resumeMonitoring == true) {
+            return '/monitoring';
+          }
+        }
+      }
+
       return null;
     },
     routes: [

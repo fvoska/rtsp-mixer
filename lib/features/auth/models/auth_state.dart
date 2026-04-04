@@ -7,12 +7,14 @@ class AuthState {
   final String? host;
   final String? errorMessage;
   final AppErrorType? errorType;
+  final bool resumeMonitoring;
 
   const AuthState.unauthenticated({this.errorMessage, this.errorType})
       : status = AuthStatus.unauthenticated,
-        host = null;
+        host = null,
+        resumeMonitoring = false;
 
-  const AuthState.authenticated({required this.host})
+  const AuthState.authenticated({required this.host, this.resumeMonitoring = false})
       : status = AuthStatus.authenticated,
         errorMessage = null,
         errorType = null;
