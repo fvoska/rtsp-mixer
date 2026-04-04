@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:flutter_foreground_task/flutter_foreground_task.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -216,13 +215,8 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen>
     notifier.setVideoEnabledForCamera(cameraId, _isVideoOn(cameraId));
   }
 
-  void _exportLogs() {
-    appLog('UI', 'Exporting logs to clipboard');
-    final logs = AppLogger.instance.exportFromDisk;
-    Clipboard.setData(ClipboardData(text: logs));
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Logs copied to clipboard')),
-    );
+  void _openLogs() {
+    context.push('/logs');
   }
 
   @override
@@ -305,9 +299,9 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen>
                   SizedBox(
                     width: double.infinity,
                     child: OutlinedButton.icon(
-                      icon: const Icon(Icons.share, size: 18),
-                      label: const Text('Export logs'),
-                      onPressed: _exportLogs,
+                      icon: const Icon(Icons.terminal, size: 18),
+                      label: const Text('View logs'),
+                      onPressed: _openLogs,
                     ),
                   ),
                 ],

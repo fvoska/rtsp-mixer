@@ -6,6 +6,7 @@ import '../../features/auth/providers/auth_provider.dart';
 import '../../features/auth/screens/login_screen.dart';
 import '../../features/cameras/providers/camera_provider.dart';
 import '../../features/cameras/screens/camera_list_screen.dart';
+import '../../features/monitoring/screens/log_screen.dart';
 import '../../features/monitoring/screens/monitoring_screen.dart';
 
 final appRouterProvider = Provider<GoRouter>((ref) {
@@ -43,6 +44,7 @@ final appRouterProvider = Provider<GoRouter>((ref) {
       GoRoute(path: '/login', builder: (_, __) => const LoginScreen()),
       GoRoute(path: '/cameras', builder: (_, __) => const CameraListScreen()),
       GoRoute(path: '/monitoring', builder: (_, __) => const MonitoringScreen()),
+      GoRoute(path: '/logs', builder: (_, __) => const LogScreen()),
     ],
   );
 });
