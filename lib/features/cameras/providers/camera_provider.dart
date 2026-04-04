@@ -41,8 +41,10 @@ class CameraNotifier extends AsyncNotifier<CameraState> {
     final newIds = Set<String>.from(current.selectedIds);
     if (newIds.contains(cameraId)) {
       newIds.remove(cameraId);
+      appLog('CAM', 'Deselected camera $cameraId (${newIds.length} selected)');
     } else if (newIds.length < 2) {
       newIds.add(cameraId);
+      appLog('CAM', 'Selected camera $cameraId (${newIds.length} selected)');
     } else {
       return;
     }

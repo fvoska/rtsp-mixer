@@ -61,6 +61,7 @@ class ForegroundServiceManager {
     required String text,
     String title = 'Baby Monitor Active',
   }) async {
+    appLog('FGS', 'Notification update: $text');
     await FlutterForegroundTask.updateService(
       notificationTitle: title,
       notificationText: text,

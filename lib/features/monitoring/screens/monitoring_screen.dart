@@ -65,6 +65,7 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen>
   @override
   void dispose() {
     _disposed = true;
+    appLog('UI', 'MonitoringScreen disposing');
     FlutterForegroundTask.removeTaskDataCallback(_receiveTaskData);
     WidgetsBinding.instance.removeObserver(this);
     // Stop service and players fire-and-forget — state updates will be ignored
@@ -168,9 +169,9 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen>
     final notifier = ref.read(audioPlayerProvider.notifier);
     setState(() {
       _globalVideo = !_globalVideo;
-      // Clear per-camera overrides so everything follows the global toggle.
       _perCameraVideo.clear();
     });
+    appLog('UI', 'Global video ${_globalVideo ? "on" : "off"}');
     notifier.setVideoEnabled(_globalVideo);
   }
 
@@ -180,10 +181,12 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen>
       final current = _isVideoOn(cameraId);
       _perCameraVideo[cameraId] = !current;
     });
+    appLog('UI', 'Camera $cameraId video ${_isVideoOn(cameraId) ? "on" : "off"}');
     notifier.setVideoEnabledForCamera(cameraId, _isVideoOn(cameraId));
   }
 
   void _exportLogs() {
+    appLog('UI', 'Exporting logs to clipboard');
     final logs = AppLogger.instance.exportFromDisk;
     Clipboard.setData(ClipboardData(text: logs));
     ScaffoldMessenger.of(context).showSnackBar(

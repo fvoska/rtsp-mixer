@@ -394,6 +394,7 @@ class AudioPlayerNotifier extends AsyncNotifier<MonitoringState> {
     if (player == null) return;
 
     player.setVolume(camState.isMuted ? 0.0 : volume);
+    appLog('AUDIO', '${camState.cameraName} volume=${volume.toStringAsFixed(0)}');
 
     state = AsyncData(
       current.copyWithCamera(
@@ -414,6 +415,7 @@ class AudioPlayerNotifier extends AsyncNotifier<MonitoringState> {
 
     if (camState.isMuted) {
       player.setVolume(camState.preMuteVolume);
+      appLog('AUDIO', '${camState.cameraName} unmuted (vol=${camState.preMuteVolume.toStringAsFixed(0)})');
       state = AsyncData(
         current.copyWithCamera(
           cameraIndex,
@@ -422,6 +424,7 @@ class AudioPlayerNotifier extends AsyncNotifier<MonitoringState> {
       );
     } else {
       player.setVolume(0.0);
+      appLog('AUDIO', '${camState.cameraName} muted');
       state = AsyncData(
         current.copyWithCamera(
           cameraIndex,
