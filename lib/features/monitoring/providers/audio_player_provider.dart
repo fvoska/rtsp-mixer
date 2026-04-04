@@ -438,12 +438,14 @@ class AudioPlayerNotifier extends AsyncNotifier<MonitoringState> {
   Future<void> setVideoEnabled(bool enabled) async {
     final value = enabled ? 'auto' : 'no';
     appLog('AUDIO', 'Setting vid=$value on ${_players.length} players');
-    // Mark all live cameras as connecting — buffering listener will restore to playing.
     _setAllCamerasConnecting();
     for (final player in _players.values) {
       final nativePlayer = player.platform as NativePlayer;
       await nativePlayer.setProperty('vid', value);
     }
+    // Restore playing status directly — toggling vid track may not trigger
+    // a buffering event since the audio stream is already flowing.
+    _restoreAllCamerasPlaying();
   }
 
   void _setAllCamerasConnecting() {
@@ -454,6 +456,19 @@ class AudioPlayerNotifier extends AsyncNotifier<MonitoringState> {
       if (updated.cameras[i].isLive) {
         updated = updated.copyWithCamera(i,
           updated.cameras[i].copyWith(connectionStatus: CameraConnectionStatus.connecting));
+      }
+    }
+    state = AsyncData(updated);
+  }
+
+  void _restoreAllCamerasPlaying() {
+    final current = state.value;
+    if (current == null) return;
+    var updated = current;
+    for (int i = 0; i < updated.cameras.length; i++) {
+      if (updated.cameras[i].connectionStatus == CameraConnectionStatus.connecting) {
+        updated = updated.copyWithCamera(i,
+          updated.cameras[i].copyWith(connectionStatus: CameraConnectionStatus.playing));
       }
     }
     state = AsyncData(updated);
@@ -512,15 +527,6 @@ class AudioPlayerNotifier extends AsyncNotifier<MonitoringState> {
     if (player == null) return;
     final value = enabled ? 'auto' : 'no';
     appLog('AUDIO', 'Setting vid=$value for camera $cameraId');
-    // Mark as connecting — buffering listener will restore to playing.
-    final current = state.value;
-    if (current != null) {
-      final idx = _cameraIndex(cameraId);
-      if (idx >= 0 && current.cameras[idx].isLive) {
-        state = AsyncData(current.copyWithCamera(idx,
-          current.cameras[idx].copyWith(connectionStatus: CameraConnectionStatus.connecting)));
-      }
-    }
     final nativePlayer = player.platform as NativePlayer;
     await nativePlayer.setProperty('vid', value);
   }
