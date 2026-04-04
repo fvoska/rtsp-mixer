@@ -50,11 +50,23 @@ class CameraNotifier extends AsyncNotifier<CameraState> {
       final cameras = await client.getCameras(host);
       appLog('CAM', 'Fetched ${cameras.length} cameras from API');
 
-      // Fetch RTSPS URLs sequentially to avoid 429 rate limiting
+      // Fetch RTSPS URLs sequentially to avoid 429 rate limiting.
+      // Reuse cached URLs when available to reduce API calls.
+      final cachedUrlMap = <String, Map<String, String>>{};
+      if (cached != null) {
+        for (final c in cached) {
+          if (c.rtspsStreamUrls.isNotEmpty) cachedUrlMap[c.id] = c.rtspsStreamUrls;
+        }
+      }
       final enrichedCameras = <ProtectCamera>[];
       for (final c in cameras) {
-        final urls = await client.getRtspsUrls(host, c.id);
-        enrichedCameras.add(urls.isNotEmpty ? c.copyWith(rtspsStreamUrls: urls) : c);
+        final cachedUrls = cachedUrlMap[c.id];
+        if (cachedUrls != null && cachedUrls.isNotEmpty) {
+          enrichedCameras.add(c.copyWith(rtspsStreamUrls: cachedUrls));
+        } else {
+          final urls = await client.getRtspsUrls(host, c.id);
+          enrichedCameras.add(urls.isNotEmpty ? c.copyWith(rtspsStreamUrls: urls) : c);
+        }
       }
       appLog('CAM', 'RTSPS URLs: ${enrichedCameras.where((c) => c.rtspsStreamUrls.isNotEmpty).length}/${cameras.length}');
 
