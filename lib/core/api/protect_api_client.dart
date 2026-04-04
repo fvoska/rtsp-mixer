@@ -26,6 +26,28 @@ class ProtectApiClient {
       client.badCertificateCallback = (_, __, ___) => true;
       return client;
     };
+
+    // Retry on 429 with exponential backoff
+    _dio.interceptors.add(InterceptorsWrapper(
+      onError: (error, handler) async {
+        if (error.response?.statusCode == 429) {
+          final retries = (error.requestOptions.extra['_retryCount'] as int?) ?? 0;
+          if (retries < 3) {
+            final delay = Duration(seconds: 1 << retries); // 1s, 2s, 4s
+            appLog('API', '429 rate limited, retry ${retries + 1}/3 after ${delay.inSeconds}s');
+            await Future.delayed(delay);
+            error.requestOptions.extra['_retryCount'] = retries + 1;
+            try {
+              final response = await _dio.fetch(error.requestOptions);
+              return handler.resolve(response);
+            } on DioException catch (e) {
+              return handler.reject(e);
+            }
+          }
+        }
+        return handler.next(error);
+      },
+    ));
   }
 
   void setApiKey(String key) => _apiKey = key;
