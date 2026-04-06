@@ -1,9 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_foreground_task/flutter_foreground_task.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:go_router/go_router.dart';
 
 import '../../../core/logging/app_logger.dart';
+import '../../../core/providers/settings_provider.dart';
 import '../../../core/services/foreground_service.dart';
 import '../../../core/theme/spacing.dart';
 import '../../auth/providers/auth_provider.dart';
@@ -23,9 +23,6 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen>
     with WidgetsBindingObserver {
   /// Global video toggle (app bar button).
   bool _globalVideo = false;
-
-  /// Show debug/stream info in cards.
-  bool _showDebugInfo = false;
 
   /// Border highlight sensitivity. 0.0 = most sensitive, 1.0 = least.
   double _activityThreshold = 0.05;
@@ -147,10 +144,6 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen>
     notifier.setVideoEnabledForCamera(cameraId, _isVideoOn(cameraId));
   }
 
-  void _openLogs() {
-    context.push('/logs');
-  }
-
   @override
   Widget build(BuildContext context) {
     final monitoringState = ref.watch(audioPlayerProvider);
@@ -159,11 +152,6 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen>
       appBar: AppBar(
         title: const Text('Monitoring'),
         actions: [
-          IconButton(
-            icon: Icon(_showDebugInfo ? Icons.bug_report : Icons.bug_report_outlined),
-            tooltip: _showDebugInfo ? 'Hide stream info' : 'Show stream info',
-            onPressed: () => setState(() => _showDebugInfo = !_showDebugInfo),
-          ),
           IconButton(
             icon: Icon(_globalVideo ? Icons.videocam : Icons.videocam_off),
             tooltip: _globalVideo
@@ -177,6 +165,7 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen>
         loading: () => const Center(child: CircularProgressIndicator()),
         error: (e, _) => Center(child: Text('Error: $e')),
         data: (state) {
+          final debugMode = ref.watch(settingsProvider).debugMode;
           if (state.cameras.isEmpty) {
             return const Center(child: CircularProgressIndicator());
           }
@@ -189,7 +178,7 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen>
                     cameraState: state.cameras[i],
                     cameraIndex: i,
                     showVideoPreview: _isVideoOn(state.cameras[i].cameraId),
-                    showDebugInfo: _showDebugInfo,
+                    showDebugInfo: debugMode,
                     activityThreshold: _activityThreshold,
                     onToggleVideo: () =>
                         _toggleCameraVideo(state.cameras[i].cameraId),
@@ -198,7 +187,7 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen>
                     const SizedBox(height: Spacing.lg),
                 ],
                 // Sensitivity slider (debug mode only)
-                if (_showDebugInfo) ...[
+                if (debugMode) ...[
                   const SizedBox(height: Spacing.lg),
                   Row(
                     children: [
@@ -226,15 +215,6 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen>
                         ),
                       ),
                     ],
-                  ),
-                  const SizedBox(height: Spacing.sm),
-                  SizedBox(
-                    width: double.infinity,
-                    child: OutlinedButton.icon(
-                      icon: const Icon(Icons.terminal, size: 18),
-                      label: const Text('View logs'),
-                      onPressed: _openLogs,
-                    ),
                   ),
                 ],
               ],

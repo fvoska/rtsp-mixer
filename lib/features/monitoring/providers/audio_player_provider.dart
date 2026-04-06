@@ -6,9 +6,11 @@ import 'package:media_kit/media_kit.dart';
 import 'package:media_kit_video/media_kit_video.dart';
 
 import '../../../core/logging/app_logger.dart';
+import '../../../core/providers/settings_provider.dart';
 import '../../../core/services/foreground_service.dart';
 import '../../auth/providers/auth_provider.dart';
 import '../../cameras/providers/camera_provider.dart';
+import '../helpers/rtsp_url.dart';
 import '../models/player_state.dart';
 
 final audioPlayerProvider =
@@ -40,7 +42,24 @@ class AudioPlayerNotifier extends AsyncNotifier<MonitoringState> {
       _lastAudioPts.clear();
       _baselineLevel.clear();
     });
+
+    // Auto-restart streams when RTSP or audio buffer settings change.
+    ref.listen(settingsProvider, (prev, next) {
+      if (prev == null) return;
+      if (prev.useRtsp != next.useRtsp ||
+          prev.audioBufferSeconds != next.audioBufferSeconds) {
+        _restartIfMonitoring();
+      }
+    });
+
     return const MonitoringState();
+  }
+
+  Future<void> _restartIfMonitoring() async {
+    if (_players.isEmpty) return;
+    appLog('AUDIO', 'Stream settings changed — restarting streams');
+    await stopMonitoring();
+    await startMonitoring();
   }
 
   /// Expose players for video preview widgets.
@@ -161,7 +180,8 @@ class AudioPlayerNotifier extends AsyncNotifier<MonitoringState> {
     }
 
     state = const AsyncLoading();
-    appLog('AUDIO', 'Starting monitoring for ${selectedCameras.length} cameras (video=$videoPreview)');
+    final settings = ref.read(settingsProvider);
+    appLog('AUDIO', 'Starting monitoring for ${selectedCameras.length} cameras (video=$videoPreview, rtsp=${settings.useRtsp}, buffer=${settings.audioBufferSeconds}s)');
 
     final cameraStates = <CameraAudioState>[];
 
@@ -170,13 +190,18 @@ class AudioPlayerNotifier extends AsyncNotifier<MonitoringState> {
       appLog('AUDIO', 'Connecting to $cameraName (${camera.id})');
 
       final quality = camera.defaultQuality;
-      final url = camera.defaultStreamUrl;
+      final rtspsUrl = camera.defaultStreamUrl;
+      final url = rtspsUrl != null
+          ? resolveStreamUrl(rtspsUrl, useRtsp: settings.useRtsp)
+          : null;
 
       var camState = CameraAudioState(
         cameraId: camera.id,
         cameraName: cameraName,
         connectionStatus: CameraConnectionStatus.connecting,
-        availableQualities: camera.rtspsStreamUrls,
+        availableQualities: camera.rtspsStreamUrls.map(
+          (k, v) => MapEntry(k, resolveStreamUrl(v, useRtsp: settings.useRtsp)),
+        ),
         activeQuality: quality,
         activeStreamUrl: url,
         mac: camera.mac,
@@ -194,7 +219,7 @@ class AudioPlayerNotifier extends AsyncNotifier<MonitoringState> {
 
       try {
         if (url == null || url.isEmpty) {
-          throw StateError('No RTSPS URL for $cameraName — enable RTSP in Protect camera settings');
+          throw StateError('No stream URL for $cameraName — enable RTSP in Protect camera settings');
         }
 
         final player = _createPlayer();
@@ -209,7 +234,7 @@ class AudioPlayerNotifier extends AsyncNotifier<MonitoringState> {
         await nativePlayer.setProperty('demuxer-readahead-secs', '2');
         await nativePlayer.setProperty('cache-pause', 'no');
         // Keep audio output buffer small but nonzero for smooth playback.
-        await nativePlayer.setProperty('audio-buffer', '0.2');
+        await nativePlayer.setProperty('audio-buffer', settings.audioBufferSeconds.toString());
 
         // Create VideoController BEFORE open so the render context exists.
         // This is required for vid=auto to work later.

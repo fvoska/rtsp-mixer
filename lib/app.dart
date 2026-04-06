@@ -6,6 +6,7 @@ import 'core/logging/app_logger.dart';
 import 'core/router/app_router.dart';
 import 'core/services/foreground_service.dart';
 import 'core/theme/app_theme.dart';
+import 'core/widgets/debug_overlay.dart';
 import 'features/monitoring/providers/audio_player_provider.dart';
 
 class App extends ConsumerStatefulWidget {
@@ -69,11 +70,13 @@ class _AppState extends ConsumerState<App> {
   Widget build(BuildContext context) {
     final router = ref.watch(appRouterProvider);
     return WithForegroundTask(
-      child: MaterialApp.router(
-        title: 'RTSP Mixer',
-        theme: AppTheme.dark,
-        routerConfig: router,
-        debugShowCheckedModeBanner: false,
+      child: DebugOverlay(
+        child: MaterialApp.router(
+          title: 'RTSP Mixer',
+          theme: AppTheme.dark,
+          routerConfig: router,
+          debugShowCheckedModeBanner: false,
+        ),
       ),
     );
   }
