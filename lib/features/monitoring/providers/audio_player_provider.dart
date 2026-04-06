@@ -199,9 +199,17 @@ class AudioPlayerNotifier extends AsyncNotifier<MonitoringState> {
 
         final player = _createPlayer();
         final nativePlayer = player.platform as NativePlayer;
-        await nativePlayer.setProperty('profile', 'low-latency');
-        await nativePlayer.setProperty('cache', 'no');
+        // Use TCP transport for reliable delivery over LAN.
         await nativePlayer.setProperty('demuxer-lavf-o', 'rtsp_transport=tcp');
+        // Small demuxer cache absorbs network jitter without adding much latency.
+        // The old profile=low-latency + cache=no combination set audio-buffer=0
+        // which caused audible crackling from audio output underruns.
+        await nativePlayer.setProperty('cache', 'yes');
+        await nativePlayer.setProperty('demuxer-max-bytes', '512KiB');
+        await nativePlayer.setProperty('demuxer-readahead-secs', '2');
+        await nativePlayer.setProperty('cache-pause', 'no');
+        // Keep audio output buffer small but nonzero for smooth playback.
+        await nativePlayer.setProperty('audio-buffer', '0.2');
 
         // Create VideoController BEFORE open so the render context exists.
         // This is required for vid=auto to work later.
