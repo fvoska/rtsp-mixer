@@ -553,6 +553,21 @@ class AudioPlayerNotifier extends AsyncNotifier<MonitoringState> {
     _restoreAllCamerasPlaying();
   }
 
+  /// Quietly disable video on all players without touching connection state.
+  /// Used during lifecycle transitions (app backgrounded) where audio must
+  /// keep flowing undisturbed.
+  Future<void> suspendVideo() async {
+    appLog('AUDIO', 'Suspending video on ${_players.length} players');
+    for (final entry in _players.entries) {
+      try {
+        final nativePlayer = entry.value.platform as NativePlayer;
+        await nativePlayer.setProperty('vid', 'no');
+      } catch (e) {
+        appLog('AUDIO', 'Failed to suspend video for ${entry.key}: $e');
+      }
+    }
+  }
+
   void _setAllCamerasConnecting() {
     final current = state.value;
     if (current == null) return;
@@ -627,13 +642,62 @@ class AudioPlayerNotifier extends AsyncNotifier<MonitoringState> {
   }
 
   /// Enable or disable video decoding on a single player by camera ID.
+  /// If re-enabling video fails (e.g. stream broke during background),
+  /// the player is reopened to restore both audio and video.
   Future<void> setVideoEnabledForCamera(String cameraId, bool enabled) async {
     final player = _players[cameraId];
     if (player == null) return;
     final value = enabled ? 'auto' : 'no';
     appLog('AUDIO', 'Setting vid=$value for camera $cameraId');
-    final nativePlayer = player.platform as NativePlayer;
-    await nativePlayer.setProperty('vid', value);
+    try {
+      final nativePlayer = player.platform as NativePlayer;
+      await nativePlayer.setProperty('vid', value);
+    } catch (e) {
+      appLog('AUDIO', 'vid=$value failed for $cameraId: $e — reopening stream');
+      await _reopenStream(cameraId, enableVideo: enabled);
+    }
+  }
+
+  /// Reopen the RTSP stream for a camera, preserving volume/mute state.
+  Future<void> _reopenStream(String cameraId, {bool enableVideo = false}) async {
+    final current = state.value;
+    if (current == null) return;
+    final idx = _cameraIndex(cameraId);
+    if (idx < 0) return;
+    final cam = current.cameras[idx];
+    final player = _players[cameraId];
+    if (player == null || cam.activeStreamUrl == null) return;
+
+    try {
+      state = AsyncData(current.copyWithCamera(idx,
+        cam.copyWith(connectionStatus: CameraConnectionStatus.connecting)));
+
+      await player.open(Media(cam.activeStreamUrl!));
+
+      if (!enableVideo) {
+        final np = player.platform as NativePlayer;
+        await np.setProperty('vid', 'no');
+      }
+
+      final updated = state.value;
+      if (updated == null) return;
+      final newIdx = _cameraIndex(cameraId);
+      if (newIdx < 0) return;
+      state = AsyncData(updated.copyWithCamera(newIdx,
+        updated.cameras[newIdx].copyWith(
+          connectionStatus: CameraConnectionStatus.playing)));
+      appLog('AUDIO', 'Stream reopened for $cameraId');
+    } catch (e) {
+      appLog('AUDIO', 'Failed to reopen stream for $cameraId: $e');
+      final updated = state.value;
+      if (updated == null) return;
+      final newIdx = _cameraIndex(cameraId);
+      if (newIdx < 0) return;
+      state = AsyncData(updated.copyWithCamera(newIdx,
+        updated.cameras[newIdx].copyWith(
+          connectionStatus: CameraConnectionStatus.error,
+          errorMessage: e.toString())));
+    }
   }
 
   Future<void> stopMonitoring() async {

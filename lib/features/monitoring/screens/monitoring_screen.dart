@@ -99,9 +99,11 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen>
           state == AppLifecycleState.hidden ||
           state == AppLifecycleState.paused) {
         if (_anyVideoOn) {
-          appLog('LIFECYCLE', 'App backgrounded — disabling video preview (D-06)');
+          appLog('LIFECYCLE', 'App backgrounded — suspending video preview (D-06)');
           _videoSuspendedByLifecycle = true;
-          notifier.setVideoEnabled(false);
+          // Use suspendVideo() to quietly disable video without touching
+          // connection state — audio must keep flowing undisturbed.
+          notifier.suspendVideo();
         }
       } else if (state == AppLifecycleState.resumed) {
         if (_videoSuspendedByLifecycle) {
@@ -116,11 +118,16 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen>
   }
 
   /// Re-apply the per-camera video state after lifecycle resume.
-  void _restoreVideoState() {
+  Future<void> _restoreVideoState() async {
     final notifier = ref.read(audioPlayerProvider.notifier);
     final cameras = ref.read(audioPlayerProvider).value?.cameras ?? [];
     for (final cam in cameras) {
-      notifier.setVideoEnabledForCamera(cam.cameraId, _isVideoOn(cam.cameraId));
+      try {
+        await notifier.setVideoEnabledForCamera(
+            cam.cameraId, _isVideoOn(cam.cameraId));
+      } catch (e) {
+        appLog('LIFECYCLE', 'Failed to restore video for ${cam.cameraId}: $e');
+      }
     }
   }
 
