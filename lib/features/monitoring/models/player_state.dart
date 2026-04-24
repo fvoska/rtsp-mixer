@@ -1,5 +1,5 @@
 /// Connection status for a single camera's RTSP stream.
-enum CameraConnectionStatus { idle, connecting, playing, error }
+enum CameraConnectionStatus { idle, connecting, playing, reconnecting, error }
 
 /// Stream technical info collected from player events.
 class StreamInfo {
@@ -140,6 +140,7 @@ class CameraAudioState {
   double get effectiveVolume => isMuted ? 0.0 : volume;
   bool get isLive => connectionStatus == CameraConnectionStatus.playing;
   bool get isError => connectionStatus == CameraConnectionStatus.error;
+  bool get isReconnecting => connectionStatus == CameraConnectionStatus.reconnecting;
   bool get isSuspiciouslySilent => isLive && silenceDuration > 10.0;
 }
 
