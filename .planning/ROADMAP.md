@@ -73,7 +73,13 @@ Plans:
   2. User can see per-camera connection status at a glance (connecting, live, reconnecting, error)
   3. App detects and recovers from zombie streams where the TCP connection is open but no audio data arrives
   4. User can view an overnight health summary showing uptime, reconnection count, and stream health events
-**Plans**: TBD
+**Plans**: 5 plans
+Plans:
+- [ ] 04-01-reconnect-core-PLAN.md -- ReconnectSupervisor (D-01 backoff + D-02 retry-forever + D-03 player triggers), CameraConnectionStatus.reconnecting, HealthEvent model + HealthEventsNotifier, Wave 0 test stubs
+- [ ] 04-02-zombie-detection-PLAN.md -- ZombieWatchdog (D-05/D-06 four-signal quorum >= 2, D-07 silent reconnect, D-08 hardcoded 60s threshold)
+- [ ] 04-03-connection-status-ui-PLAN.md -- CameraAudioCard reconnecting state (D-10 amber + spinner, D-11 status-only, no linear progress)
+- [ ] 04-04-push-alert-PLAN.md -- LocalNotificationsManager 5-min alert (D-04 one-shot), ConnectivityListener (D-03 WiFi trigger + debounce)
+- [ ] 04-05-health-summary-PLAN.md -- HealthSummaryScreen + MonitoringScreen AppBar icon (D-13/D-15/D-16/D-17)
 **UI hint**: yes
 
 ## Progress
@@ -86,4 +92,4 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4
 | 1. Protect API + Project Foundation | 3/3 | Complete | 2026-04-03 |
 | 2. RTSP Audio Streaming | 2/2 | Complete | 2026-04-03 |
 | 3. Android Background Operation | 0/2 | Not started | - |
-| 4. Reliability + Overnight Monitoring | 0/TBD | Not started | - |
+| 4. Reliability + Overnight Monitoring | 0/5 | Not started | - |

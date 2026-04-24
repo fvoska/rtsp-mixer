@@ -953,20 +953,20 @@ Claims tagged `[ASSUMED]` in this research that benefit from user/field confirma
 | A6 | 1000-event cap is acceptable for a worst-case overnight reconnect storm (will cap at "last 1000" — which is fine to review recent history) | Section 6 | Low — user-visible consequence is that the very first events of the session scroll off the list if there's a storm. Acceptable per D-17. |
 | A7 | `stream.error` and `stream.completed` fire reliably for EVERY mode 1, 3, 4, 7, 11, 14 in Section 1 (not always a certainty — some media_kit issues document silent failures) | Section 1 | Medium — if a specific mode silently fails, zombie watchdog (T2) is the catch-all. |
 
-## Open Questions
+## Open Questions (RESOLVED)
 
 1. **Should the health summary survive `stopMonitoring` until the NEXT `startMonitoring`?**
    - What we know: D-13 = session-scoped, but D-16 says user can open the summary from the monitoring screen, and the screen is only visible when monitoring IS running (except briefly on stop).
    - What's unclear: after user taps Stop, can they still open the summary to review the just-ended session?
-   - **Recommendation:** yes — keep last session's events until next startMonitoring (rather than clearing on stop). Clarifies the intent of D-13 ("session-scoped counters reset per session" — but events persist in-memory until explicitly re-cleared on next session). Low implementation cost.
+   - **Recommendation:** RESOLVED: yes — keep last session's events until next startMonitoring (rather than clearing on stop). Clarifies the intent of D-13 ("session-scoped counters reset per session" — but events persist in-memory until explicitly re-cleared on next session). Low implementation cost.
 
 2. **For the zombie detector, should signal (4) "no audioParams" have a 60s grace period after stream start?**
    - What we know: audioParams is sparse in steady state (may fire only once on connect).
    - What's unclear: how to interpret "no new audioParams events for 60s" — does "new" mean "relative to last event" (always true in steady state) or "since the zombie-check started?"
-   - **Recommendation:** interpret as "since reconnect or since stream start" — reset on every audioParams event, but the counter doesn't accumulate beyond that. This makes signal (4) effectively "stream has been quiet in param changes for 60s" which is always true after start. Conclusion: **signal (4) is the weakest; rely on (1) + (2) as primary, weight (4) at 1 in a weighted-quorum approach.**
+   - **Recommendation:** RESOLVED: interpret as "since reconnect or since stream start" — reset on every audioParams event, but the counter doesn't accumulate beyond that. This makes signal (4) effectively "stream has been quiet in param changes for 60s" which is always true after start. Conclusion: **signal (4) is the weakest; rely on (1) + (2) as primary, weight (4) at 1 in a weighted-quorum approach.**
 
 3. **Should we log the reconnect *cause* string (player_error / zombie / wifi_reconnect) as part of the `reconnect_attempt` event detail?**
-   - Recommendation: yes — diagnostic value for the user reviewing the summary after an outage. Cheap.
+   - Recommendation: RESOLVED: yes — diagnostic value for the user reviewing the summary after an outage. Cheap.
 
 ## Environment Availability
 

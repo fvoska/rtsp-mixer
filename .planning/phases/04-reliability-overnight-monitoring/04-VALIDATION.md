@@ -61,14 +61,21 @@ Test infrastructure is shared; individual task mapping is finalized by the plann
 
 ## Wave 0 Requirements
 
-- [ ] `pubspec.yaml` — add `connectivity_plus: ^7.1.1`, `flutter_local_notifications: ^19.0.0` (pinned below 20.x — project is on Dart 3.9.2 and 20.x requires Dart 3.10), and dev-dep `fake_async: ^1.3.0`
-- [ ] `test/features/monitoring/reconnect/` — directory + stub files for: `backoff_test.dart`, `trigger_dedupe_test.dart`, `wifi_debounce_test.dart`, `state_machine_test.dart`, `defensive_recovery_test.dart`
-- [ ] `test/features/monitoring/zombie/quorum_test.dart` — stub
-- [ ] `test/features/monitoring/health/event_stream_cap_test.dart` — stub
-- [ ] `test/features/monitoring/alerts/alert_timer_test.dart` — stub
-- [ ] `test/features/monitoring/widgets/camera_audio_card_test.dart` — stub (may already exist; if so, extend with reconnecting-state case)
-- [ ] `test/features/monitoring/screens/health_summary_screen_test.dart` — stub
-- [ ] `test/features/monitoring/models/player_state_test.dart` — stub
+**Scaffolding scope (executed by Plan 04-01 Task 1):** Plan 04-01 scaffolds only the supervisor-surface test files because those are the unblocking ones for Wave 1 (every other plan depends on the supervisor's contract existing). Downstream plans create their OWN test files in-place when they create the code under test — this keeps each plan's diff self-contained and avoids empty "orphan" stubs that go stale.
+
+- [ ] `pubspec.yaml` — add `connectivity_plus: ^7.1.1`, `flutter_local_notifications: ^19.0.0` (pinned below 20.x — project is on Dart 3.9.2 and 20.x requires Dart 3.10), and dev-dep `fake_async: ^1.3.0` (Plan 04-01)
+- [ ] `test/features/monitoring/reconnect/` — directory + stub files for: `backoff_test.dart`, `trigger_dedupe_test.dart`, `state_machine_test.dart`, `defensive_recovery_test.dart` (Plan 04-01 — 4 reconnect-core stubs)
+- [ ] `test/features/monitoring/health/event_stream_cap_test.dart` — stub (Plan 04-01 — 5th stub)
+- [ ] `test/features/monitoring/models/player_state_test.dart` — extended in-place (Plan 04-01 — 6th file touched; pre-existing, extended, not a new stub)
+
+**Owned by downstream plans (created, not stubbed, at the same time as the code under test):**
+- `test/features/monitoring/reconnect/wifi_debounce_test.dart` — created by Plan 04-02 alongside the WiFi-trigger wiring
+- `test/features/monitoring/zombie/quorum_test.dart` — created by Plan 04-02 alongside the zombie detector
+- `test/features/monitoring/alerts/alert_timer_test.dart` — created by Plan 04-04 alongside the 5-minute alert timer
+- `test/features/monitoring/widgets/camera_audio_card_test.dart` — extended in-place by Plan 04-03 (pre-existing if present; otherwise created) with the `reconnecting`-state case
+- `test/features/monitoring/screens/health_summary_screen_test.dart` — created by Plan 04-05 alongside `HealthSummaryScreen`
+
+Rationale: Plan 04-01 Task 1's 6 scaffolded files cover the supervisor surface that Wave 1 depends on. The other 5 test files are created by the plan that owns the code under test, so their behavior contract and their test file land in the same commit — no orphan stubs, no drift risk.
 
 ---
 
