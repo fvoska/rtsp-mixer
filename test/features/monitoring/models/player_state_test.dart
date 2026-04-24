@@ -70,6 +70,28 @@ void main() {
       );
       expect(error.isError, true);
     });
+
+    test('reconnecting status exists and is distinct from playing/error', () {
+      const state = CameraAudioState(
+        cameraId: 'cam1',
+        cameraName: 'Nursery',
+        connectionStatus: CameraConnectionStatus.reconnecting,
+      );
+      expect(state.connectionStatus, CameraConnectionStatus.reconnecting);
+      expect(state.isLive, false);
+      expect(state.isError, false);
+      expect(state.isReconnecting, true);
+    });
+
+    test('enum order is [idle, connecting, playing, reconnecting, error]', () {
+      expect(CameraConnectionStatus.values, [
+        CameraConnectionStatus.idle,
+        CameraConnectionStatus.connecting,
+        CameraConnectionStatus.playing,
+        CameraConnectionStatus.reconnecting,
+        CameraConnectionStatus.error,
+      ]);
+    });
   });
 
   group('MonitoringState', () {

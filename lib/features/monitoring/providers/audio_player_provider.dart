@@ -11,7 +11,10 @@ import '../../../core/services/foreground_service.dart';
 import '../../auth/providers/auth_provider.dart';
 import '../../cameras/providers/camera_provider.dart';
 import '../helpers/rtsp_url.dart';
+import '../models/health_event.dart';
 import '../models/player_state.dart';
+import '../services/reconnect_supervisor.dart';
+import 'health_events_provider.dart';
 
 final audioPlayerProvider =
     AsyncNotifierProvider<AudioPlayerNotifier, MonitoringState>(
@@ -26,9 +29,16 @@ class AudioPlayerNotifier extends AsyncNotifier<MonitoringState> {
   final Map<String, double> _baselineLevel = {};
   String _lastNotificationText = '';
 
+  late final ReconnectSupervisor _reconnectSupervisor = ReconnectSupervisor(
+    onAttempt: _performReconnectOpen,
+    onStatusChange: _applyReconnectStatus,
+    onEvent: _recordReconnectEvent,
+  );
+
   @override
   Future<MonitoringState> build() async {
     ref.onDispose(() {
+      try { _reconnectSupervisor.cancelAll(); } catch (_) {}
       _levelPollTimer?.cancel();
       for (final sub in _subscriptions) {
         sub.cancel();
@@ -95,11 +105,42 @@ class AudioPlayerNotifier extends AsyncNotifier<MonitoringState> {
     _subscriptions.add(
       player.stream.completed.listen((completed) {
         appLog('STREAM', '$cameraName completed=$completed');
+        if (completed) {
+          try {
+            ref.read(healthEventsProvider.notifier).record(HealthEvent(
+                  timestamp: DateTime.now(),
+                  type: HealthEventType.streamError,
+                  cameraId: cameraId,
+                  cameraName: cameraName,
+                  detail: 'stream completed (RTSP drop)',
+                ));
+          } catch (e) {
+            appLog('HEALTH', 'Failed to record completed event: $e');
+          }
+          _reconnectSupervisor.requestReconnect(cameraId,
+              cause: 'player_completed');
+        }
       }),
     );
     _subscriptions.add(
       player.stream.error.listen((error) {
         appLog('STREAM', '$cameraName error=$error');
+        try {
+          final msg = error.toString();
+          // UI-SPEC §Event log row copy contract: streamError detail truncated
+          // to 80 chars with ellipsis so the health summary row stays legible.
+          final detail = msg.length > 80 ? '${msg.substring(0, 80)}…' : msg;
+          ref.read(healthEventsProvider.notifier).record(HealthEvent(
+                timestamp: DateTime.now(),
+                type: HealthEventType.streamError,
+                cameraId: cameraId,
+                cameraName: cameraName,
+                detail: detail,
+              ));
+        } catch (e) {
+          appLog('HEALTH', 'Failed to record streamError: $e');
+        }
+        _reconnectSupervisor.requestReconnect(cameraId, cause: 'player_error');
       }),
     );
     _subscriptions.add(
@@ -183,6 +224,19 @@ class AudioPlayerNotifier extends AsyncNotifier<MonitoringState> {
     final settings = ref.read(settingsProvider);
     appLog('AUDIO', 'Starting monitoring for ${selectedCameras.length} cameras (video=$videoPreview, rtsp=${settings.useRtsp}, buffer=${settings.audioBufferSeconds}s)');
 
+    // D-13: session boundary — clear previous session's health events and
+    // record monitoringStarted before opening streams.
+    try {
+      ref.read(healthEventsProvider.notifier).clear();
+      ref.read(healthEventsProvider.notifier).record(HealthEvent(
+            timestamp: DateTime.now(),
+            type: HealthEventType.monitoringStarted,
+            detail: '${selectedCameras.length} cameras',
+          ));
+    } catch (e) {
+      appLog('HEALTH', 'Failed to clear/record monitoringStarted: $e');
+    }
+
     final cameraStates = <CameraAudioState>[];
 
     for (final camera in selectedCameras) {
@@ -224,17 +278,9 @@ class AudioPlayerNotifier extends AsyncNotifier<MonitoringState> {
 
         final player = _createPlayer();
         final nativePlayer = player.platform as NativePlayer;
-        // Use TCP transport for reliable delivery over LAN.
-        await nativePlayer.setProperty('demuxer-lavf-o', 'rtsp_transport=tcp');
-        // Small demuxer cache absorbs network jitter without adding much latency.
-        // The old profile=low-latency + cache=no combination set audio-buffer=0
-        // which caused audible crackling from audio output underruns.
-        await nativePlayer.setProperty('cache', 'yes');
-        await nativePlayer.setProperty('demuxer-max-bytes', '512KiB');
-        await nativePlayer.setProperty('demuxer-readahead-secs', '2');
-        await nativePlayer.setProperty('cache-pause', 'no');
-        // Keep audio output buffer small but nonzero for smooth playback.
-        await nativePlayer.setProperty('audio-buffer', settings.audioBufferSeconds.toString());
+        // Apply tuning properties. Idempotent helper — reused on every reconnect
+        // to hedge against mpv property resets across open() (RESEARCH §Pitfall 3).
+        await _applyPlaybackTuning(nativePlayer);
 
         // Create VideoController BEFORE open so the render context exists.
         // This is required for vid=auto to work later.
@@ -256,6 +302,18 @@ class AudioPlayerNotifier extends AsyncNotifier<MonitoringState> {
           connectionStatus: CameraConnectionStatus.playing,
         );
         appLog('AUDIO', '$cameraName is now playing');
+
+        // D-15: record per-camera streamStarted event for health summary.
+        try {
+          ref.read(healthEventsProvider.notifier).record(HealthEvent(
+                timestamp: DateTime.now(),
+                type: HealthEventType.streamStarted,
+                cameraId: camera.id,
+                cameraName: cameraName,
+              ));
+        } catch (e) {
+          appLog('HEALTH', 'Failed to record streamStarted: $e');
+        }
       } catch (e) {
         appLog('AUDIO', 'Error connecting to $cameraName: $e');
         camState = camState.copyWith(
@@ -438,6 +496,125 @@ class AudioPlayerNotifier extends AsyncNotifier<MonitoringState> {
     } catch (_) {
       return null;
     }
+  }
+
+  /// Apply all mpv tuning properties. Idempotent; safe to call before every
+  /// open() — hedges against Pitfall 3 (RESEARCH §Pitfall 3) where mpv
+  /// properties may reset across player.open() on some builds.
+  Future<void> _applyPlaybackTuning(NativePlayer nativePlayer) async {
+    final settings = ref.read(settingsProvider);
+    // Use TCP transport for reliable delivery over LAN.
+    await nativePlayer.setProperty('demuxer-lavf-o', 'rtsp_transport=tcp');
+    // Small demuxer cache absorbs network jitter without adding much latency.
+    // The old profile=low-latency + cache=no combination set audio-buffer=0
+    // which caused audible crackling from audio output underruns.
+    await nativePlayer.setProperty('cache', 'yes');
+    await nativePlayer.setProperty('demuxer-max-bytes', '512KiB');
+    await nativePlayer.setProperty('demuxer-readahead-secs', '2');
+    await nativePlayer.setProperty('cache-pause', 'no');
+    // Keep audio output buffer small but nonzero for smooth playback.
+    await nativePlayer.setProperty(
+        'audio-buffer', settings.audioBufferSeconds.toString());
+  }
+
+  /// Supervisor's onAttempt: actually reconnect the media_kit Player.
+  /// Reuses the same Player instance (RESEARCH §Section 2 Pattern 1).
+  /// Wraps open() in a 15s timeout — mpv network-timeout is broken for RTSP.
+  Future<void> _performReconnectOpen(String cameraId) async {
+    final player = _players[cameraId];
+    if (player == null) {
+      throw StateError('No player for $cameraId');
+    }
+    final current = state.value;
+    final idx = _cameraIndex(cameraId);
+    if (current == null || idx < 0) {
+      throw StateError('No camera state for $cameraId');
+    }
+    final cam = current.cameras[idx];
+    final url = cam.activeStreamUrl;
+    if (url == null || url.isEmpty) {
+      throw StateError('No active stream URL for $cameraId');
+    }
+
+    appLog('RECONNECT', '$cameraId: stop + reopen $url');
+    try {
+      await player.stop();
+    } catch (e) {
+      appLog('RECONNECT', '$cameraId: stop() failed (continuing): $e');
+    }
+    await Future.delayed(const Duration(milliseconds: 200));
+
+    final nativePlayer = player.platform as NativePlayer;
+    // Re-apply tuning properties — hedge against Pitfall 3 (property reset).
+    try {
+      await _applyPlaybackTuning(nativePlayer);
+    } catch (e) {
+      appLog('RECONNECT', '$cameraId: tuning re-apply failed (continuing): $e');
+    }
+
+    // Wrap open() in a 15s timeout — mpv network-timeout is broken for RTSP.
+    await player.open(Media(url)).timeout(
+      const Duration(seconds: 15),
+      onTimeout: () {
+        throw TimeoutException(
+            'player.open($url) exceeded 15s', const Duration(seconds: 15));
+      },
+    );
+
+    // Re-disable video after open unless preview is on (same rule as startMonitoring).
+    try {
+      await nativePlayer.setProperty('vid', 'no');
+    } catch (e) {
+      appLog('RECONNECT', '$cameraId: vid=no failed (non-fatal): $e');
+    }
+  }
+
+  /// Supervisor's onStatusChange: flip UI state.
+  void _applyReconnectStatus(String cameraId, ReconnectStatus status) {
+    final current = state.value;
+    if (current == null) return;
+    final idx = _cameraIndex(cameraId);
+    if (idx < 0) return;
+    final cam = current.cameras[idx];
+    final newStatus = status == ReconnectStatus.reconnecting
+        ? CameraConnectionStatus.reconnecting
+        : CameraConnectionStatus.playing;
+    state = AsyncData(current.copyWithCamera(
+      idx,
+      cam.copyWith(connectionStatus: newStatus),
+    ));
+  }
+
+  /// Supervisor's onEvent: record to health summary stream.
+  void _recordReconnectEvent(
+    ReconnectEventType type,
+    String cameraId,
+    String? detail,
+  ) {
+    try {
+      final cameraName = _findCameraName(cameraId) ?? cameraId;
+      final evtType = type == ReconnectEventType.reconnectAttempt
+          ? HealthEventType.reconnectAttempt
+          : HealthEventType.reconnectSuccess;
+      ref.read(healthEventsProvider.notifier).record(HealthEvent(
+            timestamp: DateTime.now(),
+            type: evtType,
+            cameraId: cameraId,
+            cameraName: cameraName,
+            detail: detail,
+          ));
+    } catch (e) {
+      appLog('RECONNECT', 'Failed to record event: $e');
+    }
+  }
+
+  String? _findCameraName(String cameraId) {
+    final current = state.value;
+    if (current == null) return null;
+    for (final c in current.cameras) {
+      if (c.cameraId == cameraId) return c.cameraName;
+    }
+    return null;
   }
 
   void setVolume(int cameraIndex, double volume) {
@@ -639,6 +816,10 @@ class AudioPlayerNotifier extends AsyncNotifier<MonitoringState> {
   Future<void> stopMonitoring() async {
     appLog('AUDIO', 'Stopping monitoring');
     _levelPollTimer?.cancel();
+    // Cancel supervisor BEFORE disposing players (T-04-08 ordering).
+    try { _reconnectSupervisor.cancelAll(); } catch (e) {
+      appLog('RECONNECT', 'cancelAll threw during stopMonitoring: $e');
+    }
     _lastAudioPts.clear();
     _baselineLevel.clear();
     _lastNotificationText = '';
@@ -654,6 +835,16 @@ class AudioPlayerNotifier extends AsyncNotifier<MonitoringState> {
     _players.clear();
     state = const AsyncData(MonitoringState());
     appLog('AUDIO', 'All players stopped and disposed');
+
+    // D-13: record monitoringStopped after teardown so it lands last in the list.
+    try {
+      ref.read(healthEventsProvider.notifier).record(HealthEvent(
+            timestamp: DateTime.now(),
+            type: HealthEventType.monitoringStopped,
+          ));
+    } catch (e) {
+      appLog('HEALTH', 'Failed to record monitoringStopped: $e');
+    }
   }
 
   /// Save per-camera volume/mute to secure storage.
