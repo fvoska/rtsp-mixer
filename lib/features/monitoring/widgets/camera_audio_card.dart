@@ -112,68 +112,110 @@ class _CameraAudioCardState extends ConsumerState<CameraAudioCard> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             // Row 1: Status dot + Camera name + Status text + Buttons
-            Row(
-              children: [
-                Container(
-                  width: 8,
-                  height: 8,
-                  decoration: BoxDecoration(
-                    shape: BoxShape.circle,
-                    color: cs.isLive
-                        ? AppTheme.statusOnline
-                        : cs.isError
-                            ? AppTheme.statusOffline
-                            : theme.colorScheme.onSurface
-                                .withValues(alpha: 0.5),
-                  ),
-                ),
-                const SizedBox(width: Spacing.sm),
-                Expanded(
-                  child: Text(
-                    cs.cameraName,
-                    style: theme.textTheme.titleMedium,
-                  ),
-                ),
-                if (isConnecting)
-                  Text('Connecting...', style: theme.textTheme.bodyMedium),
-                if (cs.isLive)
-                  Text(
-                    'Live',
-                    style: theme.textTheme.bodyMedium
-                        ?.copyWith(color: AppTheme.statusOnline),
-                  ),
-                if (cs.isError)
-                  Flexible(
-                    child: Text(
-                      cs.errorMessage ?? 'Stream failed',
-                      style: theme.textTheme.bodyMedium
-                          ?.copyWith(color: AppTheme.statusOffline),
-                      overflow: TextOverflow.ellipsis,
+            // When reconnecting, the header row is wrapped in a tinted container
+            // (UI-SPEC §Component Inventory #1). Tint stays on the inner row so
+            // the outer AnimatedContainer border animation is unaffected.
+            Container(
+              padding: cs.connectionStatus == CameraConnectionStatus.reconnecting
+                  ? const EdgeInsets.all(Spacing.sm)
+                  : EdgeInsets.zero,
+              decoration: cs.connectionStatus == CameraConnectionStatus.reconnecting
+                  ? BoxDecoration(
+                      color: theme.colorScheme.tertiaryContainer
+                          .withValues(alpha: 0.3),
+                      borderRadius: BorderRadius.circular(8),
+                    )
+                  : null,
+              child: Row(
+                children: [
+                  Container(
+                    width: 8,
+                    height: 8,
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      color: cs.isLive
+                          ? AppTheme.statusOnline
+                          : cs.isError
+                              ? AppTheme.statusOffline
+                              : cs.connectionStatus ==
+                                      CameraConnectionStatus.reconnecting
+                                  ? theme.colorScheme.tertiary
+                                  : theme.colorScheme.onSurface
+                                      .withValues(alpha: 0.5),
                     ),
                   ),
-                IconButton(
-                  icon: Icon(
-                    cs.isMuted ? Icons.volume_off : Icons.volume_up,
+                  const SizedBox(width: Spacing.sm),
+                  Expanded(
+                    child: Text(
+                      cs.cameraName,
+                      style: theme.textTheme.titleMedium,
+                    ),
                   ),
-                  tooltip: cs.isMuted ? 'Unmute' : 'Mute',
-                  onPressed: () => ref
-                      .read(audioPlayerProvider.notifier)
-                      .toggleMute(idx),
-                ),
-                if (widget.onToggleVideo != null)
+                  // Status text — exactly one branch renders per UI-SPEC
+                  // Interaction States Matrix (idle renders nothing).
+                  if (cs.isLive)
+                    Text(
+                      'Live',
+                      style: theme.textTheme.bodyMedium
+                          ?.copyWith(color: AppTheme.statusOnline),
+                    )
+                  else if (cs.isError)
+                    Flexible(
+                      child: Text(
+                        cs.errorMessage ?? 'Stream failed',
+                        style: theme.textTheme.bodyMedium
+                            ?.copyWith(color: AppTheme.statusOffline),
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    )
+                  else if (cs.connectionStatus ==
+                      CameraConnectionStatus.reconnecting)
+                    Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        SizedBox(
+                          width: 14,
+                          height: 14,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2.0,
+                            valueColor: AlwaysStoppedAnimation(
+                                theme.colorScheme.tertiary),
+                          ),
+                        ),
+                        const SizedBox(width: Spacing.xs),
+                        Text(
+                          'Reconnecting…',
+                          style: theme.textTheme.bodyMedium
+                              ?.copyWith(color: theme.colorScheme.tertiary),
+                        ),
+                      ],
+                    )
+                  else if (isConnecting)
+                    Text('Connecting…', style: theme.textTheme.bodyMedium),
                   IconButton(
                     icon: Icon(
-                      widget.showVideoPreview
-                          ? Icons.videocam
-                          : Icons.videocam_off,
-                      size: 20,
+                      cs.isMuted ? Icons.volume_off : Icons.volume_up,
                     ),
-                    tooltip: widget.showVideoPreview
-                        ? 'Hide video'
-                        : 'Show video',
-                    onPressed: widget.onToggleVideo,
+                    tooltip: cs.isMuted ? 'Unmute' : 'Mute',
+                    onPressed: () => ref
+                        .read(audioPlayerProvider.notifier)
+                        .toggleMute(idx),
                   ),
-              ],
+                  if (widget.onToggleVideo != null)
+                    IconButton(
+                      icon: Icon(
+                        widget.showVideoPreview
+                            ? Icons.videocam
+                            : Icons.videocam_off,
+                        size: 20,
+                      ),
+                      tooltip: widget.showVideoPreview
+                          ? 'Hide video'
+                          : 'Show video',
+                      onPressed: widget.onToggleVideo,
+                    ),
+                ],
+              ),
             ),
 
             // Audio level indicator
