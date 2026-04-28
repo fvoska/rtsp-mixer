@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:math';
 
 import 'package:fake_async/fake_async.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -47,14 +48,12 @@ void main() {
         '(WiFi-back bypass)', () {
       fakeAsync((async) {
         var attempts = 0;
-        var attemptedAt = <int>[]; // ms-since-T0 when each attempt fired
-        final t0 = DateTime.now().millisecondsSinceEpoch;
+        // Use a fixed-seed Random so backoff is deterministic across runs.
         final sup = ReconnectSupervisor(
+          random: Random(42),
           onAttempt: (_) async {
             attempts++;
-            attemptedAt
-                .add(DateTime.now().millisecondsSinceEpoch - t0);
-            // First attempt fails to seed a backoff timer; following ones succeed.
+            // First attempt fails to seed a backoff timer; following succeed.
             if (attempts == 1) {
               throw StateError('seed failure');
             }
@@ -62,18 +61,20 @@ void main() {
           onStatusChange: (_, __) {},
           onEvent: (_, __, ___) {},
         );
-        // First trigger: seeds attempt 0, fails after 1s backoff resolves to attempt.
+        // First trigger: seeds attempt 0, fires after ~1s backoff (jittered).
         sup.requestReconnect('cam1', cause: 'player_error');
-        // Wait long enough for first scheduled attempt to run and fail,
-        // putting the supervisor into "retry timer pending" state.
-        async.elapse(const Duration(seconds: 3));
-        expect(attempts, 1, reason: 'seed attempt should have fired and failed');
+        // Elapse enough for attempt 0 to fire and fail (~1.2s upper bound),
+        // but NOT enough for attempt 1's retry (~2s base) to fire yet.
+        async.elapse(const Duration(milliseconds: 1500));
+        expect(attempts, 1,
+            reason: 'seed attempt should have fired and failed exactly once');
         expect(sup.hasPendingRetry('cam1'), true,
             reason: 'a retry should be scheduled after the failure');
 
-        // Now: WiFi-back trigger arrives. Without CR-02 fix this would be
-        // suppressed and the camera would wait the full backoff. With the fix
-        // the immediate flag cancels the pending timer and attempts now.
+        // Now: WiFi-back trigger arrives while a backoff retry is pending.
+        // Without CR-02 fix this would be suppressed and the camera would
+        // wait the full backoff. With the fix the immediate flag cancels
+        // the pending timer and attempts now.
         sup.requestReconnect('cam1',
             cause: 'wifi_reconnect', immediate: true);
         async.flushMicrotasks();

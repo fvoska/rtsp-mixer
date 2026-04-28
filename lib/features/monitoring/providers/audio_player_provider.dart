@@ -656,7 +656,20 @@ class AudioPlayerNotifier extends AsyncNotifier<MonitoringState> {
       throw StateError('No active stream URL for $cameraId');
     }
 
-    appLog('RECONNECT', '$cameraId: stop + reopen $url');
+    final nativePlayer = player.platform as NativePlayer;
+    // Capture the user's current video preference BEFORE stop() so reconnect
+    // doesn't silently disable a preview the user had toggled on.
+    // Pre-Phase-4 this method unconditionally forced vid=no on every reopen,
+    // which was harmless when reconnects were rare but turns the preview into
+    // a black screen now that the supervisor + watchdog reconnect aggressively.
+    String? priorVid;
+    try {
+      priorVid = await _tryGetProperty(nativePlayer, 'vid');
+    } catch (e) {
+      appLog('RECONNECT', '$cameraId: vid read failed (continuing): $e');
+    }
+
+    appLog('RECONNECT', '$cameraId: stop + reopen $url (priorVid=$priorVid)');
     try {
       await player.stop();
     } catch (e) {
@@ -664,7 +677,6 @@ class AudioPlayerNotifier extends AsyncNotifier<MonitoringState> {
     }
     await Future.delayed(const Duration(milliseconds: 200));
 
-    final nativePlayer = player.platform as NativePlayer;
     // Re-apply tuning properties — hedge against Pitfall 3 (property reset).
     try {
       await _applyPlaybackTuning(nativePlayer);
@@ -681,11 +693,16 @@ class AudioPlayerNotifier extends AsyncNotifier<MonitoringState> {
       },
     );
 
-    // Re-disable video after open unless preview is on (same rule as startMonitoring).
+    // Restore the video track selection. If the user had vid=no (audio-only,
+    // the default), keep it off. If they had vid=auto (preview on), put it
+    // back so the reconnect doesn't trash their video. Default to 'no' if the
+    // pre-stop read failed — preserves the original audio-only contract.
+    final restoreVid = (priorVid == 'auto' || priorVid == '1') ? 'auto' : 'no';
     try {
-      await nativePlayer.setProperty('vid', 'no');
+      await nativePlayer.setProperty('vid', restoreVid);
     } catch (e) {
-      appLog('RECONNECT', '$cameraId: vid=no failed (non-fatal): $e');
+      appLog('RECONNECT',
+          '$cameraId: vid=$restoreVid restore failed (non-fatal): $e');
     }
   }
 
