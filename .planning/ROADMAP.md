@@ -76,10 +76,10 @@ Plans:
 **Plans**: 5 plans
 Plans:
 - [x] 04-01-reconnect-core-PLAN.md -- ReconnectSupervisor (D-01 backoff + D-02 retry-forever + D-03 player triggers), CameraConnectionStatus.reconnecting, HealthEvent model + HealthEventsNotifier, Wave 0 test stubs
-- [ ] 04-02-zombie-detection-PLAN.md -- ZombieWatchdog (D-05/D-06 four-signal quorum >= 2, D-07 silent reconnect, D-08 hardcoded 60s threshold)
-- [ ] 04-03-connection-status-ui-PLAN.md -- CameraAudioCard reconnecting state (D-10 amber + spinner, D-11 status-only, no linear progress)
+- [x] 04-02-zombie-detection-PLAN.md -- ZombieWatchdog (D-05/D-06 four-signal quorum >= 2, D-07 silent reconnect, D-08 hardcoded 60s threshold)
+- [x] 04-03-connection-status-ui-PLAN.md -- CameraAudioCard reconnecting state (D-10 amber + spinner, D-11 status-only, no linear progress)
 - [ ] 04-04-push-alert-PLAN.md -- LocalNotificationsManager 5-min alert (D-04 one-shot), ConnectivityListener (D-03 WiFi trigger + debounce)
-- [ ] 04-05-health-summary-PLAN.md -- HealthSummaryScreen + MonitoringScreen AppBar icon (D-13/D-15/D-16/D-17)
+- [x] 04-05-health-summary-PLAN.md -- HealthSummaryScreen + MonitoringScreen AppBar icon (D-13/D-15/D-16/D-17)
 **UI hint**: yes
 
 ## Progress
