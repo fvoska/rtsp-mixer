@@ -11,6 +11,7 @@ import '../providers/audio_player_provider.dart';
 import '../services/audio_handler.dart';
 import '../widgets/camera_audio_card.dart';
 import '../widgets/stop_monitoring_button.dart';
+import 'health_summary_screen.dart';
 
 class MonitoringScreen extends ConsumerStatefulWidget {
   const MonitoringScreen({super.key});
@@ -152,6 +153,15 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen>
       appBar: AppBar(
         title: const Text('Monitoring'),
         actions: [
+          IconButton(
+            icon: const Icon(Icons.monitor_heart_outlined),
+            tooltip: 'Open health summary',
+            onPressed: () => Navigator.of(context).push(
+              MaterialPageRoute(
+                builder: (_) => const HealthSummaryScreen(),
+              ),
+            ),
+          ),
           IconButton(
             icon: Icon(_globalVideo ? Icons.videocam : Icons.videocam_off),
             tooltip: _globalVideo
