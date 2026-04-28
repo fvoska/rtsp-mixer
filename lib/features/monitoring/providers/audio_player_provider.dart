@@ -394,6 +394,20 @@ class AudioPlayerNotifier extends AsyncNotifier<MonitoringState> {
           connectionStatus: CameraConnectionStatus.error,
           errorMessage: e.toString(),
         );
+        // WR-01 fix: a failed initial open leaves the camera in `error` with
+        // no supervisor or alert ownership. Hand off to both so D-04's 5-min
+        // alert can fire and the supervisor's retry loop takes over.
+        try {
+          _alertPolicy.armIfAbsent(camera.id);
+          // ignore: unawaited_futures
+          _reconnectSupervisor.requestReconnect(
+            camera.id,
+            cause: 'initial_open_failed',
+          );
+        } catch (handoffErr) {
+          appLog('AUDIO',
+              'Handoff to supervisor/alert after initial-open failure threw: $handoffErr');
+        }
       }
 
       cameraStates.add(camState);
@@ -697,6 +711,11 @@ class AudioPlayerNotifier extends AsyncNotifier<MonitoringState> {
       } catch (e) {
         appLog('ZOMBIE', 'reset error (non-fatal): $e');
       }
+      // WR-03 fix: the new stream's audio-pts starts back near 0. The next
+      // poll would otherwise compute a large negative ptsDelta against the
+      // previous stream's PTS and miscount one tick of `silenceDuration`.
+      _lastAudioPts.remove(cameraId);
+      _baselineLevel.remove(cameraId);
     }
     // RELY-01 D-04: alert-timer lifecycle on supervisor-driven status changes.
     final cameraName = _findCameraName(cameraId) ?? cameraId;

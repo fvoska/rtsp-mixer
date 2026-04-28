@@ -31,6 +31,14 @@ class ConnectivityListener {
   bool? _lastKnownHasLan; // null = never evaluated
 
   /// Start listening. Must pair with cancel().
+  ///
+  /// Subscribes synchronously (no `await` before `listen`) so callers do not
+  /// race the first emitted event. Seeds `_lastKnownHasLan` from
+  /// `Connectivity().checkConnectivity()` in the background (WR-02 fix) so
+  /// the first debounced edge compares against truth rather than the
+  /// default-true fallback. Race window between subscription and snapshot
+  /// is tolerable because the 1-second debounce typically dominates the
+  /// snapshot latency on a real device.
   void start() {
     _sub?.cancel();
     _sub = _stream.listen((results) {
@@ -42,6 +50,22 @@ class ConnectivityListener {
       } catch (e) {
         appLog('CONN', 'Listener error (non-fatal): $e');
       }
+    });
+    // Seed initial state asynchronously — fire and forget.
+    Connectivity().checkConnectivity().then((initial) {
+      // Only seed if no event has already established the state, otherwise
+      // we'd clobber a real edge.
+      if (_lastKnownHasLan == null) {
+        _lastKnownHasLan = initial.contains(ConnectivityResult.wifi) ||
+            initial.contains(ConnectivityResult.ethernet);
+        appLog('CONN',
+            'Seeded initial connectivity: lanReachable=$_lastKnownHasLan ($initial)');
+      }
+    }).catchError((Object e) {
+      // checkConnectivity is unavailable in pure-Dart unit tests (no platform
+      // bindings). Leave `_lastKnownHasLan` as null — first event will use
+      // wasOn=true (existing behavior).
+      appLog('CONN', 'Initial connectivity snapshot failed (non-fatal): $e');
     });
     appLog('CONN',
         'ConnectivityListener started (debounce=${debounce.inMilliseconds}ms)');

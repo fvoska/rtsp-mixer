@@ -29,7 +29,7 @@ void main() {
       expect(fires.first, contains('PTS stall'));
     });
 
-    test('bitrate=0 alone (signal 3) does NOT fire — score would be 1', () {
+    test('bitrate=0 alone (signal 3) does NOT fire — PTS-stall absent', () {
       // Simulate PTS advancing + buffering false + audioParams firing on every tick,
       // so only the bitrate=0 counter is allowed to grow.
       for (var i = 0; i < 120; i++) {
@@ -38,12 +38,12 @@ void main() {
         watchdog.recordAudioParams('cam1');
         watchdog.tick('cam1', 500);
       }
-      // Score = 1 (bitrate=0 only, weight 1). Must NOT fire.
-      expect(watchdog.zombieScore('cam1'), 1);
+      // PTS-stall not present → score forced to 0 regardless of corroborators.
+      expect(watchdog.zombieScore('cam1'), 0);
       expect(fires, isEmpty);
     });
 
-    test('audioParams silent alone (signal 4) does NOT fire — score would be 1',
+    test('audioParams silent alone (signal 4) does NOT fire — PTS-stall absent',
         () {
       for (var i = 0; i < 120; i++) {
         watchdog.recordPtsAdvance('cam1');
@@ -51,20 +51,37 @@ void main() {
         watchdog.recordBitrateNonZero('cam1');
         watchdog.tick('cam1', 500);
       }
-      expect(watchdog.zombieScore('cam1'), 1);
+      expect(watchdog.zombieScore('cam1'), 0);
       expect(fires, isEmpty);
     });
 
-    test('buffering + bitrate=0 quorum (1 + 1 = 2) fires', () {
+    test(
+        'buffering + bitrate=0 WITHOUT PTS-stall does NOT fire (CR-01: '
+        'PTS-stall is necessary)', () {
+      // Steady-state simulation — PTS keeps advancing every poll while the
+      // edge-triggered signals (buffering=false, audioParams) drift to threshold.
+      // Pre-fix this would have fired around 60s. Post-fix it must not.
+      for (var i = 0; i < 240; i++) {
+        watchdog.recordPtsAdvance('cam1'); // PTS healthy every tick
+        watchdog.tick('cam1', 500);
+      }
+      expect(watchdog.zombieScore('cam1'), 0);
+      expect(fires, isEmpty);
+    });
+
+    test('PTS-stall + buffering quorum fires with corroboration', () {
+      // PTS-stall present (no recordPtsAdvance), buffering also stuck.
+      // bitrate kept healthy and audioParams firing — pure 2-signal quorum.
       for (var i = 0; i < 120; i++) {
-        watchdog.recordPtsAdvance('cam1');
+        watchdog.recordBitrateNonZero('cam1');
         watchdog.recordAudioParams('cam1');
         watchdog.tick('cam1', 500);
       }
-      expect(watchdog.zombieScore('cam1'), 2);
+      // Score = 2 (PTS) + 1 (buffering) = 3.
+      expect(watchdog.zombieScore('cam1'), 3);
       expect(fires.length, 1);
+      expect(fires.first, contains('PTS stall'));
       expect(fires.first, contains('buffering stuck'));
-      expect(fires.first, contains('bitrate=0'));
     });
 
     test('PTS advance resets the counter and clears the fire latch', () {

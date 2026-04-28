@@ -8,8 +8,6 @@ import '../../../core/logging/app_logger.dart';
 class _ReconnectState {
   int attempt = 0;                   // current backoff attempt (0 = first attempt)
   Timer? retryTimer;                 // scheduled next retry
-  Timer? alertTimer;                 // 5-min alert countdown (set by Plan 04)
-  bool alertFired = false;           // one-shot gate (D-04; enforced by Plan 04)
   bool inFlight = false;             // dedupe guard (Pattern 3)
   DateTime? firstDropAt;             // for health summary downtime
 }
@@ -66,15 +64,48 @@ class ReconnectSupervisor {
   /// Dedup-protected entry point (D-03 triggers all route here).
   /// Schedules a retry with computed backoff unless one is already in-flight
   /// OR a retry is already scheduled (Pattern 3 dedup guard).
+  ///
+  /// `immediate: true` (D-03 trigger c — WiFi-back) is the one path that
+  /// bypasses the dedup guard for a *pending* retry: it cancels the timer
+  /// and attempts now. It still respects `inFlight` — an attempt currently
+  /// executing must complete before a new one starts.
   Future<void> requestReconnect(
     String cameraId, {
     required String cause,
     bool immediate = false,
   }) async {
     final st = _perCamera.putIfAbsent(cameraId, () => _ReconnectState());
-    // Dedup: suppress if an attempt is running OR a retry is already scheduled.
-    // This prevents overlapping triggers (stream.error + zombie + wifi) from
-    // each scheduling their own parallel retry timers.
+
+    if (immediate) {
+      // An attempt currently running owns the camera — cannot interrupt.
+      if (st.inFlight) {
+        appLog('RECONNECT',
+            '$cameraId: immediate request suppressed — attempt in-flight ($cause)');
+        return;
+      }
+      // Cancel any pending backoff timer; the network just came back, retry now.
+      st.retryTimer?.cancel();
+      st.inFlight = true;
+      st.firstDropAt ??= DateTime.now();
+      onStatusChange(cameraId, ReconnectStatus.reconnecting);
+      onEvent(
+        ReconnectEventType.reconnectAttempt,
+        cameraId,
+        'attempt ${st.attempt} (cause=$cause, immediate)',
+      );
+      try {
+        await _attemptReconnect(cameraId);
+      } catch (_) {
+        // _attemptReconnect already rescheduled via _scheduleRetry on failure.
+      } finally {
+        st.inFlight = false;
+      }
+      return;
+    }
+
+    // Non-immediate path: dedup as before. Suppress if attempt running OR
+    // retry already scheduled — prevents overlapping triggers (stream.error +
+    // zombie) from each scheduling their own parallel retry timers.
     if (st.inFlight || (st.retryTimer?.isActive ?? false)) {
       appLog('RECONNECT', '$cameraId: suppressed duplicate ($cause)');
       return;
@@ -89,13 +120,7 @@ class ReconnectSupervisor {
     );
 
     try {
-      if (immediate) {
-        // WiFi-reconnect trigger (D-03): bypass backoff — network just came back.
-        st.retryTimer?.cancel();
-        await _attemptReconnect(cameraId);
-      } else {
-        _scheduleRetry(cameraId, computeBackoff(st.attempt, random: _random));
-      }
+      _scheduleRetry(cameraId, computeBackoff(st.attempt, random: _random));
     } catch (_) {
       // _attemptReconnect already rescheduled via _scheduleRetry on failure.
       // Swallow so the requestReconnect future completes cleanly.
@@ -163,12 +188,12 @@ class ReconnectSupervisor {
     }
   }
 
-  /// Cancel all timers (retry + alert) and forget all per-camera state.
+  /// Cancel all retry timers and forget all per-camera state.
   /// MUST be called from stopMonitoring AND onDispose.
+  /// (Alert timers live in AlertPolicy — supervisor doesn't own them.)
   void cancelAll() {
     for (final st in _perCamera.values) {
       st.retryTimer?.cancel();
-      st.alertTimer?.cancel();
     }
     _perCamera.clear();
     appLog('RECONNECT', 'Supervisor cancelled all timers');

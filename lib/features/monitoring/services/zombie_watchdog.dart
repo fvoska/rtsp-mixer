@@ -2,16 +2,30 @@ import '../../../core/logging/app_logger.dart';
 
 /// RELY-03: detects TCP-open-but-no-audio zombie streams via 4 signals (D-06).
 ///
-/// Ages each signal in milliseconds. When quorum score >= 2, fires the
-/// `onFire` callback (typically → ReconnectSupervisor.requestReconnect).
-/// Hardcoded 60s threshold per signal (D-05, D-08) — not user-configurable.
+/// Ages each signal in milliseconds. When quorum score >= 2 *and* PTS-stall
+/// is among the signals, fires the `onFire` callback (typically →
+/// ReconnectSupervisor.requestReconnect). Hardcoded 60s threshold per signal
+/// (D-05, D-08) — not user-configurable.
 ///
-/// Weighting (RESEARCH §Section 5 recommendation):
-/// - PTS stall: weight 2 (most specific signal — advances even during silence)
-/// - buffering stuck: weight 1
-/// - bitrate=0: weight 1 (legitimately 0 at stream start; weak alone)
-/// - no audioParams: weight 1 (sparse in steady state; weak alone)
-/// Fires at score >= 2, i.e., PTS alone OR any two of the others.
+/// Why PTS-stall is necessary (CR-01 fix):
+/// Of the four signals, only PTS-stall is *naturally* reset every poll
+/// during health (`recordPtsAdvance` fires from `_pollAudioLevels` whenever
+/// audio data flows). The other three are edge-triggered:
+///   - `buffering=false` only fires on `true→false` transitions
+///   - `audioParams` only fires when params change
+///   - `bitrate=0` is reset every poll, but is legitimately 0 during startup
+/// In steady state, both `_bufferingStuckMs` and `_noAudioParamsMs` will
+/// drift to threshold without ever indicating a real problem. Without
+/// gating on PTS-stall, the watchdog would false-positive every ~60s on a
+/// healthy stream. So: PTS-stall is the necessary signal; the other three
+/// only *corroborate* it.
+///
+/// Weighting:
+/// - PTS-stall: weight 2 (necessary condition — must be present to fire)
+/// - buffering stuck: weight 1 (corroborating)
+/// - bitrate=0: weight 1 (corroborating)
+/// - no audioParams: weight 1 (corroborating)
+/// Fires at score >= 2, requiring PTS-stall (which alone gives score 2).
 class ZombieWatchdog {
   ZombieWatchdog({
     required this.onFire,
@@ -79,10 +93,14 @@ class ZombieWatchdog {
   void recordAudioParams(String cameraId) => _noAudioParamsMs[cameraId] = 0;
 
   /// Compute weighted quorum score for a camera.
-  /// PTS stall weight 2; others weight 1 each. Fire threshold is >= 2.
+  /// PTS-stall is a necessary condition: without it, score is 0 regardless
+  /// of the other signals (CR-01 fix — prevents steady-state false positives
+  /// from edge-triggered signals never recurring during health).
+  /// PTS-stall weight 2; corroborating signals weight 1 each.
+  /// Fire threshold is >= 2.
   int zombieScore(String cameraId) {
-    var score = 0;
-    if ((_ptsStallMs[cameraId] ?? 0) >= thresholdMs) score += 2;
+    if ((_ptsStallMs[cameraId] ?? 0) < thresholdMs) return 0;
+    var score = 2; // PTS-stall present.
     if ((_bufferingStuckMs[cameraId] ?? 0) >= thresholdMs) score += 1;
     if ((_bitrateZeroMs[cameraId] ?? 0) >= thresholdMs) score += 1;
     if ((_noAudioParamsMs[cameraId] ?? 0) >= thresholdMs) score += 1;
