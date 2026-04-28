@@ -8,11 +8,14 @@ import 'package:media_kit_video/media_kit_video.dart';
 import '../../../core/logging/app_logger.dart';
 import '../../../core/providers/settings_provider.dart';
 import '../../../core/services/foreground_service.dart';
+import '../../../core/services/local_notifications.dart';
 import '../../auth/providers/auth_provider.dart';
 import '../../cameras/providers/camera_provider.dart';
 import '../helpers/rtsp_url.dart';
 import '../models/health_event.dart';
 import '../models/player_state.dart';
+import '../services/alert_policy.dart';
+import '../services/connectivity_listener.dart';
 import '../services/reconnect_supervisor.dart';
 import '../services/zombie_watchdog.dart';
 import 'health_events_provider.dart';
@@ -56,11 +59,40 @@ class AudioPlayerNotifier extends AsyncNotifier<MonitoringState> {
     },
   );
 
+  // RELY-01 D-04: 5-min one-shot per-camera alert policy.
+  late final AlertPolicy _alertPolicy = AlertPolicy(
+    onFire: (cameraId) {
+      final cameraName = _findCameraName(cameraId) ?? cameraId;
+      LocalNotificationsManager.fireAlert(
+        cameraId: cameraId,
+        cameraName: cameraName,
+      );
+      try {
+        ref.read(healthEventsProvider.notifier).record(HealthEvent(
+              timestamp: DateTime.now(),
+              type: HealthEventType.alertFired,
+              cameraId: cameraId,
+              cameraName: cameraName,
+            ));
+      } catch (e) {
+        appLog('NOTIF', 'Failed to record alertFired event: $e');
+      }
+    },
+  );
+
+  // RELY-01 D-03 trigger c: WiFi reconnect listener.
+  late final ConnectivityListener _connectivityListener = ConnectivityListener(
+    onDropped: _onWifiDropped,
+    onReconnected: _onWifiReconnected,
+  );
+
   @override
   Future<MonitoringState> build() async {
     ref.onDispose(() {
       try { _reconnectSupervisor.cancelAll(); } catch (_) {}
       try { _zombieWatchdog.resetAll(); } catch (_) {}
+      try { _alertPolicy.cancelAll(); } catch (_) {}
+      try { _connectivityListener.cancel(); } catch (_) {}
       _levelPollTimer?.cancel();
       for (final sub in _subscriptions) {
         sub.cancel();
@@ -186,9 +218,14 @@ class AudioPlayerNotifier extends AsyncNotifier<MonitoringState> {
         if (buffering && cam.connectionStatus == CameraConnectionStatus.playing) {
           state = AsyncData(current.copyWithCamera(idx,
             cam.copyWith(connectionStatus: CameraConnectionStatus.connecting)));
+          // D-04: outage clock starts the moment we leave `playing`.
+          _alertPolicy.armIfAbsent(cameraId);
         } else if (!buffering && cam.connectionStatus == CameraConnectionStatus.connecting) {
           state = AsyncData(current.copyWithCamera(idx,
             cam.copyWith(connectionStatus: CameraConnectionStatus.playing)));
+          // D-04: recovered — cancel pending alert + dismiss any fired one.
+          _alertPolicy.clear(cameraId);
+          LocalNotificationsManager.cancelAlert(cameraId);
         }
       }),
     );
@@ -402,6 +439,13 @@ class AudioPlayerNotifier extends AsyncNotifier<MonitoringState> {
 
     // Start polling audio-pts to detect silence / estimate activity.
     _startLevelPolling();
+
+    // RELY-01 D-03 trigger c: subscribe to connectivity events for WiFi reconnect.
+    try {
+      _connectivityListener.start();
+    } catch (e) {
+      appLog('CONN', 'Failed to start connectivity listener: $e');
+    }
   }
 
   static const _pollInterval = Duration(milliseconds: 500);
@@ -654,6 +698,60 @@ class AudioPlayerNotifier extends AsyncNotifier<MonitoringState> {
         appLog('ZOMBIE', 'reset error (non-fatal): $e');
       }
     }
+    // RELY-01 D-04: alert-timer lifecycle on supervisor-driven status changes.
+    final cameraName = _findCameraName(cameraId) ?? cameraId;
+    if (status == ReconnectStatus.playing) {
+      _alertPolicy.clear(cameraId);
+      LocalNotificationsManager.cancelAlert(cameraId);
+    } else {
+      appLog('NOTIF', 'Arming 5-min alert timer for $cameraName');
+      _alertPolicy.armIfAbsent(cameraId);
+    }
+  }
+
+  /// D-03 trigger c: WiFi dropped — record event only; supervisor will pick up
+  /// player.stream.error within 30–60s naturally. Do NOT proactively reconnect
+  /// while network is down — attempts would fail and waste battery.
+  void _onWifiDropped() {
+    appLog('CONN', 'WiFi dropped — recording event');
+    try {
+      ref.read(healthEventsProvider.notifier).record(HealthEvent(
+            timestamp: DateTime.now(),
+            type: HealthEventType.wifiDropped,
+          ));
+    } catch (e) {
+      appLog('CONN', 'Failed to record wifiDropped: $e');
+    }
+  }
+
+  /// D-03 trigger c: WiFi reconnected — immediate retry for any non-playing
+  /// camera. Bypasses backoff because the network just came back.
+  void _onWifiReconnected() {
+    appLog('CONN',
+        'WiFi reconnected — triggering immediate reconnect for non-playing cameras');
+    try {
+      ref.read(healthEventsProvider.notifier).record(HealthEvent(
+            timestamp: DateTime.now(),
+            type: HealthEventType.wifiReconnected,
+          ));
+    } catch (e) {
+      appLog('CONN', 'Failed to record wifiReconnected: $e');
+    }
+    final current = state.value;
+    if (current == null) return;
+    for (final cam in current.cameras) {
+      if (cam.connectionStatus != CameraConnectionStatus.playing) {
+        try {
+          _reconnectSupervisor.requestReconnect(
+            cam.cameraId,
+            cause: 'wifi_reconnect',
+            immediate: true,
+          );
+        } catch (e) {
+          appLog('CONN', 'wifi_reconnect requestReconnect failed: $e');
+        }
+      }
+    }
   }
 
   /// Supervisor's onEvent: record to health summary stream.
@@ -887,6 +985,19 @@ class AudioPlayerNotifier extends AsyncNotifier<MonitoringState> {
   Future<void> stopMonitoring() async {
     appLog('AUDIO', 'Stopping monitoring');
     _levelPollTimer?.cancel();
+    // RELY-01 D-04: tear down alerts BEFORE the supervisor so a pending
+    // status flap can't re-arm a timer mid-teardown.
+    final knownCameraIds =
+        state.value?.cameras.map((c) => c.cameraId).toList() ?? const [];
+    try { _alertPolicy.cancelAll(); } catch (e) {
+      appLog('NOTIF', 'AlertPolicy.cancelAll threw during stopMonitoring: $e');
+    }
+    for (final id in knownCameraIds) {
+      LocalNotificationsManager.cancelAlert(id);
+    }
+    try { _connectivityListener.cancel(); } catch (e) {
+      appLog('CONN', 'connectivity cancel threw during stopMonitoring: $e');
+    }
     // Cancel supervisor BEFORE disposing players (T-04-08 ordering).
     try { _reconnectSupervisor.cancelAll(); } catch (e) {
       appLog('RECONNECT', 'cancelAll threw during stopMonitoring: $e');
