@@ -1,14 +1,21 @@
 ---
-status: partial
+status: testing
 phase: 04-reliability-overnight-monitoring
 source: [04-VERIFICATION.md]
 started: 2026-04-28T23:14:00Z
-updated: 2026-04-28T23:14:00Z
+updated: 2026-04-28T23:40:00Z
 ---
 
 ## Current Test
 
-[awaiting human testing]
+number: 1
+name: Overnight 8h soak run
+expected: |
+  App runs unattended for 8+ hours on Android with screen off; both cameras
+  stay live (or recover within seconds via the supervisor); no foreground
+  service death; health summary shows accurate uptime/reconnect counts in
+  the morning.
+awaiting: user response
 
 ## Tests
 
