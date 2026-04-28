@@ -14,6 +14,7 @@ import '../helpers/rtsp_url.dart';
 import '../models/health_event.dart';
 import '../models/player_state.dart';
 import '../services/reconnect_supervisor.dart';
+import '../services/zombie_watchdog.dart';
 import 'health_events_provider.dart';
 
 final audioPlayerProvider =
@@ -35,10 +36,31 @@ class AudioPlayerNotifier extends AsyncNotifier<MonitoringState> {
     onEvent: _recordReconnectEvent,
   );
 
+  // RELY-03: zombie-stream watchdog. D-07 silent fire via supervisor.
+  late final ZombieWatchdog _zombieWatchdog = ZombieWatchdog(
+    onFire: (cameraId, detail) {
+      appLog('ZOMBIE',
+          '$cameraId: fire -> requestReconnect (detail=$detail)');
+      try {
+        ref.read(healthEventsProvider.notifier).record(HealthEvent(
+              timestamp: DateTime.now(),
+              type: HealthEventType.zombieDetected,
+              cameraId: cameraId,
+              cameraName: _findCameraName(cameraId),
+              detail: detail,
+            ));
+      } catch (e) {
+        appLog('ZOMBIE', '$cameraId: failed to record zombie event: $e');
+      }
+      _reconnectSupervisor.requestReconnect(cameraId, cause: 'zombie');
+    },
+  );
+
   @override
   Future<MonitoringState> build() async {
     ref.onDispose(() {
       try { _reconnectSupervisor.cancelAll(); } catch (_) {}
+      try { _zombieWatchdog.resetAll(); } catch (_) {}
       _levelPollTimer?.cancel();
       for (final sub in _subscriptions) {
         sub.cancel();
@@ -146,6 +168,15 @@ class AudioPlayerNotifier extends AsyncNotifier<MonitoringState> {
     _subscriptions.add(
       player.stream.buffering.listen((buffering) {
         appLog('STREAM', '$cameraName buffering=$buffering');
+        // RELY-03: feed watchdog. buffering=false resets the stuck-buffering counter;
+        // buffering=true is a no-op — tick() accumulates.
+        try {
+          if (!buffering) {
+            _zombieWatchdog.recordBufferingFalse(cameraId);
+          }
+        } catch (e) {
+          appLog('ZOMBIE', 'buffering listener error (non-fatal): $e');
+        }
         // Update status based on buffering state.
         final current = state.value;
         if (current == null) return;
@@ -168,6 +199,12 @@ class AudioPlayerNotifier extends AsyncNotifier<MonitoringState> {
           sampleRate: params.sampleRate,
           channels: params.hrChannels,
         ));
+        // RELY-03: feed watchdog — any audioParams event resets the counter.
+        try {
+          _zombieWatchdog.recordAudioParams(cameraId);
+        } catch (e) {
+          appLog('ZOMBIE', 'audioParams listener error (non-fatal): $e');
+        }
       }),
     );
     _subscriptions.add(
@@ -400,6 +437,14 @@ class AudioPlayerNotifier extends AsyncNotifier<MonitoringState> {
         _lastAudioPts[cam.cameraId] = pts;
 
         final flowing = ptsDelta > 0.01;
+        // RELY-03: feed watchdog with PTS-advance positive signal.
+        try {
+          if (flowing) {
+            _zombieWatchdog.recordPtsAdvance(cam.cameraId);
+          }
+        } catch (e) {
+          appLog('ZOMBIE', 'pts feed error (non-fatal): $e');
+        }
         // Normalize: typical delta at 500ms poll is ~0.5s.
         final level = flowing ? (ptsDelta / 0.6).clamp(0.2, 1.0) : 0.0;
 
@@ -428,6 +473,14 @@ class AudioPlayerNotifier extends AsyncNotifier<MonitoringState> {
         final height = int.tryParse(await _tryGetProperty(np, 'video-params/h') ?? '');
         final fps = double.tryParse(await _tryGetProperty(np, 'container-fps') ?? '');
         final audioBitrate = double.tryParse(await _tryGetProperty(np, 'audio-bitrate') ?? '');
+        // RELY-03: feed watchdog with bitrate>0 positive signal.
+        try {
+          if (audioBitrate != null && audioBitrate > 0) {
+            _zombieWatchdog.recordBitrateNonZero(cam.cameraId);
+          }
+        } catch (e) {
+          appLog('ZOMBIE', 'bitrate feed error (non-fatal): $e');
+        }
         final videoBitrate = double.tryParse(await _tryGetProperty(np, 'video-bitrate') ?? '');
 
         final newInfo = cam.streamInfo.merge(
@@ -464,6 +517,15 @@ class AudioPlayerNotifier extends AsyncNotifier<MonitoringState> {
             ),
           );
           changed = true;
+        }
+
+        // RELY-03: tick the watchdog once per camera per pass. Must run
+        // AFTER the positive-signal feeders above so signal-age accounting
+        // reflects this poll's signals.
+        try {
+          _zombieWatchdog.tick(cam.cameraId, _pollInterval.inMilliseconds);
+        } catch (e) {
+          appLog('ZOMBIE', 'tick error (non-fatal): $e');
         }
       } catch (_) {
         // Player may be disposed during poll.
@@ -583,6 +645,15 @@ class AudioPlayerNotifier extends AsyncNotifier<MonitoringState> {
       idx,
       cam.copyWith(connectionStatus: newStatus),
     ));
+    // RELY-03: a successful reconnect zeroes the watchdog so the next
+    // zombie can fire fresh. Status `reconnecting` keeps counters running.
+    if (status == ReconnectStatus.playing) {
+      try {
+        _zombieWatchdog.reset(cameraId);
+      } catch (e) {
+        appLog('ZOMBIE', 'reset error (non-fatal): $e');
+      }
+    }
   }
 
   /// Supervisor's onEvent: record to health summary stream.
@@ -819,6 +890,9 @@ class AudioPlayerNotifier extends AsyncNotifier<MonitoringState> {
     // Cancel supervisor BEFORE disposing players (T-04-08 ordering).
     try { _reconnectSupervisor.cancelAll(); } catch (e) {
       appLog('RECONNECT', 'cancelAll threw during stopMonitoring: $e');
+    }
+    try { _zombieWatchdog.resetAll(); } catch (e) {
+      appLog('ZOMBIE', 'resetAll threw during stopMonitoring: $e');
     }
     _lastAudioPts.clear();
     _baselineLevel.clear();
