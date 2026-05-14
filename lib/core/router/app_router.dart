@@ -5,8 +5,9 @@ import 'package:go_router/go_router.dart';
 import '../../features/auth/providers/auth_provider.dart';
 import '../../features/auth/screens/login_screen.dart';
 import '../../features/cameras/screens/camera_list_screen.dart';
-import '../../features/monitoring/screens/log_screen.dart';
-import '../../features/monitoring/screens/monitoring_screen.dart';
+import '../../features/monitoring/providers/session_history_provider.dart';
+import '../../features/monitoring/screens/health_summary_screen.dart';
+import '../widgets/main_shell.dart';
 
 final appRouterProvider = Provider<GoRouter>((ref) {
   final authListenable = _AuthRefreshNotifier(ref);
@@ -40,11 +41,67 @@ final appRouterProvider = Provider<GoRouter>((ref) {
     routes: [
       GoRoute(path: '/login', builder: (_, __) => const LoginScreen()),
       GoRoute(path: '/cameras', builder: (_, __) => const CameraListScreen()),
-      GoRoute(path: '/monitoring', builder: (_, __) => const MonitoringScreen()),
-      GoRoute(path: '/logs', builder: (_, __) => const LogScreen()),
+      // ShellRoute hosts the three primary tabs. MainShell uses an IndexedStack
+      // internally so MonitoringScreen stays mounted across tab switches
+      // (260514-siv). Sub-route builders return SizedBox.shrink() — the actual
+      // widgets live in MainShell's IndexedStack. EXCEPTION: /sessions/:id uses
+      // a pageBuilder so it stacks ON TOP of the shell as a MaterialPage.
+      ShellRoute(
+        builder: (context, state, _) => MainShell(
+          currentLocation: state.matchedLocation,
+        ),
+        routes: [
+          GoRoute(
+            path: '/monitoring',
+            builder: (_, __) => const SizedBox.shrink(),
+          ),
+          GoRoute(
+            path: '/sessions',
+            builder: (_, __) => const SizedBox.shrink(),
+          ),
+          GoRoute(
+            path: '/sessions/:id',
+            pageBuilder: (context, state) {
+              final id = state.pathParameters['id'] ?? '';
+              return MaterialPage(
+                key: state.pageKey,
+                child: _SessionDetailRoute(id: id),
+              );
+            },
+          ),
+          GoRoute(
+            path: '/logs',
+            builder: (_, __) => const SizedBox.shrink(),
+          ),
+        ],
+      ),
     ],
   );
 });
+
+/// Looks up a session by id from sessionHistoryProvider (current + past).
+/// Renders HealthSummaryScreen or a "Session not found" fallback — never crashes.
+class _SessionDetailRoute extends ConsumerWidget {
+  const _SessionDetailRoute({required this.id});
+  final String id;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final history = ref.watch(sessionHistoryProvider).value;
+    final session = history == null
+        ? null
+        : (history.current?.id == id
+            ? history.current
+            : history.past.where((s) => s.id == id).firstOrNull);
+    if (session == null) {
+      return Scaffold(
+        appBar: AppBar(title: const Text('Session')),
+        body: const Center(child: Text('Session not found')),
+      );
+    }
+    return HealthSummaryScreen(session: session);
+  }
+}
 
 class _AuthRefreshNotifier extends ChangeNotifier {
   _AuthRefreshNotifier(Ref ref) {

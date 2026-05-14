@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_foreground_task/flutter_foreground_task.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 
 import '../../../core/logging/app_logger.dart';
 import '../../../core/providers/settings_provider.dart';
@@ -8,10 +9,9 @@ import '../../../core/services/foreground_service.dart';
 import '../../../core/theme/spacing.dart';
 import '../../auth/providers/auth_provider.dart';
 import '../providers/audio_player_provider.dart';
+import '../providers/session_history_provider.dart';
 import '../services/audio_handler.dart';
 import '../widgets/camera_audio_card.dart';
-import '../widgets/stop_monitoring_button.dart';
-import 'health_summary_screen.dart';
 
 class MonitoringScreen extends ConsumerStatefulWidget {
   const MonitoringScreen({super.key});
@@ -51,7 +51,9 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen>
         await FlutterForegroundTask.requestIgnoreBatteryOptimization();
       }
 
-      // Cameras are already loaded by AuthNotifier before we get here
+      // Cameras are already loaded by AuthNotifier before we get here.
+      // startMonitoring is idempotent (260514-siv) — safe to call when the
+      // ShellRoute re-mounts MonitoringScreen for any reason.
       await ref.read(audioPlayerProvider.notifier).startMonitoring();
       // Start foreground service after monitoring is active
       final monState = ref.read(audioPlayerProvider).value;
@@ -145,23 +147,26 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen>
     notifier.setVideoEnabledForCamera(cameraId, _isVideoOn(cameraId));
   }
 
+  Future<void> _onStopPressed() async {
+    await ref.read(storageProvider).delete('was_monitoring');
+    await ref.read(audioPlayerProvider.notifier).stopMonitoring();
+    await ForegroundServiceManager.stop();
+    if (mounted) context.go('/cameras');
+  }
+
   @override
   Widget build(BuildContext context) {
     final monitoringState = ref.watch(audioPlayerProvider);
+    final sessionHistory = ref.watch(sessionHistoryProvider).value;
+    final hasCameras = monitoringState.value?.cameras.isNotEmpty ?? false;
+    final hasCurrentSession = sessionHistory?.current != null;
+    final showStopFab = hasCameras && hasCurrentSession;
+    final theme = Theme.of(context);
 
     return Scaffold(
       appBar: AppBar(
         title: const Text('Monitoring'),
         actions: [
-          IconButton(
-            icon: const Icon(Icons.monitor_heart_outlined),
-            tooltip: 'Open health summary',
-            onPressed: () => Navigator.of(context).push(
-              MaterialPageRoute(
-                builder: (_) => const HealthSummaryScreen(),
-              ),
-            ),
-          ),
           IconButton(
             icon: Icon(_globalVideo ? Icons.videocam : Icons.videocam_off),
             tooltip: _globalVideo
@@ -227,12 +232,22 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen>
                     ],
                   ),
                 ],
+                // Leave room below the FAB so the last card isn't covered.
+                if (showStopFab) const SizedBox(height: 80),
               ],
             ),
           );
         },
       ),
-      bottomNavigationBar: const StopMonitoringButton(),
+      floatingActionButton: showStopFab
+          ? FloatingActionButton.extended(
+              onPressed: _onStopPressed,
+              backgroundColor: theme.colorScheme.errorContainer,
+              foregroundColor: theme.colorScheme.onErrorContainer,
+              icon: const Icon(Icons.stop_rounded),
+              label: const Text('Stop monitoring'),
+            )
+          : null,
     );
   }
 }

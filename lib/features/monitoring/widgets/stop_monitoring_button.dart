@@ -1,3 +1,8 @@
+// TODO(260514-siv): delete this file once no usages remain.
+// Replaced by the inline FloatingActionButton.extended on MonitoringScreen.
+// Kept here in this task to keep the diff focused; follow-up cleanup will
+// remove the file entirely.
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -8,6 +13,9 @@ import '../../auth/providers/auth_provider.dart';
 import '../providers/audio_player_provider.dart';
 
 /// Bottom button that stops all players and navigates back to the camera list.
+@Deprecated(
+  'Replaced by inline FAB on MonitoringScreen — see task 260514-siv plan',
+)
 class StopMonitoringButton extends ConsumerWidget {
   const StopMonitoringButton({super.key});
 

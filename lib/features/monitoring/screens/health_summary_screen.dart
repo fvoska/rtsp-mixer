@@ -4,28 +4,31 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../core/theme/spacing.dart';
 import '../models/health_event.dart';
-import '../models/player_state.dart';
-import '../providers/audio_player_provider.dart';
-import '../providers/health_events_provider.dart';
+import '../models/session.dart';
 
-/// MNTR-01: session-scoped overnight health summary.
-/// Reads healthEventsProvider + audioPlayerProvider (for camera names).
-/// Session boundaries: events list is cleared on startMonitoring (D-13).
+/// MNTR-01 / 260514-siv: per-session health summary.
+///
+/// Reads events directly from the [Session] passed in (no longer watches
+/// healthEventsProvider). Used both for in-flight sessions (via /sessions/:id
+/// when current.id matches) and for finalized sessions from history.
 class HealthSummaryScreen extends ConsumerWidget {
-  const HealthSummaryScreen({super.key});
+  const HealthSummaryScreen({super.key, required this.session});
+
+  final Session session;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final theme = Theme.of(context);
-    final events = ref.watch(healthEventsProvider);
-    final monState = ref.watch(audioPlayerProvider).value;
-    final cameras = monState?.cameras ?? const <CameraAudioState>[];
+    final events = session.events;
+
+    final cameras = session.cameras;
 
     final startedEvent = events
         .where((e) => e.type == HealthEventType.monitoringStarted)
         .fold<HealthEvent?>(null, (_, e) => e);
-    final isStoppedSession = events.isNotEmpty &&
-        events.last.type == HealthEventType.monitoringStopped;
+    final isStoppedSession = session.endedAt != null ||
+        (events.isNotEmpty &&
+            events.last.type == HealthEventType.monitoringStopped);
 
     // Non-trivial events = everything except the implicit monitoringStarted row.
     final nonTrivial = events.where(
@@ -45,7 +48,7 @@ class HealthSummaryScreen extends ConsumerWidget {
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Health summary'),
+        title: Text(_formatRange(session)),
       ),
       body: Padding(
         padding: const EdgeInsets.symmetric(
@@ -55,7 +58,10 @@ class HealthSummaryScreen extends ConsumerWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            _SessionUptimeCard(startedAt: startedEvent?.timestamp),
+            _SessionUptimeCard(
+              startedAt: startedEvent?.timestamp ?? session.startedAt,
+              endedAt: session.endedAt,
+            ),
             const SizedBox(height: Spacing.lg),
             if (cameras.isNotEmpty) ...[
               Text('Cameras', style: theme.textTheme.titleMedium),
@@ -118,15 +124,35 @@ class HealthSummaryScreen extends ConsumerWidget {
   }
 }
 
+String _formatRange(Session s) {
+  String hm(DateTime t) =>
+      '${t.hour.toString().padLeft(2, '0')}:${t.minute.toString().padLeft(2, '0')}';
+  String ymd(DateTime t) =>
+      '${t.year}-${t.month.toString().padLeft(2, '0')}-${t.day.toString().padLeft(2, '0')}';
+  final end = s.endedAt;
+  if (end == null) {
+    return '${ymd(s.startedAt)} · ${hm(s.startedAt)} → live';
+  }
+  final sameDay = s.startedAt.year == end.year &&
+      s.startedAt.month == end.month &&
+      s.startedAt.day == end.day;
+  if (sameDay) {
+    return '${ymd(s.startedAt)} · ${hm(s.startedAt)} → ${hm(end)}';
+  }
+  return '${ymd(s.startedAt)} → ${ymd(end)}';
+}
+
 class _SessionUptimeCard extends StatelessWidget {
-  const _SessionUptimeCard({required this.startedAt});
+  const _SessionUptimeCard({required this.startedAt, required this.endedAt});
   final DateTime? startedAt;
+  final DateTime? endedAt;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final end = endedAt ?? DateTime.now();
     final uptime = startedAt != null
-        ? DateTime.now().difference(startedAt!)
+        ? end.difference(startedAt!)
         : Duration.zero;
     return Card.filled(
       child: Padding(
@@ -135,7 +161,7 @@ class _SessionUptimeCard extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(
-              'Session uptime',
+              endedAt == null ? 'Session uptime' : 'Session duration',
               style: theme.textTheme.bodySmall
                   ?.copyWith(color: theme.colorScheme.onSurfaceVariant),
             ),
@@ -165,7 +191,7 @@ class _CamerasRow extends StatelessWidget {
     required this.reconnectCount,
     required this.downtime,
   });
-  final List<CameraAudioState> cameras;
+  final List<({String id, String name})> cameras;
   final Map<String, int> reconnectCount;
   final Map<String, Duration> downtime;
 
@@ -176,9 +202,9 @@ class _CamerasRow extends StatelessWidget {
       final cam = cameras[i];
       children.add(Expanded(
         child: _CameraTile(
-          name: cam.cameraName,
-          reconnects: reconnectCount[cam.cameraId] ?? 0,
-          downtime: downtime[cam.cameraId] ?? Duration.zero,
+          name: cam.name,
+          reconnects: reconnectCount[cam.id] ?? 0,
+          downtime: downtime[cam.id] ?? Duration.zero,
         ),
       ));
       if (i < cameras.length - 1) {
@@ -269,7 +295,7 @@ class _StoppedSessionBanner extends StatelessWidget {
         borderRadius: BorderRadius.circular(8),
       ),
       child: Text(
-        'Monitoring stopped. Start monitoring to reset the session.',
+        'Session finalized.',
         style: theme.textTheme.bodySmall
             ?.copyWith(color: theme.colorScheme.onSurfaceVariant),
       ),
@@ -294,14 +320,14 @@ class _EmptyEvents extends StatelessWidget {
           ),
           const SizedBox(height: Spacing.md),
           Text(
-            'Monitoring just started',
+            'No events recorded',
             style: theme.textTheme.titleMedium,
           ),
           const SizedBox(height: Spacing.sm),
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: Spacing.lg),
             child: Text(
-              'Events will appear here as the session runs — reconnects, WiFi changes, and alerts.',
+              'This session ran without any reconnects, WiFi changes, or alerts.',
               textAlign: TextAlign.center,
               style: theme.textTheme.bodyMedium
                   ?.copyWith(color: theme.colorScheme.onSurfaceVariant),

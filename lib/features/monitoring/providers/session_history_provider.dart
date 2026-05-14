@@ -50,11 +50,19 @@ class SessionHistoryNotifier extends AsyncNotifier<SessionHistory> {
   Timer? _debounce;
   _LifecycleListener? _lifecycleListener;
 
+  /// Snapshot kept in sync with [state] so we can flush from `onDispose`,
+  /// where Riverpod 3 forbids reading `state` or other providers.
+  SessionHistory? _latest;
+
+  /// Captured at build() time so onDispose doesn't need to call ref.read.
+  SessionHistoryRepository? _repo;
+
   static const _debounceDuration = Duration(seconds: 1);
 
   @override
   Future<SessionHistory> build() async {
     final repo = ref.read(sessionHistoryRepositoryProvider);
+    _repo = repo;
     final loaded = await repo.load();
     appLog('SESSION',
         'build: loaded current=${loaded.current?.id ?? 'null'} past=${loaded.past.length}');
@@ -83,18 +91,26 @@ class SessionHistoryNotifier extends AsyncNotifier<SessionHistory> {
       } catch (e) {
         appLog('SESSION', 'removeObserver failed: $e');
       }
-      // Synchronous best-effort flush on dispose.
-      final s = state.value;
-      if (s != null) {
+      // Best-effort flush on dispose. Uses captured _latest + _repo because
+      // Riverpod 3 disallows touching state or ref.read inside onDispose.
+      final s = _latest;
+      final r = _repo;
+      if (s != null && r != null) {
         // Fire and forget — provider is being torn down.
-        ref.read(sessionHistoryRepositoryProvider).save(
-              current: s.current,
-              past: s.past,
-            );
+        r.save(current: s.current, past: s.past);
       }
     });
 
-    return SessionHistory(current: loaded.current, past: loaded.past);
+    final initial = SessionHistory(current: loaded.current, past: loaded.past);
+    _latest = initial;
+    return initial;
+  }
+
+  /// Update both [state] and the [_latest] snapshot in one place so they
+  /// don't drift.
+  void _setState(SessionHistory next) {
+    _latest = next;
+    state = AsyncData(next);
   }
 
   /// Begin a new session for [cameras]. If a session is already in flight,
@@ -102,7 +118,7 @@ class SessionHistoryNotifier extends AsyncNotifier<SessionHistory> {
   /// idempotency guard lives in `audio_player_provider.startMonitoring`).
   Future<void> beginSession(List<({String id, String name})> cameras) async {
     try {
-      final cur = state.value;
+      final cur = _latest;
       if (cur?.current != null) {
         appLog('SESSION',
             'beginSession called while session ${cur!.current!.id} is in flight — noop');
@@ -111,7 +127,7 @@ class SessionHistoryNotifier extends AsyncNotifier<SessionHistory> {
       final session = Session.start(cameras: cameras);
       appLog('SESSION',
           'beginSession id=${session.id} cameras=${cameras.length}');
-      state = AsyncData(SessionHistory(
+      _setState(SessionHistory(
         current: session,
         past: cur?.past ?? const [],
       ));
@@ -124,14 +140,14 @@ class SessionHistoryNotifier extends AsyncNotifier<SessionHistory> {
   /// Append [e] to the current session. No-op if no session is running.
   void recordEvent(HealthEvent e) {
     try {
-      final cur = state.value;
+      final cur = _latest;
       final session = cur?.current;
       if (session == null) {
         // Pre-session events (e.g., from a notifier wired before startMonitoring)
         // are dropped by design — they have no session to belong to.
         return;
       }
-      state = AsyncData(cur!.copyWith(
+      _setState(cur!.copyWith(
         current: session.withEventAppended(e),
       ));
       _scheduleFlush();
@@ -145,7 +161,7 @@ class SessionHistoryNotifier extends AsyncNotifier<SessionHistory> {
   /// the caller proceeds (Stop button + restart-and-see-history flow).
   Future<void> endCurrentSession() async {
     try {
-      final cur = state.value;
+      final cur = _latest;
       final session = cur?.current;
       if (session == null) {
         appLog('SESSION', 'endCurrentSession: no current session — noop');
@@ -158,7 +174,7 @@ class SessionHistoryNotifier extends AsyncNotifier<SessionHistory> {
           : newPast;
       appLog('SESSION',
           'endCurrentSession id=${ended.id} events=${ended.events.length}');
-      state = AsyncData(SessionHistory(
+      _setState(SessionHistory(
         current: null,
         past: trimmed,
       ));
@@ -176,13 +192,11 @@ class SessionHistoryNotifier extends AsyncNotifier<SessionHistory> {
   Future<void> flush() async {
     _debounce?.cancel();
     _debounce = null;
-    final s = state.value;
-    if (s == null) return;
+    final s = _latest;
+    final r = _repo;
+    if (s == null || r == null) return;
     try {
-      await ref.read(sessionHistoryRepositoryProvider).save(
-            current: s.current,
-            past: s.past,
-          );
+      await r.save(current: s.current, past: s.past);
     } catch (e, st) {
       appLog('SESSION', 'flush: unexpected error ($e); stack=$st');
     }
