@@ -88,6 +88,12 @@ Recent decisions affecting current work:
 
 None yet.
 
+### Quick Tasks Completed
+
+| ID | Date | Slug | Summary | Plan |
+|----|------|------|---------|------|
+| 260514-siv | 2026-05-14 | session-history | Persist last 10 sessions to `sessions.json`; shell-based bottom NavigationBar with IndexedStack (Monitor/Sessions/Logs) keeps audio running across tabs; ActiveSessionBar mini-player; Stop moved to FAB; `startMonitoring` made idempotent | [PLAN](quick/260514-siv-session-history/260514-siv-PLAN.md) · [SUMMARY](quick/260514-siv-session-history/260514-siv-SUMMARY.md) |
+
 ### Blockers/Concerns
 
 - ~~Research flags media_kit RTSP audio-only as untested~~ — **resolved**: media_kit_libs_audio lacks RTSP demuxer, must use media_kit_libs_video with vid=no
