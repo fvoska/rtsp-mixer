@@ -5,8 +5,7 @@ import 'package:go_router/go_router.dart';
 import '../../features/monitoring/screens/log_screen.dart';
 import '../../features/monitoring/screens/monitoring_screen.dart';
 import '../../features/monitoring/screens/sessions_list_screen.dart';
-// ActiveSessionBar is wired in Task 3 of 260514-siv. Until then a SizedBox
-// placeholder sits in the slot below the IndexedStack.
+import '../../features/monitoring/widgets/active_session_bar.dart';
 
 /// Top-level shell hosting the three primary tabs.
 ///
@@ -57,10 +56,12 @@ class _MainShellState extends ConsumerState<MainShell> {
               ],
             ),
           ),
-          // ActiveSessionBar slot (Task 3): sits inside the body Column,
-          // ABOVE the Scaffold's bottomNavigationBar — so it visually floats
-          // just above the NavigationBar without breaking SafeArea.
-          const SizedBox.shrink(),
+          // ActiveSessionBar sits inside the body Column, ABOVE the Scaffold's
+          // bottomNavigationBar — so it visually floats just above the
+          // NavigationBar without breaking SafeArea on the NavigationBar itself.
+          // The widget hides itself when no session is running or the user is
+          // already on the Monitor tab.
+          ActiveSessionBar(selectedIndex: selectedIndex),
         ],
       ),
       bottomNavigationBar: NavigationBar(
