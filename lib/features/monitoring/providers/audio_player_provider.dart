@@ -19,6 +19,7 @@ import '../services/connectivity_listener.dart';
 import '../services/reconnect_supervisor.dart';
 import '../services/zombie_watchdog.dart';
 import 'health_events_provider.dart';
+import 'session_history_provider.dart';
 
 final audioPlayerProvider =
     AsyncNotifierProvider<AudioPlayerNotifier, MonitoringState>(
@@ -294,9 +295,43 @@ class AudioPlayerNotifier extends AsyncNotifier<MonitoringState> {
       return;
     }
 
+    // Idempotency guard (260514-siv): if MonitoringScreen is re-entered via
+    // ShellRoute while a session is already in flight AND players are still
+    // connecting/connected, return without clearing events or restarting streams.
+    // Note: enum value is `playing` (not `connected`) — see CameraConnectionStatus.
+    try {
+      final existing = ref.read(sessionHistoryProvider).value?.current;
+      final running = state.value?.cameras.any((c) =>
+              c.connectionStatus == CameraConnectionStatus.connecting ||
+              c.connectionStatus == CameraConnectionStatus.playing ||
+              c.connectionStatus == CameraConnectionStatus.reconnecting) ??
+          false;
+      if (existing != null && running) {
+        appLog('AUDIO',
+            'startMonitoring called while session already in progress — noop');
+        return;
+      }
+    } catch (e) {
+      appLog('SESSION', 'startMonitoring idempotency check failed: $e');
+      // fall through — better to restart than to be stuck
+    }
+
     state = const AsyncLoading();
     final settings = ref.read(settingsProvider);
     appLog('AUDIO', 'Starting monitoring for ${selectedCameras.length} cameras (video=$videoPreview, rtsp=${settings.useRtsp}, buffer=${settings.audioBufferSeconds}s)');
+
+    // 260514-siv: begin a new persisted session BEFORE recording the first
+    // event, so the monitoringStarted event lands in the new session rather
+    // than being dropped (recordEvent is a no-op when current == null).
+    try {
+      await ref.read(sessionHistoryProvider.notifier).beginSession(
+            selectedCameras
+                .map((c) => (id: c.id, name: c.name ?? 'Camera'))
+                .toList(),
+          );
+    } catch (e) {
+      appLog('SESSION', 'beginSession from startMonitoring failed: $e');
+    }
 
     // D-13: session boundary — clear previous session's health events and
     // record monitoringStarted before opening streams.
@@ -1065,6 +1100,15 @@ class AudioPlayerNotifier extends AsyncNotifier<MonitoringState> {
           ));
     } catch (e) {
       appLog('HEALTH', 'Failed to record monitoringStopped: $e');
+    }
+
+    // 260514-siv: finalize the persisted session. Awaits a synchronous flush
+    // so the session is on disk before stopMonitoring returns (the user is
+    // about to be routed to /cameras and might immediately re-open Sessions).
+    try {
+      await ref.read(sessionHistoryProvider.notifier).endCurrentSession();
+    } catch (e) {
+      appLog('SESSION', 'endCurrentSession from stopMonitoring failed: $e');
     }
   }
 
