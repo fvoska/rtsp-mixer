@@ -28,12 +28,12 @@ final appRouterProvider = Provider<GoRouter>((ref) {
         return location == '/login' ? null : '/login';
       }
 
-      // Authenticated (cameras already loaded by AuthNotifier)
+      // Authenticated — always land in the shell on /monitoring. When no
+      // cameras are selected, MonitoringScreen renders an empty state with
+      // a CTA to /cameras. This way the persistent nav (Sessions / Logs /
+      // Settings) is reachable immediately, not gated behind monitoring.
       if (location == '/login') {
-        if (auth.value?.resumeMonitoring == true) {
-          return '/monitoring';
-        }
-        return '/cameras';
+        return '/monitoring';
       }
 
       return null;
@@ -41,6 +41,21 @@ final appRouterProvider = Provider<GoRouter>((ref) {
     routes: [
       GoRoute(path: '/login', builder: (_, __) => const LoginScreen()),
       GoRoute(path: '/cameras', builder: (_, __) => const CameraListScreen()),
+      // Session detail lives ABOVE the shell so it stacks like a normal
+      // detail page (its own AppBar + back button, no tab bar — standard
+      // mobile pattern). Keeping it inside the ShellRoute hid it because
+      // MainShell deliberately ignores ShellRoute.builder's `child` to make
+      // IndexedStack work for the tab screens.
+      GoRoute(
+        path: '/sessions/:id',
+        pageBuilder: (context, state) {
+          final id = state.pathParameters['id'] ?? '';
+          return MaterialPage(
+            key: state.pageKey,
+            child: _SessionDetailRoute(id: id),
+          );
+        },
+      ),
       // ShellRoute hosts the three primary tabs. MainShell uses an IndexedStack
       // internally so MonitoringScreen stays mounted across tab switches
       // (260514-siv). Sub-route builders return SizedBox.shrink() — the actual
@@ -58,16 +73,6 @@ final appRouterProvider = Provider<GoRouter>((ref) {
           GoRoute(
             path: '/sessions',
             builder: (_, __) => const SizedBox.shrink(),
-          ),
-          GoRoute(
-            path: '/sessions/:id',
-            pageBuilder: (context, state) {
-              final id = state.pathParameters['id'] ?? '';
-              return MaterialPage(
-                key: state.pageKey,
-                child: _SessionDetailRoute(id: id),
-              );
-            },
           ),
           GoRoute(
             path: '/logs',

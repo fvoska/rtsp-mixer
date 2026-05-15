@@ -8,6 +8,7 @@ import '../../../core/providers/settings_provider.dart';
 import '../../../core/services/foreground_service.dart';
 import '../../../core/theme/spacing.dart';
 import '../../auth/providers/auth_provider.dart';
+import '../../cameras/providers/camera_provider.dart';
 import '../providers/audio_player_provider.dart';
 import '../providers/session_history_provider.dart';
 import '../services/audio_handler.dart';
@@ -182,6 +183,15 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen>
         data: (state) {
           final debugMode = ref.watch(settingsProvider).debugMode;
           if (state.cameras.isEmpty) {
+            // Two reasons this branch fires:
+            //   1. No cameras selected yet — show a CTA to /cameras.
+            //   2. Cameras are selected but haven't connected yet — spinner.
+            final selected =
+                ref.watch(cameraNotifierProvider).value?.selectedCameras ??
+                    const [];
+            if (selected.isEmpty) {
+              return const _NoCamerasSelected();
+            }
             return const Center(child: CircularProgressIndicator());
           }
           return SingleChildScrollView(
@@ -248,6 +258,49 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen>
               label: const Text('Stop monitoring'),
             )
           : null,
+    );
+  }
+}
+
+class _NoCamerasSelected extends StatelessWidget {
+  const _NoCamerasSelected();
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: Spacing.xl),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(
+              Icons.videocam_off_outlined,
+              size: 64,
+              color: theme.colorScheme.onSurfaceVariant,
+            ),
+            const SizedBox(height: Spacing.lg),
+            Text(
+              'No cameras selected',
+              style: theme.textTheme.titleLarge,
+            ),
+            const SizedBox(height: Spacing.sm),
+            Text(
+              'Pick the cameras you want to listen to. You can change them anytime.',
+              textAlign: TextAlign.center,
+              style: theme.textTheme.bodyMedium?.copyWith(
+                color: theme.colorScheme.onSurfaceVariant,
+              ),
+            ),
+            const SizedBox(height: Spacing.xl),
+            FilledButton.icon(
+              icon: const Icon(Icons.videocam),
+              label: const Text('Select cameras'),
+              onPressed: () => context.push('/cameras'),
+            ),
+          ],
+        ),
+      ),
     );
   }
 }
