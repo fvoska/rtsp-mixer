@@ -73,6 +73,10 @@ final appRouterProvider = Provider<GoRouter>((ref) {
             path: '/logs',
             builder: (_, __) => const SizedBox.shrink(),
           ),
+          GoRoute(
+            path: '/settings',
+            builder: (_, __) => const SizedBox.shrink(),
+          ),
         ],
       ),
     ],

@@ -6,6 +6,7 @@ import '../../features/monitoring/screens/log_screen.dart';
 import '../../features/monitoring/screens/monitoring_screen.dart';
 import '../../features/monitoring/screens/sessions_list_screen.dart';
 import '../../features/monitoring/widgets/active_session_bar.dart';
+import '../../features/settings/screens/settings_screen.dart';
 
 /// Top-level shell hosting the three primary tabs.
 ///
@@ -19,6 +20,7 @@ import '../../features/monitoring/widgets/active_session_bar.dart';
 /// - `/monitoring` → index 0
 /// - `/sessions` (and prefix-matches like `/sessions/`) → index 1
 /// - `/logs` → index 2
+/// - `/settings` → index 3
 /// - `/sessions/:id` is NOT in the IndexedStack — it pushes on top of the
 ///   shell via go_router's `MaterialPage` pageBuilder.
 class MainShell extends ConsumerStatefulWidget {
@@ -31,11 +33,12 @@ class MainShell extends ConsumerStatefulWidget {
 }
 
 class _MainShellState extends ConsumerState<MainShell> {
-  static const _tabs = ['/monitoring', '/sessions', '/logs'];
+  static const _tabs = ['/monitoring', '/sessions', '/logs', '/settings'];
 
   int _indexFor(String loc) {
     if (loc.startsWith('/sessions')) return 1;
     if (loc.startsWith('/logs')) return 2;
+    if (loc.startsWith('/settings')) return 3;
     return 0; // default to monitoring
   }
 
@@ -53,6 +56,7 @@ class _MainShellState extends ConsumerState<MainShell> {
                 MonitoringScreen(),
                 SessionsListScreen(),
                 LogScreen(),
+                SettingsScreen(),
               ],
             ),
           ),
@@ -81,6 +85,11 @@ class _MainShellState extends ConsumerState<MainShell> {
             icon: Icon(Icons.article_outlined),
             selectedIcon: Icon(Icons.article),
             label: 'Logs',
+          ),
+          NavigationDestination(
+            icon: Icon(Icons.settings_outlined),
+            selectedIcon: Icon(Icons.settings),
+            label: 'Settings',
           ),
         ],
       ),
