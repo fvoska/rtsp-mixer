@@ -54,28 +54,33 @@ class _LogScreenState extends State<LogScreen> {
 
     return Scaffold(
       appBar: AppBar(
-        title: Text('Logs (${lines.length})'),
+        title: const Text('Logs'),
         actions: [
-          IconButton(
-            icon: Icon(_autoScroll ? Icons.vertical_align_bottom : Icons.vertical_align_bottom_outlined),
-            tooltip: _autoScroll ? 'Auto-scroll on' : 'Auto-scroll off',
-            onPressed: () => setState(() => _autoScroll = !_autoScroll),
-          ),
-          IconButton(
-            icon: const Icon(Icons.copy),
-            tooltip: 'Copy all to clipboard',
-            onPressed: () {
-              Clipboard.setData(ClipboardData(text: AppLogger.instance.exportFromDisk));
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(content: Text('Logs copied to clipboard')),
-              );
-            },
+          PopupMenuButton<_LogAction>(
+            onSelected: _onMenuAction,
+            itemBuilder: (_) => [
+              CheckedPopupMenuItem(
+                value: _LogAction.toggleAutoScroll,
+                checked: _autoScroll,
+                child: const Text('Auto-scroll'),
+              ),
+              const PopupMenuItem(
+                value: _LogAction.copyAll,
+                child: ListTile(
+                  leading: Icon(Icons.copy),
+                  title: Text('Copy all to clipboard'),
+                  dense: true,
+                  contentPadding: EdgeInsets.zero,
+                ),
+              ),
+            ],
           ),
         ],
-        bottom: PreferredSize(
-          preferredSize: const Size.fromHeight(48),
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+      ),
+      body: Column(
+        children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(12, 8, 12, 4),
             child: TextField(
               style: theme.textTheme.bodySmall,
               decoration: InputDecoration(
@@ -89,27 +94,41 @@ class _LogScreenState extends State<LogScreen> {
               onChanged: (v) => setState(() => _filter = v),
             ),
           ),
-        ),
-      ),
-      body: ListView.builder(
-        controller: _scrollController,
-        itemCount: lines.length,
-        itemBuilder: (_, i) {
-          final line = lines[i];
-          return Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 1),
-            child: Text(
-              line,
-              style: TextStyle(
-                fontFamily: 'monospace',
-                fontSize: 11,
-                color: _colorForLine(line, theme),
-              ),
+          Expanded(
+            child: ListView.builder(
+              controller: _scrollController,
+              itemCount: lines.length,
+              itemBuilder: (_, i) {
+                final line = lines[i];
+                return Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 1),
+                  child: Text(
+                    line,
+                    style: TextStyle(
+                      fontFamily: 'monospace',
+                      fontSize: 11,
+                      color: _colorForLine(line, theme),
+                    ),
+                  ),
+                );
+              },
             ),
-          );
-        },
+          ),
+        ],
       ),
     );
+  }
+
+  void _onMenuAction(_LogAction action) {
+    switch (action) {
+      case _LogAction.toggleAutoScroll:
+        setState(() => _autoScroll = !_autoScroll);
+      case _LogAction.copyAll:
+        Clipboard.setData(ClipboardData(text: AppLogger.instance.exportFromDisk));
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Logs copied to clipboard')),
+        );
+    }
   }
 
   Color _colorForLine(String line, ThemeData theme) {
@@ -122,3 +141,5 @@ class _LogScreenState extends State<LogScreen> {
     return theme.colorScheme.onSurface.withValues(alpha: 0.8);
   }
 }
+
+enum _LogAction { toggleAutoScroll, copyAll }

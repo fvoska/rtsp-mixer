@@ -10,6 +10,7 @@ enum HealthEventType {
   wifiDropped,
   wifiReconnected,
   alertFired,
+  driftResync,
 }
 
 /// Single append-only health event. No copyWith — events are immutable records.

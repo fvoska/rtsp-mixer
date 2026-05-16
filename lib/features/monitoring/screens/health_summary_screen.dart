@@ -426,6 +426,8 @@ class _EventRow extends StatelessWidget {
         return Icons.wifi;
       case HealthEventType.alertFired:
         return Icons.notifications_active_outlined;
+      case HealthEventType.driftResync:
+        return Icons.fast_forward_outlined;
     }
   }
 
@@ -446,6 +448,8 @@ class _EventRow extends StatelessWidget {
         return theme.colorScheme.primary;
       case HealthEventType.monitoringStopped:
         return theme.colorScheme.onSurfaceVariant;
+      case HealthEventType.driftResync:
+        return theme.colorScheme.tertiary;
     }
   }
 
@@ -471,6 +475,8 @@ class _EventRow extends StatelessWidget {
         return 'WiFi reconnected';
       case HealthEventType.alertFired:
         return '5-minute alert sent';
+      case HealthEventType.driftResync:
+        return 'Drift resync';
     }
   }
 }

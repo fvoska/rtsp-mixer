@@ -16,6 +16,7 @@ import '../models/health_event.dart';
 import '../models/player_state.dart';
 import '../services/alert_policy.dart';
 import '../services/connectivity_listener.dart';
+import '../services/drift_watchdog.dart';
 import '../services/reconnect_supervisor.dart';
 import '../services/zombie_watchdog.dart';
 import 'health_events_provider.dart';
@@ -60,6 +61,30 @@ class AudioPlayerNotifier extends AsyncNotifier<MonitoringState> {
     },
   );
 
+  /// Drift watchdog: silent force-forward when demuxer cache grows past the
+  /// configured buffer + tolerance. The only reliable resync on this FFmpeg
+  /// build is stop+open — supervisor handles that via 'drift' cause.
+  late final DriftWatchdog _driftWatchdog = DriftWatchdog(
+    onFire: (cameraId, detail) {
+      try {
+        ref.read(healthEventsProvider.notifier).record(HealthEvent(
+              timestamp: DateTime.now(),
+              type: HealthEventType.driftResync,
+              cameraId: cameraId,
+              cameraName: _findCameraName(cameraId),
+              detail: detail,
+            ));
+      } catch (e) {
+        appLog('DRIFT', '$cameraId: failed to record driftResync event: $e');
+      }
+      _reconnectSupervisor.requestReconnect(cameraId, cause: 'drift');
+    },
+  );
+
+  /// Tolerance added on top of the user-configured audio buffer before a drift
+  /// resync fires. Keeps small jitter from triggering needless reconnects.
+  static const _driftToleranceSeconds = 1.0;
+
   // RELY-01 D-04: 5-min one-shot per-camera alert policy.
   late final AlertPolicy _alertPolicy = AlertPolicy(
     onFire: (cameraId) {
@@ -92,6 +117,7 @@ class AudioPlayerNotifier extends AsyncNotifier<MonitoringState> {
     ref.onDispose(() {
       try { _reconnectSupervisor.cancelAll(); } catch (_) {}
       try { _zombieWatchdog.resetAll(); } catch (_) {}
+      try { _driftWatchdog.resetAll(); } catch (_) {}
       try { _alertPolicy.cancelAll(); } catch (_) {}
       try { _connectivityListener.cancel(); } catch (_) {}
       _levelPollTimer?.cancel();
@@ -620,6 +646,27 @@ class AudioPlayerNotifier extends AsyncNotifier<MonitoringState> {
         } catch (e) {
           appLog('ZOMBIE', 'tick error (non-fatal): $e');
         }
+
+        // Drift detection: feed the watchdog the demuxer's forward cache.
+        // demuxer-cache-duration is the seconds of decoded+demuxed audio
+        // sitting ahead of the playhead. If it exceeds the user buffer plus
+        // tolerance for the confirm window, the watchdog fires a stop+open.
+        try {
+          final cacheStr = await _tryGetProperty(np, 'demuxer-cache-duration');
+          final cache = double.tryParse(cacheStr ?? '');
+          if (cache != null && cache.isFinite && cache >= 0) {
+            final bufferSeconds =
+                ref.read(settingsProvider).audioBufferSeconds;
+            _driftWatchdog.recordCacheDuration(
+              cameraId: cam.cameraId,
+              cacheSeconds: cache,
+              thresholdSeconds: bufferSeconds + _driftToleranceSeconds,
+              pollIntervalMs: _pollInterval.inMilliseconds,
+            );
+          }
+        } catch (e) {
+          appLog('DRIFT', 'cache read error (non-fatal): $e');
+        }
       } catch (_) {
         // Player may be disposed during poll.
       }
@@ -665,7 +712,14 @@ class AudioPlayerNotifier extends AsyncNotifier<MonitoringState> {
     // which caused audible crackling from audio output underruns.
     await nativePlayer.setProperty('cache', 'yes');
     await nativePlayer.setProperty('demuxer-max-bytes', '512KiB');
-    await nativePlayer.setProperty('demuxer-readahead-secs', '2');
+    // Cap backlog at 0 so the demuxer drops already-played audio rather than
+    // accumulating an unbounded history. Without this, brief decoder stalls
+    // overnight let the live edge drift by minutes (audio plays old samples
+    // forever once jitter pushes packets into the back-buffer).
+    await nativePlayer.setProperty('demuxer-max-back-bytes', '0');
+    // Read-ahead matches the playback buffer goal — 1s is enough to absorb
+    // LAN jitter without giving room for noticeable lag.
+    await nativePlayer.setProperty('demuxer-readahead-secs', '1');
     await nativePlayer.setProperty('cache-pause', 'no');
     // Keep audio output buffer small but nonzero for smooth playback.
     await nativePlayer.setProperty(
@@ -762,6 +816,11 @@ class AudioPlayerNotifier extends AsyncNotifier<MonitoringState> {
         _zombieWatchdog.reset(cameraId);
       } catch (e) {
         appLog('ZOMBIE', 'reset error (non-fatal): $e');
+      }
+      try {
+        _driftWatchdog.reset(cameraId);
+      } catch (e) {
+        appLog('DRIFT', 'reset error (non-fatal): $e');
       }
       // WR-03 fix: the new stream's audio-pts starts back near 0. The next
       // poll would otherwise compute a large negative ptsDelta against the
@@ -1075,6 +1134,9 @@ class AudioPlayerNotifier extends AsyncNotifier<MonitoringState> {
     }
     try { _zombieWatchdog.resetAll(); } catch (e) {
       appLog('ZOMBIE', 'resetAll threw during stopMonitoring: $e');
+    }
+    try { _driftWatchdog.resetAll(); } catch (e) {
+      appLog('DRIFT', 'resetAll threw during stopMonitoring: $e');
     }
     _lastAudioPts.clear();
     _baselineLevel.clear();

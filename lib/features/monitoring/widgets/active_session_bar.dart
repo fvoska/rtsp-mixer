@@ -6,6 +6,7 @@ import 'package:go_router/go_router.dart';
 
 import '../../../core/theme/app_theme.dart';
 import '../../../core/theme/spacing.dart';
+import '../../auth/providers/auth_provider.dart';
 import '../providers/session_history_provider.dart';
 
 /// Mini-bar shown above the bottom NavigationBar while monitoring is active
@@ -49,15 +50,25 @@ class _ActiveSessionBarState extends ConsumerState<ActiveSessionBar> {
   @override
   Widget build(BuildContext context) {
     final history = ref.watch(sessionHistoryProvider).value;
+    final authState = ref.watch(authNotifierProvider).value;
     final session = history?.current;
-    if (session == null || widget.selectedIndex == 0) {
+    final resuming = (authState?.resumeMonitoring ?? false) && session == null;
+    // Hide on Monitor tab (inline banner takes over there) and when no session
+    // is in flight and no resume is pending.
+    if (widget.selectedIndex == 0) {
+      return const SizedBox.shrink();
+    }
+    if (session == null && !resuming) {
       return const SizedBox.shrink();
     }
 
     final theme = Theme.of(context);
-    final uptime = DateTime.now().difference(session.startedAt);
-    final formatted = _formatUptime(uptime);
-    final semanticsLabel = 'Return to monitoring, uptime $formatted';
+    final startedAt = session?.startedAt ?? DateTime.now();
+    final uptime = DateTime.now().difference(startedAt);
+    final formatted = session == null ? 'resuming…' : _formatUptime(uptime);
+    final semanticsLabel = session == null
+        ? 'Resuming monitoring'
+        : 'Return to monitoring, uptime $formatted';
 
     return Semantics(
       label: semanticsLabel,
