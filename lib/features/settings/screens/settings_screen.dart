@@ -3,6 +3,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/providers/settings_provider.dart';
 import '../../../core/theme/spacing.dart';
+import '../../auth/providers/auth_provider.dart';
+import '../../monitoring/providers/audio_player_provider.dart';
 
 class SettingsScreen extends ConsumerWidget {
   const SettingsScreen({super.key});
@@ -52,14 +54,21 @@ class SettingsScreen extends ConsumerWidget {
             ),
           ),
           const Divider(height: 1),
-          SwitchListTile(
-            title: const Text('Debug mode'),
+          ListTile(
+            title: const Text('Activity trigger'),
             subtitle: Text(
-              'Show stream info in camera cards',
+              _activityLabel(settings.activityThreshold),
               style: theme.textTheme.bodySmall,
             ),
-            value: settings.debugMode,
-            onChanged: (_) => notifier.toggleDebugMode(),
+          ),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: Spacing.lg),
+            child: Slider(
+              value: settings.activityThreshold,
+              min: 0.01,
+              max: 0.5,
+              onChanged: notifier.setActivityThreshold,
+            ),
           ),
           const Padding(
             padding: EdgeInsets.fromLTRB(
@@ -73,8 +82,55 @@ class SettingsScreen extends ConsumerWidget {
               style: TextStyle(fontSize: 12),
             ),
           ),
+          const Divider(height: 1),
+          ListTile(
+            leading: Icon(Icons.logout, color: theme.colorScheme.error),
+            title: Text(
+              'Sign out',
+              style: TextStyle(color: theme.colorScheme.error),
+            ),
+            subtitle: const Text('Forget the saved Protect API key.'),
+            onTap: () => _confirmSignOut(context, ref),
+          ),
         ],
       ),
     );
+  }
+
+  String _activityLabel(double v) {
+    if (v < 0.05) return 'High sensitivity — highlight even quiet sounds';
+    if (v < 0.15) return 'Medium sensitivity';
+    return 'Low sensitivity — highlight only loud sounds';
+  }
+
+  Future<void> _confirmSignOut(BuildContext context, WidgetRef ref) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Sign out?'),
+        content: const Text(
+          'Active monitoring will be stopped. You will need to re-enter your '
+          'Protect API key to sign back in.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            style: TextButton.styleFrom(
+              foregroundColor: Theme.of(ctx).colorScheme.error,
+            ),
+            onPressed: () => Navigator.of(ctx).pop(true),
+            child: const Text('Sign out'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true) return;
+    // Stop monitoring before logout so the user doesn't end up logged out
+    // with the foreground service + audio still running.
+    await ref.read(audioPlayerProvider.notifier).stopMonitoringAndCleanup();
+    await ref.read(authNotifierProvider.notifier).logout();
   }
 }

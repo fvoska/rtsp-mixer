@@ -156,6 +156,9 @@ class MonitoringState {
     return MonitoringState(cameras: updated);
   }
 
+  MonitoringState copyWith({List<CameraAudioState>? cameras}) =>
+      MonitoringState(cameras: cameras ?? this.cameras);
+
   bool get allLive => cameras.isNotEmpty && cameras.every((c) => c.isLive);
   bool get anyError => cameras.any((c) => c.isError);
 }

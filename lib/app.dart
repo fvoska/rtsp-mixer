@@ -30,16 +30,17 @@ class _AppState extends ConsumerState<App> {
 
   void _onTaskData(Object data) {
     appLog('FGS', 'Received task data: $data (${data.runtimeType})');
+    final notifier = ref.read(audioPlayerProvider.notifier);
     if (data == 'pause') {
-      final notifier = ref.read(audioPlayerProvider.notifier);
       try {
         if (notifier.isAllMuted) {
           notifier.unmuteAll();
           ForegroundServiceManager.updateNotification(
             title: 'Baby Monitor Active',
             text: _currentNotificationText(),
-            notificationButtons: [
-              const NotificationButton(id: 'pause', text: 'Pause'),
+            notificationButtons: const [
+              NotificationButton(id: 'pause', text: 'Pause'),
+              NotificationButton(id: 'stop', text: 'Stop'),
             ],
           );
         } else {
@@ -47,13 +48,20 @@ class _AppState extends ConsumerState<App> {
           ForegroundServiceManager.updateNotification(
             title: 'Baby Monitor — Paused',
             text: 'All cameras muted',
-            notificationButtons: [
-              const NotificationButton(id: 'pause', text: 'Resume'),
+            notificationButtons: const [
+              NotificationButton(id: 'pause', text: 'Resume'),
+              NotificationButton(id: 'stop', text: 'Stop'),
             ],
           );
         }
       } catch (e) {
         appLog('FGS', 'Error handling pause: $e');
+      }
+    } else if (data == 'stop') {
+      try {
+        notifier.stopMonitoringAndCleanup();
+      } catch (e) {
+        appLog('FGS', 'Error handling stop: $e');
       }
     }
   }

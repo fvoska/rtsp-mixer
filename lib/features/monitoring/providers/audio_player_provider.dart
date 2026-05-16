@@ -1174,6 +1174,102 @@ class AudioPlayerNotifier extends AsyncNotifier<MonitoringState> {
     }
   }
 
+  /// Unified entry point for "the user wants monitoring fully stopped."
+  ///
+  /// Used by every stop path (inline Stop banner, media-notification Stop
+  /// button, FGS notification Stop button, sign-out flow). Performs the
+  /// full teardown that the in-process stopMonitoring() alone is not
+  /// responsible for:
+  ///   - delete the `was_monitoring` storage flag so the app doesn't try to
+  ///     auto-resume on next launch
+  ///   - clear AuthState.resumeMonitoring so UI predicates that OR it in
+  ///     don't keep showing "monitoring active" after the user has stopped
+  ///   - tear down players via stopMonitoring()
+  ///   - stop the Android foreground service
+  Future<void> stopMonitoringAndCleanup() async {
+    try {
+      await ref.read(storageProvider).delete('was_monitoring');
+    } catch (e) {
+      appLog('AUDIO', 'failed to delete was_monitoring (continuing): $e');
+    }
+    try {
+      ref.read(authNotifierProvider.notifier).clearResumeFlag();
+    } catch (e) {
+      appLog('AUDIO', 'failed to clear resume flag (continuing): $e');
+    }
+    await stopMonitoring();
+    try {
+      await ForegroundServiceManager.stop();
+    } catch (e) {
+      appLog('AUDIO', 'failed to stop FGS (continuing): $e');
+    }
+  }
+
+  /// Remove a single camera from the live mix without stopping the others.
+  ///
+  /// Disposes that camera's player, drops it from the audio state, removes
+  /// it from the user's selected set, and records a health event. If the
+  /// removed camera was the last one, falls back to a full stop so the
+  /// foreground service isn't left running with nothing to play.
+  Future<void> removeCamera(String cameraId) async {
+    final current = state.value;
+    if (current == null) return;
+    final idx = _cameraIndex(cameraId);
+    if (idx < 0) return;
+    final cam = current.cameras[idx];
+    appLog('AUDIO', 'Removing camera ${cam.cameraName} ($cameraId) from mix');
+
+    // Stop the per-camera reconnect supervisor + clear watchdog state so
+    // they don't fire on a disposed player.
+    try { _reconnectSupervisor.cancel(cameraId); } catch (_) {}
+    try { _zombieWatchdog.reset(cameraId); } catch (_) {}
+    try { _driftWatchdog.reset(cameraId); } catch (_) {}
+    try { _alertPolicy.clear(cameraId); } catch (_) {}
+    LocalNotificationsManager.cancelAlert(cameraId);
+
+    final player = _players.remove(cameraId);
+    _videoControllers.remove(cameraId);
+    _lastAudioPts.remove(cameraId);
+    _baselineLevel.remove(cameraId);
+    if (player != null) {
+      try {
+        await player.stop();
+        await player.dispose();
+      } catch (e) {
+        appLog('AUDIO', 'dispose for $cameraId threw (continuing): $e');
+      }
+    }
+
+    // Drop the camera from MonitoringState.
+    final newCameras = [...current.cameras]..removeAt(idx);
+    state = AsyncData(current.copyWith(cameras: newCameras));
+
+    // Drop from the user's selected set so on next start it stays out.
+    try {
+      ref.read(cameraNotifierProvider.notifier).toggleCamera(cameraId);
+    } catch (e) {
+      // toggleCamera no-ops if not selected; safe to ignore.
+      appLog('AUDIO', 'toggleCamera on remove threw (continuing): $e');
+    }
+
+    try {
+      ref.read(healthEventsProvider.notifier).record(HealthEvent(
+            timestamp: DateTime.now(),
+            type: HealthEventType.monitoringStopped,
+            cameraId: cameraId,
+            cameraName: cam.cameraName,
+            detail: 'removed from mix',
+          ));
+    } catch (_) {}
+
+    // If that was the last camera, fall back to a full stop so the FGS
+    // isn't left running with no audio.
+    if (newCameras.isEmpty) {
+      appLog('AUDIO', 'Last camera removed — performing full stop');
+      await stopMonitoringAndCleanup();
+    }
+  }
+
   /// Save per-camera volume/mute to secure storage.
   void _saveMixState() {
     final current = state.value;

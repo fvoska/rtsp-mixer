@@ -199,6 +199,14 @@ class ReconnectSupervisor {
     appLog('RECONNECT', 'Supervisor cancelled all timers');
   }
 
+  /// Cancel retry state for a single camera (used when a camera is removed
+  /// from the live mix while others keep monitoring).
+  void cancel(String cameraId) {
+    final st = _perCamera.remove(cameraId);
+    st?.retryTimer?.cancel();
+    appLog('RECONNECT', '$cameraId: supervisor state cancelled');
+  }
+
   /// Test hook: inspect pending retry state.
   int attemptCount(String cameraId) => _perCamera[cameraId]?.attempt ?? 0;
   bool hasPendingRetry(String cameraId) =>

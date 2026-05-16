@@ -47,8 +47,11 @@ class ForegroundServiceManager {
       serviceId: 256,
       notificationTitle: 'Baby Monitor Active',
       notificationText: notificationText,
-      notificationButtons: [
-        const NotificationButton(id: 'pause', text: 'Pause'),
+      notificationButtons: const [
+        // 'pause' toggles mute-all (label flips Pause <-> Resume).
+        // 'stop' ends monitoring entirely.
+        NotificationButton(id: 'pause', text: 'Pause'),
+        NotificationButton(id: 'stop', text: 'Stop'),
       ],
       callback: startCallback,
     );
@@ -103,8 +106,8 @@ class MonitoringTaskHandler extends TaskHandler {
   @override
   void onNotificationButtonPressed(String id) {
     print('[FGS] Notification button pressed: $id');
-    if (id == 'pause') {
-      FlutterForegroundTask.sendDataToMain('pause');
+    if (id == 'pause' || id == 'stop') {
+      FlutterForegroundTask.sendDataToMain(id);
     }
   }
 

@@ -142,5 +142,41 @@ void main() {
       expect(c.read(authNotifierProvider).value?.isAuthenticated, false);
       expect(await storage.loadCredentials(), isNull);
     });
+
+    test('clearResumeFlag flips resumeMonitoring to false', () async {
+      // Simulate "app died mid-session" by setting the was_monitoring flag
+      // before the notifier reads it on build().
+      await storage.saveCredentials('10.0.0.1', 'key');
+      await storage.write('was_monitoring', 'true');
+      api.verifyResult = true;
+      final c = createContainer(storage: storage, api: api);
+      addTearDown(c.dispose);
+      final state = await waitForAuth(c);
+      expect(state.resumeMonitoring, isTrue,
+          reason: 'was_monitoring=true should surface as resumeMonitoring');
+
+      c.read(authNotifierProvider.notifier).clearResumeFlag();
+      expect(
+        c.read(authNotifierProvider).value?.resumeMonitoring,
+        isFalse,
+        reason: 'after clearResumeFlag the predicate driving the stop banner '
+            'must read false — otherwise the banner stays visible forever and '
+            'the Stop button looks broken',
+      );
+      // host preserved
+      expect(c.read(authNotifierProvider).value?.host, '10.0.0.1');
+    });
+
+    test('clearResumeFlag is a no-op when already false', () async {
+      await storage.saveCredentials('10.0.0.1', 'key');
+      api.verifyResult = true;
+      final c = createContainer(storage: storage, api: api);
+      addTearDown(c.dispose);
+      final state = await waitForAuth(c);
+      expect(state.resumeMonitoring, isFalse);
+      // Should not throw, should leave state untouched.
+      c.read(authNotifierProvider.notifier).clearResumeFlag();
+      expect(c.read(authNotifierProvider).value?.isAuthenticated, isTrue);
+    });
   });
 }

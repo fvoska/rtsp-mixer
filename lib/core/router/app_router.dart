@@ -4,7 +4,6 @@ import 'package:go_router/go_router.dart';
 
 import '../../features/auth/providers/auth_provider.dart';
 import '../../features/auth/screens/login_screen.dart';
-import '../../features/cameras/screens/camera_list_screen.dart';
 import '../../features/monitoring/providers/session_history_provider.dart';
 import '../../features/monitoring/screens/health_summary_screen.dart';
 import '../widgets/main_shell.dart';
@@ -28,11 +27,16 @@ final appRouterProvider = Provider<GoRouter>((ref) {
         return location == '/login' ? null : '/login';
       }
 
-      // Authenticated — always land in the shell on /monitoring. When no
-      // cameras are selected, MonitoringScreen renders an empty state with
-      // a CTA to /cameras. This way the persistent nav (Sessions / Logs /
-      // Settings) is reachable immediately, not gated behind monitoring.
+      // Authenticated — always land in the shell on /monitoring. The Monitor
+      // tab handles both the idle (camera picker) and live states, so the
+      // tab bar is reachable immediately and the user never gets stuck on a
+      // headerless camera-selection screen.
       if (location == '/login') {
+        return '/monitoring';
+      }
+
+      // Legacy /cameras link folded into /monitoring (idle state).
+      if (location == '/cameras') {
         return '/monitoring';
       }
 
@@ -40,7 +44,6 @@ final appRouterProvider = Provider<GoRouter>((ref) {
     },
     routes: [
       GoRoute(path: '/login', builder: (_, __) => const LoginScreen()),
-      GoRoute(path: '/cameras', builder: (_, __) => const CameraListScreen()),
       // Session detail lives ABOVE the shell so it stacks like a normal
       // detail page (its own AppBar + back button, no tab bar — standard
       // mobile pattern). Keeping it inside the ShellRoute hid it because

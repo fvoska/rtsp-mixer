@@ -88,8 +88,13 @@ class MonitoringAudioHandler extends BaseAudioHandler {
   @override
   Future<void> stop() async {
     appLog('AUDIO_SERVICE', 'MediaSession stop');
+    // Full cleanup so the user's expectation matches the label: Stop ends
+    // monitoring everywhere — deletes was_monitoring, clears the resume
+    // flag, tears down players, and stops the foreground service. Without
+    // this the inline banner / mini-bar stay visible after the media-
+    // notification Stop, which made it look like the button did nothing.
     try {
-      await _ref.read(audioPlayerProvider.notifier).stopMonitoring();
+      await _ref.read(audioPlayerProvider.notifier).stopMonitoringAndCleanup();
     } catch (e) {
       appLog('AUDIO_SERVICE', 'Error in stop: $e');
     }

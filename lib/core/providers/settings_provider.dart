@@ -12,24 +12,25 @@ class AppSettings {
   /// Audio output buffer in seconds. Higher = smoother, more latency.
   final double audioBufferSeconds;
 
-  /// Show debug info in camera cards and other screens.
-  final bool debugMode;
+  /// Activity-trigger sensitivity for the highlight border on camera cards.
+  /// 0.01 = most sensitive (any sound), 0.5 = least.
+  final double activityThreshold;
 
   const AppSettings({
     this.useRtsp = false,
     this.audioBufferSeconds = 0.5,
-    this.debugMode = false,
+    this.activityThreshold = 0.05,
   });
 
   AppSettings copyWith({
     bool? useRtsp,
     double? audioBufferSeconds,
-    bool? debugMode,
+    double? activityThreshold,
   }) =>
       AppSettings(
         useRtsp: useRtsp ?? this.useRtsp,
         audioBufferSeconds: audioBufferSeconds ?? this.audioBufferSeconds,
-        debugMode: debugMode ?? this.debugMode,
+        activityThreshold: activityThreshold ?? this.activityThreshold,
       );
 
   @override
@@ -38,21 +39,24 @@ class AppSettings {
       other is AppSettings &&
           useRtsp == other.useRtsp &&
           audioBufferSeconds == other.audioBufferSeconds &&
-          debugMode == other.debugMode;
+          activityThreshold == other.activityThreshold;
 
   @override
-  int get hashCode => Object.hash(useRtsp, audioBufferSeconds, debugMode);
+  int get hashCode =>
+      Object.hash(useRtsp, audioBufferSeconds, activityThreshold);
 
   Map<String, dynamic> toJson() => {
         'useRtsp': useRtsp,
         'audioBufferSeconds': audioBufferSeconds,
-        'debugMode': debugMode,
+        'activityThreshold': activityThreshold,
       };
 
   factory AppSettings.fromJson(Map<String, dynamic> json) => AppSettings(
         useRtsp: json['useRtsp'] as bool? ?? false,
-        audioBufferSeconds: (json['audioBufferSeconds'] as num?)?.toDouble() ?? 0.5,
-        debugMode: json['debugMode'] as bool? ?? false,
+        audioBufferSeconds:
+            (json['audioBufferSeconds'] as num?)?.toDouble() ?? 0.5,
+        activityThreshold:
+            (json['activityThreshold'] as num?)?.toDouble() ?? 0.05,
       );
 }
 
@@ -71,7 +75,8 @@ class SettingsNotifier extends Notifier<AppSettings> {
       if (raw != null) {
         final settings = AppSettings.fromJson(jsonDecode(raw) as Map<String, dynamic>);
         state = settings;
-        appLog('SETTINGS', 'Loaded: rtsp=${settings.useRtsp} buffer=${settings.audioBufferSeconds}s debug=${settings.debugMode}');
+        appLog('SETTINGS',
+            'Loaded: rtsp=${settings.useRtsp} buffer=${settings.audioBufferSeconds}s activity=${settings.activityThreshold}');
       }
     } catch (e) {
       appLog('SETTINGS', 'Failed to load settings: $e');
@@ -96,9 +101,9 @@ class SettingsNotifier extends Notifier<AppSettings> {
     _save();
   }
 
-  void toggleDebugMode() {
-    state = state.copyWith(debugMode: !state.debugMode);
-    appLog('SETTINGS', 'Debug mode: ${state.debugMode}');
+  void setActivityThreshold(double value) {
+    state = state.copyWith(activityThreshold: value);
+    appLog('SETTINGS', 'Activity threshold: $value');
     _save();
   }
 }

@@ -1,11 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_foreground_task/flutter_foreground_task.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:go_router/go_router.dart';
 
 import '../../../core/logging/app_logger.dart';
 import '../../../core/providers/settings_provider.dart';
 import '../../../core/services/foreground_service.dart';
+import '../../../core/theme/app_theme.dart';
 import '../../../core/theme/spacing.dart';
 import '../../auth/providers/auth_provider.dart';
 import '../../cameras/providers/camera_provider.dart';
@@ -26,8 +26,9 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen>
   /// Global video toggle.
   bool _globalVideo = false;
 
-  /// Border highlight sensitivity. 0.0 = most sensitive, 1.0 = least.
-  double _activityThreshold = 0.05;
+  /// Whether to show extra per-camera debug detail (replaces the old global
+  /// debug-mode setting — this lives per-screen-session only).
+  bool _showDetails = false;
 
   /// Per-camera video overrides. If absent, follows _globalVideo.
   final Map<String, bool> _perCameraVideo = {};
@@ -39,42 +40,57 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen>
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
-    Future.microtask(() async {
-      // Request notification permission (required on Android 13+)
-      final notifPerm = await FlutterForegroundTask.checkNotificationPermission();
+    Future.microtask(_maybeAutoResume);
+  }
+
+  /// Only auto-start monitoring on mount if the auth layer signals that the
+  /// previous session should be resumed (was_monitoring=true on disk). The
+  /// idle Monitor tab is now a first-class state where the user explicitly
+  /// taps Start — we don't want every tab switch back to Monitor to silently
+  /// reconnect streams.
+  Future<void> _maybeAutoResume() async {
+    // Notification + battery permissions — fine to request on every mount,
+    // they're idempotent on the platform side.
+    try {
+      final notifPerm =
+          await FlutterForegroundTask.checkNotificationPermission();
       if (notifPerm != NotificationPermission.granted) {
         appLog('FGS', 'Requesting notification permission');
         await FlutterForegroundTask.requestNotificationPermission();
       }
-      // Request battery optimization exemption for overnight reliability
       if (!await FlutterForegroundTask.isIgnoringBatteryOptimizations) {
         appLog('FGS', 'Requesting battery optimization exemption');
         await FlutterForegroundTask.requestIgnoreBatteryOptimization();
       }
+    } catch (e) {
+      appLog('FGS', 'Permission request failed (continuing): $e');
+    }
 
-      // Cameras are already loaded by AuthNotifier before we get here.
-      // startMonitoring is idempotent (260514-siv) — safe to call when the
-      // ShellRoute re-mounts MonitoringScreen for any reason.
-      await ref.read(audioPlayerProvider.notifier).startMonitoring();
-      // Start foreground service after monitoring is active
-      final monState = ref.read(audioPlayerProvider).value;
-      if (monState != null && monState.cameras.isNotEmpty) {
-        final names = monState.cameras.map((c) => c.cameraName).toList();
-        await ForegroundServiceManager.start(names);
-        // Remember monitoring state for auto-resume on app restart
-        await ref.read(storageProvider).write('was_monitoring', 'true');
+    final resume = ref.read(authNotifierProvider).value?.resumeMonitoring ?? false;
+    if (!resume) {
+      appLog('UI', 'Monitor tab mounted with no resume flag — staying idle');
+      return;
+    }
+    await _startMonitoringFlow();
+  }
 
-        // Initialize audio_service for MediaSession lock screen controls (D-04)
-        try {
-          final handler = await ref.read(audioHandlerProvider.future);
-          handler.setCameraNames(names);
-          handler.setPlaying();
-        } catch (e) {
-          // audio_service is nice-to-have -- don't break monitoring if it fails
-          appLog('AUDIO_SERVICE', 'Failed to init audio handler: $e');
-        }
+  /// Begin monitoring with the current camera selection. Used by both
+  /// the explicit Start button and the auto-resume path.
+  Future<void> _startMonitoringFlow() async {
+    await ref.read(audioPlayerProvider.notifier).startMonitoring();
+    final monState = ref.read(audioPlayerProvider).value;
+    if (monState != null && monState.cameras.isNotEmpty) {
+      final names = monState.cameras.map((c) => c.cameraName).toList();
+      await ForegroundServiceManager.start(names);
+      await ref.read(storageProvider).write('was_monitoring', 'true');
+      try {
+        final handler = await ref.read(audioHandlerProvider.future);
+        handler.setCameraNames(names);
+        handler.setPlaying();
+      } catch (e) {
+        appLog('AUDIO_SERVICE', 'Failed to init audio handler: $e');
       }
-    });
+    }
   }
 
   @override
@@ -85,7 +101,6 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen>
     super.dispose();
   }
 
-
   bool _isVideoOn(String cameraId) =>
       _perCameraVideo[cameraId] ?? _globalVideo;
 
@@ -95,8 +110,6 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen>
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (_disposed) return;
-    // D-06: Video preview auto-disables when app is backgrounded or screen turns off.
-    // Re-enables when user returns. Audio continues uninterrupted.
     try {
       final notifier = ref.read(audioPlayerProvider.notifier);
       if (state == AppLifecycleState.inactive ||
@@ -119,7 +132,6 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen>
     }
   }
 
-  /// Re-apply the per-camera video state after lifecycle resume.
   void _restoreVideoState() {
     final notifier = ref.read(audioPlayerProvider.notifier);
     final cameras = ref.read(audioPlayerProvider).value?.cameras ?? [];
@@ -149,10 +161,15 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen>
   }
 
   Future<void> _onStopPressed() async {
-    await ref.read(storageProvider).delete('was_monitoring');
-    await ref.read(audioPlayerProvider.notifier).stopMonitoring();
-    await ForegroundServiceManager.stop();
-    if (mounted) context.go('/cameras');
+    await ref.read(audioPlayerProvider.notifier).stopMonitoringAndCleanup();
+    // Intentionally no navigation — the Monitor tab now handles the idle
+    // state (camera picker) so the user can pick + restart without leaving.
+  }
+
+  Future<void> _onRemoveCamera(String cameraId) async {
+    await ref.read(audioPlayerProvider.notifier).removeCamera(cameraId);
+    _perCameraVideo.remove(cameraId);
+    if (mounted) setState(() {});
   }
 
   @override
@@ -160,98 +177,29 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen>
     final monitoringState = ref.watch(audioPlayerProvider);
     final sessionHistory = ref.watch(sessionHistoryProvider).value;
     final authState = ref.watch(authNotifierProvider).value;
-    // Stop control visibility depends on whether a session exists OR the auth
-    // layer is signalling a monitoring resume. hasCameras is intentionally not
-    // part of this predicate: on relaunch (was_monitoring=true) and during the
-    // camera-fetch window of startMonitoring, cameras may briefly be empty even
-    // though the user has an active session they need to be able to stop.
     final hasCurrentSession = sessionHistory?.current != null ||
         (authState?.resumeMonitoring ?? false);
 
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('Monitoring'),
-      ),
+      appBar: AppBar(title: const Text('Monitoring')),
       body: Column(
         children: [
           if (hasCurrentSession)
             _InlineStopBanner(onStop: _onStopPressed),
           Expanded(
-            child: monitoringState.when(
-              loading: () => const Center(child: CircularProgressIndicator()),
-              error: (e, _) => Center(child: Text('Error: $e')),
-              data: (state) {
-                final debugMode = ref.watch(settingsProvider).debugMode;
-                if (state.cameras.isEmpty) {
-                  // Two reasons this branch fires:
-                  //   1. No cameras selected yet — show a CTA to /cameras.
-                  //   2. Cameras are selected but haven't connected yet — spinner.
-                  final selected =
-                      ref.watch(cameraNotifierProvider).value?.selectedCameras ??
-                          const [];
-                  if (selected.isEmpty) {
-                    return const _NoCamerasSelected();
-                  }
-                  return const Center(child: CircularProgressIndicator());
-                }
-                return SingleChildScrollView(
-                  padding: const EdgeInsets.all(Spacing.lg),
-                  child: Column(
-                    children: [
-                      _VideoToggleRow(
-                        globalVideoOn: _globalVideo,
-                        onToggle: _toggleGlobalVideo,
-                      ),
-                      const SizedBox(height: Spacing.md),
-                      for (int i = 0; i < state.cameras.length; i++) ...[
-                        CameraAudioCard(
-                          cameraState: state.cameras[i],
-                          cameraIndex: i,
-                          showVideoPreview: _isVideoOn(state.cameras[i].cameraId),
-                          showDebugInfo: debugMode,
-                          activityThreshold: _activityThreshold,
-                          onToggleVideo: () =>
-                              _toggleCameraVideo(state.cameras[i].cameraId),
-                        ),
-                        if (i < state.cameras.length - 1)
-                          const SizedBox(height: Spacing.lg),
-                      ],
-                      // Sensitivity slider (debug mode only)
-                      if (debugMode) ...[
-                        const SizedBox(height: Spacing.lg),
-                        Row(
-                          children: [
-                            Text('Activity trigger',
-                                style: Theme.of(context).textTheme.bodySmall),
-                            Expanded(
-                              child: Slider(
-                                value: _activityThreshold,
-                                min: 0.01,
-                                max: 0.5,
-                                onChanged: (v) =>
-                                    setState(() => _activityThreshold = v),
-                              ),
-                            ),
-                            SizedBox(
-                              width: 48,
-                              child: Text(
-                                _activityThreshold < 0.05
-                                    ? 'High'
-                                    : _activityThreshold < 0.15
-                                        ? 'Med'
-                                        : 'Low',
-                                style: Theme.of(context).textTheme.bodySmall,
-                                textAlign: TextAlign.right,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ],
-                    ],
-                  ),
-                );
-              },
-            ),
+            child: hasCurrentSession
+                ? _LiveMonitoringView(
+                    monitoringState: monitoringState,
+                    globalVideo: _globalVideo,
+                    showDetails: _showDetails,
+                    onToggleGlobalVideo: _toggleGlobalVideo,
+                    onToggleShowDetails: () =>
+                        setState(() => _showDetails = !_showDetails),
+                    isVideoOn: _isVideoOn,
+                    onToggleCameraVideo: _toggleCameraVideo,
+                    onRemoveCamera: _onRemoveCamera,
+                  )
+                : _IdleCameraPicker(onStart: _startMonitoringFlow),
           ),
         ],
       ),
@@ -259,10 +207,8 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen>
   }
 }
 
-/// Sticky red banner at the top of the monitoring body that lets the user stop
-/// the session at any time — including the relaunch window where audio is
-/// resuming but cameras haven't reloaded yet. Mirrors the visual language of
-/// [ActiveSessionBar] so the control feels the same on every tab.
+/// Sticky red banner at the top of the monitoring body that lets the user
+/// stop the session at any time.
 class _InlineStopBanner extends StatelessWidget {
   const _InlineStopBanner({required this.onStop});
 
@@ -314,14 +260,85 @@ class _InlineStopBanner extends StatelessWidget {
   }
 }
 
-class _VideoToggleRow extends StatelessWidget {
-  const _VideoToggleRow({
+class _LiveMonitoringView extends ConsumerWidget {
+  const _LiveMonitoringView({
+    required this.monitoringState,
+    required this.globalVideo,
+    required this.showDetails,
+    required this.onToggleGlobalVideo,
+    required this.onToggleShowDetails,
+    required this.isVideoOn,
+    required this.onToggleCameraVideo,
+    required this.onRemoveCamera,
+  });
+
+  final AsyncValue monitoringState;
+  final bool globalVideo;
+  final bool showDetails;
+  final VoidCallback onToggleGlobalVideo;
+  final VoidCallback onToggleShowDetails;
+  final bool Function(String cameraId) isVideoOn;
+  final void Function(String cameraId) onToggleCameraVideo;
+  final Future<void> Function(String cameraId) onRemoveCamera;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    return monitoringState.when(
+      loading: () => const Center(child: CircularProgressIndicator()),
+      error: (e, _) => Center(child: Text('Error: $e')),
+      data: (state) {
+        final activityThreshold =
+            ref.watch(settingsProvider).activityThreshold;
+        if (state.cameras.isEmpty) {
+          // Resuming or just-finished-stop transient — keep the chrome stable
+          // while the new state lands.
+          return const Center(child: CircularProgressIndicator());
+        }
+        return SingleChildScrollView(
+          padding: const EdgeInsets.all(Spacing.lg),
+          child: Column(
+            children: [
+              _LiveToolbar(
+                globalVideoOn: globalVideo,
+                showDetails: showDetails,
+                onToggleGlobalVideo: onToggleGlobalVideo,
+                onToggleShowDetails: onToggleShowDetails,
+              ),
+              const SizedBox(height: Spacing.md),
+              for (int i = 0; i < state.cameras.length; i++) ...[
+                CameraAudioCard(
+                  cameraState: state.cameras[i],
+                  cameraIndex: i,
+                  showVideoPreview: isVideoOn(state.cameras[i].cameraId),
+                  showDebugInfo: showDetails,
+                  activityThreshold: activityThreshold,
+                  onToggleVideo: () =>
+                      onToggleCameraVideo(state.cameras[i].cameraId),
+                  onRemove: () => onRemoveCamera(state.cameras[i].cameraId),
+                ),
+                if (i < state.cameras.length - 1)
+                  const SizedBox(height: Spacing.lg),
+              ],
+            ],
+          ),
+        );
+      },
+    );
+  }
+}
+
+class _LiveToolbar extends StatelessWidget {
+  const _LiveToolbar({
     required this.globalVideoOn,
-    required this.onToggle,
+    required this.showDetails,
+    required this.onToggleGlobalVideo,
+    required this.onToggleShowDetails,
   });
 
   final bool globalVideoOn;
-  final VoidCallback onToggle;
+  final bool showDetails;
+  final VoidCallback onToggleGlobalVideo;
+  final VoidCallback onToggleShowDetails;
 
   @override
   Widget build(BuildContext context) {
@@ -329,13 +346,15 @@ class _VideoToggleRow extends StatelessWidget {
     return Row(
       children: [
         Expanded(
-          child: Text(
-            'Cameras',
-            style: theme.textTheme.titleMedium,
-          ),
+          child: Text('Cameras', style: theme.textTheme.titleMedium),
         ),
         TextButton.icon(
-          onPressed: onToggle,
+          onPressed: onToggleShowDetails,
+          icon: Icon(showDetails ? Icons.info : Icons.info_outline),
+          label: Text(showDetails ? 'Hide details' : 'Show details'),
+        ),
+        TextButton.icon(
+          onPressed: onToggleGlobalVideo,
           icon: Icon(globalVideoOn ? Icons.videocam : Icons.videocam_off),
           label: Text(globalVideoOn ? 'Hide video' : 'Show video'),
         ),
@@ -344,45 +363,143 @@ class _VideoToggleRow extends StatelessWidget {
   }
 }
 
-class _NoCamerasSelected extends StatelessWidget {
-  const _NoCamerasSelected();
+/// Idle state: pick up to 2 cameras + Start Monitoring.
+class _IdleCameraPicker extends ConsumerWidget {
+  const _IdleCameraPicker({required this.onStart});
+
+  final Future<void> Function() onStart;
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final theme = Theme.of(context);
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: Spacing.xl),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(
-              Icons.videocam_off_outlined,
-              size: 64,
-              color: theme.colorScheme.onSurfaceVariant,
-            ),
-            const SizedBox(height: Spacing.lg),
-            Text(
-              'No cameras selected',
-              style: theme.textTheme.titleLarge,
-            ),
-            const SizedBox(height: Spacing.sm),
-            Text(
-              'Pick the cameras you want to listen to. You can change them anytime.',
-              textAlign: TextAlign.center,
-              style: theme.textTheme.bodyMedium?.copyWith(
-                color: theme.colorScheme.onSurfaceVariant,
+    final cameraState = ref.watch(cameraNotifierProvider);
+
+    return cameraState.when(
+      loading: () => const Center(child: CircularProgressIndicator()),
+      error: (e, _) => Center(
+        child: Text('Error: $e',
+            style: TextStyle(color: theme.colorScheme.error)),
+      ),
+      data: (state) {
+        if (state.cameras.isEmpty) {
+          return Center(
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: Spacing.xl),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(Icons.videocam_off_outlined,
+                      size: 64,
+                      color: theme.colorScheme.onSurfaceVariant),
+                  const SizedBox(height: Spacing.lg),
+                  Text('No cameras found',
+                      style: theme.textTheme.titleLarge),
+                  const SizedBox(height: Spacing.sm),
+                  Text(
+                    'Pull to refresh, or enable RTSP on a Protect camera.',
+                    textAlign: TextAlign.center,
+                    style: theme.textTheme.bodyMedium?.copyWith(
+                      color: theme.colorScheme.onSurfaceVariant,
+                    ),
+                  ),
+                  const SizedBox(height: Spacing.lg),
+                  TextButton.icon(
+                    onPressed: () {
+                      final host =
+                          ref.read(authNotifierProvider).value?.host;
+                      if (host != null) {
+                        ref
+                            .read(cameraNotifierProvider.notifier)
+                            .loadCameras(host);
+                      }
+                    },
+                    icon: const Icon(Icons.refresh),
+                    label: const Text('Refresh'),
+                  ),
+                ],
               ),
             ),
-            const SizedBox(height: Spacing.xl),
-            FilledButton.icon(
-              icon: const Icon(Icons.videocam),
-              label: const Text('Select cameras'),
-              onPressed: () => context.push('/cameras'),
+          );
+        }
+        final atLimit = state.selectedIds.length >= 2;
+        return Column(
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(
+                  Spacing.lg, Spacing.lg, Spacing.lg, Spacing.sm),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      'Choose 1 or 2 cameras to monitor',
+                      style: theme.textTheme.bodyLarge,
+                    ),
+                  ),
+                  IconButton(
+                    icon: const Icon(Icons.refresh),
+                    tooltip: 'Refresh cameras',
+                    onPressed: () {
+                      final host =
+                          ref.read(authNotifierProvider).value?.host;
+                      if (host != null) {
+                        ref
+                            .read(cameraNotifierProvider.notifier)
+                            .loadCameras(host);
+                      }
+                    },
+                  ),
+                ],
+              ),
+            ),
+            Expanded(
+              child: ListView.builder(
+                itemCount: state.cameras.length,
+                itemBuilder: (_, i) {
+                  final cam = state.cameras[i];
+                  final selected = state.selectedIds.contains(cam.id);
+                  final muted = atLimit && !selected;
+                  return Opacity(
+                    opacity: muted ? 0.5 : 1.0,
+                    child: CheckboxListTile(
+                      value: selected,
+                      onChanged: (_) => ref
+                          .read(cameraNotifierProvider.notifier)
+                          .toggleCamera(cam.id),
+                      title: Text(cam.name ?? 'Unnamed Camera'),
+                      subtitle: Text(cam.state),
+                      secondary: Container(
+                        width: 8,
+                        height: 8,
+                        decoration: BoxDecoration(
+                          shape: BoxShape.circle,
+                          color: cam.isConnected
+                              ? AppTheme.statusOnline
+                              : AppTheme.statusOffline,
+                        ),
+                      ),
+                    ),
+                  );
+                },
+              ),
+            ),
+            SafeArea(
+              child: Padding(
+                padding: const EdgeInsets.symmetric(
+                    horizontal: Spacing.lg, vertical: Spacing.md),
+                child: SizedBox(
+                  width: double.infinity,
+                  height: 48,
+                  child: FilledButton.icon(
+                    icon: const Icon(Icons.play_arrow_rounded),
+                    label: const Text('Start monitoring'),
+                    onPressed: state.canStartMonitoring ? () => onStart() : null,
+                  ),
+                ),
+              ),
             ),
           ],
-        ),
-      ),
+        );
+      },
     );
   }
 }

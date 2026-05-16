@@ -100,6 +100,25 @@ class AuthNotifier extends AsyncNotifier<AuthState> {
     await storage.clearAll();
     state = const AsyncData(AuthState.unauthenticated());
   }
+
+  /// Drop the resumeMonitoring flag from the current AuthState.
+  ///
+  /// resumeMonitoring is set at app-launch from the persisted `was_monitoring`
+  /// key and reflects "the app died with monitoring running — resume it." Once
+  /// the user explicitly stops monitoring, that signal is no longer valid;
+  /// without clearing it the UI predicates that combine it with session state
+  /// (inline stop banner, ActiveSessionBar) would stay visible forever,
+  /// making the Stop button look broken.
+  void clearResumeFlag() {
+    final current = state.value;
+    if (current == null || !current.isAuthenticated) return;
+    if (!current.resumeMonitoring) return;
+    state = AsyncData(AuthState.authenticated(
+      host: current.host,
+      resumeMonitoring: false,
+    ));
+    appLog('AUTH', 'Cleared resumeMonitoring flag');
+  }
 }
 
 final authNotifierProvider =

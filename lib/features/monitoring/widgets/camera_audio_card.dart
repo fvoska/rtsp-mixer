@@ -16,6 +16,7 @@ class CameraAudioCard extends ConsumerStatefulWidget {
   final bool showDebugInfo;
   final double activityThreshold;
   final VoidCallback? onToggleVideo;
+  final VoidCallback? onRemove;
 
   const CameraAudioCard({
     super.key,
@@ -25,6 +26,7 @@ class CameraAudioCard extends ConsumerStatefulWidget {
     this.showDebugInfo = false,
     this.activityThreshold = 0.05,
     this.onToggleVideo,
+    this.onRemove,
   });
 
   @override
@@ -68,6 +70,37 @@ class _CameraAudioCardState extends ConsumerState<CameraAudioCard> {
 
   void _resetView() {
     _transformController.value = Matrix4.identity();
+  }
+
+  Future<void> _confirmRemove(BuildContext context) async {
+    final onRemove = widget.onRemove;
+    if (onRemove == null) return;
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text('Remove ${widget.cameraState.cameraName}?'),
+        content: const Text(
+          'Stops just this camera. Other cameras keep monitoring. '
+          'If this is the last camera, monitoring will stop.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            style: TextButton.styleFrom(
+              foregroundColor: Theme.of(ctx).colorScheme.error,
+            ),
+            onPressed: () => Navigator.of(ctx).pop(true),
+            child: const Text('Remove'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed == true) {
+      onRemove();
+    }
   }
 
   @override
@@ -213,6 +246,16 @@ class _CameraAudioCardState extends ConsumerState<CameraAudioCard> {
                           ? 'Hide video'
                           : 'Show video',
                       onPressed: widget.onToggleVideo,
+                    ),
+                  if (widget.onRemove != null)
+                    IconButton(
+                      icon: Icon(
+                        Icons.close_rounded,
+                        size: 20,
+                        color: theme.colorScheme.error,
+                      ),
+                      tooltip: 'Remove from mix',
+                      onPressed: () => _confirmRemove(context),
                     ),
                 ],
               ),
