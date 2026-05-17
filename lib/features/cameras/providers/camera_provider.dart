@@ -84,11 +84,9 @@ class CameraNotifier extends AsyncNotifier<CameraState> {
     if (newIds.contains(cameraId)) {
       newIds.remove(cameraId);
       appLog('CAM', 'Deselected camera $cameraId (${newIds.length} selected)');
-    } else if (newIds.length < 2) {
+    } else {
       newIds.add(cameraId);
       appLog('CAM', 'Selected camera $cameraId (${newIds.length} selected)');
-    } else {
-      return;
     }
     state = AsyncData(current.copyWith(selectedIds: newIds));
     ref.read(storageProvider).saveSelectedCameraIds(newIds.toList());

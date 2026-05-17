@@ -301,6 +301,7 @@ class _LiveMonitoringView extends ConsumerWidget {
               _LiveToolbar(
                 globalVideoOn: globalVideo,
                 showDetails: showDetails,
+                cameraCount: state.cameras.length,
                 onToggleGlobalVideo: onToggleGlobalVideo,
                 onToggleShowDetails: onToggleShowDetails,
               ),
@@ -331,12 +332,14 @@ class _LiveToolbar extends StatelessWidget {
   const _LiveToolbar({
     required this.globalVideoOn,
     required this.showDetails,
+    required this.cameraCount,
     required this.onToggleGlobalVideo,
     required this.onToggleShowDetails,
   });
 
   final bool globalVideoOn;
   final bool showDetails;
+  final int cameraCount;
   final VoidCallback onToggleGlobalVideo;
   final VoidCallback onToggleShowDetails;
 
@@ -345,6 +348,24 @@ class _LiveToolbar extends StatelessWidget {
     final theme = Theme.of(context);
     return Row(
       children: [
+        if (cameraCount > 2) ...[
+          Chip(
+            avatar: Icon(
+              Icons.warning_amber_outlined,
+              size: 16,
+              color: theme.colorScheme.onTertiaryContainer,
+            ),
+            label: Text(
+              'More than 2 cameras may degrade performance and battery life.',
+              style: theme.textTheme.labelSmall?.copyWith(
+                color: theme.colorScheme.onTertiaryContainer,
+              ),
+            ),
+            backgroundColor: theme.colorScheme.tertiaryContainer,
+            visualDensity: VisualDensity.compact,
+          ),
+          const SizedBox(width: Spacing.sm),
+        ],
         Expanded(
           child: Text('Cameras', style: theme.textTheme.titleMedium),
         ),
@@ -363,7 +384,7 @@ class _LiveToolbar extends StatelessWidget {
   }
 }
 
-/// Idle state: pick up to 2 cameras + Start Monitoring.
+/// Idle state: pick cameras to monitor + Start Monitoring.
 class _IdleCameraPicker extends ConsumerWidget {
   const _IdleCameraPicker({required this.onStart});
 
@@ -421,7 +442,6 @@ class _IdleCameraPicker extends ConsumerWidget {
             ),
           );
         }
-        final atLimit = state.selectedIds.length >= 2;
         return Column(
           children: [
             Padding(
@@ -431,7 +451,7 @@ class _IdleCameraPicker extends ConsumerWidget {
                 children: [
                   Expanded(
                     child: Text(
-                      'Choose 1 or 2 cameras to monitor',
+                      'Choose cameras to monitor — 2 recommended',
                       style: theme.textTheme.bodyLarge,
                     ),
                   ),
@@ -457,31 +477,53 @@ class _IdleCameraPicker extends ConsumerWidget {
                 itemBuilder: (_, i) {
                   final cam = state.cameras[i];
                   final selected = state.selectedIds.contains(cam.id);
-                  final muted = atLimit && !selected;
-                  return Opacity(
-                    opacity: muted ? 0.5 : 1.0,
-                    child: CheckboxListTile(
-                      value: selected,
-                      onChanged: (_) => ref
-                          .read(cameraNotifierProvider.notifier)
-                          .toggleCamera(cam.id),
-                      title: Text(cam.name ?? 'Unnamed Camera'),
-                      subtitle: Text(cam.state),
-                      secondary: Container(
-                        width: 8,
-                        height: 8,
-                        decoration: BoxDecoration(
-                          shape: BoxShape.circle,
-                          color: cam.isConnected
-                              ? AppTheme.statusOnline
-                              : AppTheme.statusOffline,
-                        ),
+                  return CheckboxListTile(
+                    value: selected,
+                    onChanged: (_) => ref
+                        .read(cameraNotifierProvider.notifier)
+                        .toggleCamera(cam.id),
+                    title: Text(cam.name ?? 'Unnamed Camera'),
+                    subtitle: Text(cam.state),
+                    secondary: Container(
+                      width: 8,
+                      height: 8,
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        color: cam.isConnected
+                            ? AppTheme.statusOnline
+                            : AppTheme.statusOffline,
                       ),
                     ),
                   );
                 },
               ),
             ),
+            if (state.hasPerformanceRisk)
+              Container(
+                width: double.infinity,
+                color: theme.colorScheme.tertiaryContainer,
+                padding: const EdgeInsets.symmetric(
+                    horizontal: Spacing.lg, vertical: Spacing.sm),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.center,
+                  children: [
+                    Icon(
+                      Icons.warning_amber_outlined,
+                      size: 18,
+                      color: theme.colorScheme.onTertiaryContainer,
+                    ),
+                    const SizedBox(width: Spacing.sm),
+                    Expanded(
+                      child: Text(
+                        'More than 2 cameras may degrade performance and battery life.',
+                        style: theme.textTheme.bodySmall?.copyWith(
+                          color: theme.colorScheme.onTertiaryContainer,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
             SafeArea(
               child: Padding(
                 padding: const EdgeInsets.symmetric(

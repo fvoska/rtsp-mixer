@@ -6,7 +6,9 @@ class CameraState {
 
   const CameraState({this.cameras = const [], this.selectedIds = const {}});
 
-  bool get canStartMonitoring => selectedIds.isNotEmpty && selectedIds.length <= 2;
+  bool get canStartMonitoring => selectedIds.isNotEmpty;
+
+  bool get hasPerformanceRisk => selectedIds.length > 2;
 
   List<ProtectCamera> get selectedCameras =>
       cameras.where((c) => selectedIds.contains(c.id)).toList();
