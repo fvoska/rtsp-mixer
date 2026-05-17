@@ -38,7 +38,7 @@ ProviderContainer createContainer({
 Future<CameraState> waitForCameras(ProviderContainer c) async {
   for (var i = 0; i < 100; i++) {
     final v = c.read(cameraNotifierProvider);
-    if (v is AsyncData<CameraState>) return v.value!;
+    if (v is AsyncData<CameraState>) return v.value;
     if (v is AsyncError) throw v.error!;
     await Future.delayed(const Duration(milliseconds: 10));
   }
@@ -50,9 +50,9 @@ Future<CameraState> waitForCamerasWithUrls(ProviderContainer c) async {
   for (var i = 0; i < 100; i++) {
     final v = c.read(cameraNotifierProvider);
     if (v is AsyncData<CameraState> &&
-        v.value!.cameras.isNotEmpty &&
-        v.value!.cameras.every((cam) => cam.rtspsStreamUrls.isNotEmpty)) {
-      return v.value!;
+        v.value.cameras.isNotEmpty &&
+        v.value.cameras.every((cam) => cam.rtspsStreamUrls.isNotEmpty)) {
+      return v.value;
     }
     await Future.delayed(const Duration(milliseconds: 10));
   }

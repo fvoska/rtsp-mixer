@@ -37,7 +37,7 @@ ProviderContainer createContainer({
 Future<AuthState> waitForAuth(ProviderContainer c) async {
   for (var i = 0; i < 100; i++) {
     final v = c.read(authNotifierProvider);
-    if (v is AsyncData<AuthState>) return v.value!;
+    if (v is AsyncData<AuthState>) return v.value;
     if (v is AsyncError) throw v.error!;
     await Future.delayed(const Duration(milliseconds: 10));
   }
