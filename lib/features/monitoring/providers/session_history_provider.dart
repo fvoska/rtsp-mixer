@@ -11,7 +11,7 @@ import '../services/session_history_repository.dart';
 /// Immutable snapshot of session history.
 ///
 /// `current` is the in-flight session (or null if no session is running).
-/// `past` is the list of finalized sessions, most-recent first, max length 10.
+/// `past` is the list of finalized sessions, most-recent first, max length 100.
 class SessionHistory {
   final Session? current;
   final List<Session> past;
@@ -156,7 +156,8 @@ class SessionHistoryNotifier extends AsyncNotifier<SessionHistory> {
     }
   }
 
-  /// Move the current session into `past` (trimmed to 10) and clear `current`.
+  /// Move the current session into `past` (trimmed to [SessionHistoryRepository.maxPast])
+  /// and clear `current`.
   /// Awaits a synchronous flush so the freshly-ended session is on disk before
   /// the caller proceeds (Stop button + restart-and-see-history flow).
   Future<void> endCurrentSession() async {

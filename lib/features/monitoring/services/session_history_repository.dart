@@ -18,11 +18,11 @@ import '../models/session.dart';
 /// ```
 /// { "current": Session|null, "past": [Session, ...] }
 /// ```
-/// `past` is trimmed to the 10 most recent finalized sessions.
+/// `past` is trimmed to the 100 most recent finalized sessions.
 class SessionHistoryRepository {
   static const _filename = 'sessions.json';
   static const _tmpSuffix = '.tmp';
-  static const maxPast = 10;
+  static const maxPast = 100;
 
   /// Load `(current, past)` from disk. Returns an empty pair on any failure
   /// (missing file, corrupt JSON, IO error). Never throws.
@@ -60,7 +60,7 @@ class SessionHistoryRepository {
         }
       }
 
-      // Defense in depth — even if disk had >10, trim on the way in.
+      // Defense in depth — even if disk had >maxPast, trim on the way in.
       final trimmed = past.length > maxPast ? past.sublist(0, maxPast) : past;
       return (current: current, past: trimmed);
     } on FormatException catch (e) {

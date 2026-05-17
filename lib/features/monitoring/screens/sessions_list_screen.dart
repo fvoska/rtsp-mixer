@@ -10,7 +10,7 @@ import '../models/session.dart';
 import '../providers/session_history_provider.dart';
 
 /// `/sessions` tab — lists the in-flight session (if any) followed by up to
-/// 10 finalized sessions, most-recent first.
+/// 100 finalized sessions, most-recent first.
 ///
 /// Per the 260514-siv plan: the in-flight row uses a 1-second periodic
 /// StreamBuilder so the uptime ticks live. Finalized rows render their
