@@ -22,7 +22,7 @@ class LocalNotificationsManager {
     try {
       const androidInit = AndroidInitializationSettings('@mipmap/ic_launcher');
       await _plugin.initialize(
-        const InitializationSettings(android: androidInit),
+        settings: const InitializationSettings(android: androidInit),
       );
       const channel = AndroidNotificationChannel(
         'baby_monitor_alert',
@@ -69,10 +69,10 @@ class LocalNotificationsManager {
         ticker: 'Camera offline',
       );
       await _plugin.show(
-        cameraId.hashCode,
-        'Camera offline: $cameraName',
-        'No audio for 5 minutes. Tap to check.',
-        const NotificationDetails(android: details),
+        id: cameraId.hashCode,
+        title: 'Camera offline: $cameraName',
+        body: 'No audio for 5 minutes. Tap to check.',
+        notificationDetails: const NotificationDetails(android: details),
       );
     } catch (e) {
       // Defensive: never let notification failures kill the monitoring loop.
@@ -85,7 +85,7 @@ class LocalNotificationsManager {
   static Future<void> cancelAlert(String cameraId) async {
     try {
       appLog('NOTIF', 'Cancel alert for $cameraId');
-      await _plugin.cancel(cameraId.hashCode);
+      await _plugin.cancel(id: cameraId.hashCode);
     } catch (e) {
       appLog('NOTIF', 'cancelAlert failed for $cameraId: $e');
     }
