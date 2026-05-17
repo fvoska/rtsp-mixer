@@ -13,8 +13,8 @@ void main() {
         var attempts = 0;
         final sup = ReconnectSupervisor(
           onAttempt: (_) async => attempts++,
-          onStatusChange: (_, __) {},
-          onEvent: (_, __, ___) {},
+          onStatusChange: (_, _) {},
+          onEvent: (_, _, _) {},
         );
         // First call enters, schedules retry. Second is suppressed because
         // a retry is already scheduled for this cameraId.
@@ -32,8 +32,8 @@ void main() {
         final sup = ReconnectSupervisor(
           onAttempt: (id) async =>
               id == 'cam1' ? attemptsCam1++ : attemptsCam2++,
-          onStatusChange: (_, __) {},
-          onEvent: (_, __, ___) {},
+          onStatusChange: (_, _) {},
+          onEvent: (_, _, _) {},
         );
         sup.requestReconnect('cam1', cause: 'player_error');
         sup.requestReconnect('cam2', cause: 'player_error');
@@ -58,8 +58,8 @@ void main() {
               throw StateError('seed failure');
             }
           },
-          onStatusChange: (_, __) {},
-          onEvent: (_, __, ___) {},
+          onStatusChange: (_, _) {},
+          onEvent: (_, _, _) {},
         );
         // First trigger: seeds attempt 0, fires after ~1s backoff (jittered).
         sup.requestReconnect('cam1', cause: 'player_error');
@@ -99,8 +99,8 @@ void main() {
               await completer.future;
             }
           },
-          onStatusChange: (_, __) {},
-          onEvent: (_, __, ___) {},
+          onStatusChange: (_, _) {},
+          onEvent: (_, _, _) {},
         );
         sup.requestReconnect('cam1',
             cause: 'wifi_reconnect', immediate: true);

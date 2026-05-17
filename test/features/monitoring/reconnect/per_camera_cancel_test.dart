@@ -12,8 +12,8 @@ void main() {
             attempts.add(id);
             throw StateError('keep failing'); // force re-schedule
           },
-          onStatusChange: (_, __) {},
-          onEvent: (_, __, ___) {},
+          onStatusChange: (_, _) {},
+          onEvent: (_, _, _) {},
         );
 
         sup.requestReconnect('cam1', cause: 'test');
@@ -37,8 +37,8 @@ void main() {
       fakeAsync((async) {
         final sup = ReconnectSupervisor(
           onAttempt: (_) async => throw StateError('fail'),
-          onStatusChange: (_, __) {},
-          onEvent: (_, __, ___) {},
+          onStatusChange: (_, _) {},
+          onEvent: (_, _, _) {},
         );
         sup.requestReconnect('cam1', cause: 'test');
         async.elapse(const Duration(seconds: 10));

@@ -47,7 +47,7 @@ class SessionsListScreen extends ConsumerWidget {
               vertical: Spacing.md,
             ),
             itemCount: entries.length,
-            separatorBuilder: (_, __) => const SizedBox(height: Spacing.sm),
+            separatorBuilder: (_, _) => const SizedBox(height: Spacing.sm),
             itemBuilder: (_, i) => entries[i],
           );
         },

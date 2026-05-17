@@ -43,7 +43,7 @@ final appRouterProvider = Provider<GoRouter>((ref) {
       return null;
     },
     routes: [
-      GoRoute(path: '/login', builder: (_, __) => const LoginScreen()),
+      GoRoute(path: '/login', builder: (_, _) => const LoginScreen()),
       // Session detail lives ABOVE the shell so it stacks like a normal
       // detail page (its own AppBar + back button, no tab bar — standard
       // mobile pattern). Keeping it inside the ShellRoute hid it because
@@ -71,19 +71,19 @@ final appRouterProvider = Provider<GoRouter>((ref) {
         routes: [
           GoRoute(
             path: '/monitoring',
-            builder: (_, __) => const SizedBox.shrink(),
+            builder: (_, _) => const SizedBox.shrink(),
           ),
           GoRoute(
             path: '/sessions',
-            builder: (_, __) => const SizedBox.shrink(),
+            builder: (_, _) => const SizedBox.shrink(),
           ),
           GoRoute(
             path: '/logs',
-            builder: (_, __) => const SizedBox.shrink(),
+            builder: (_, _) => const SizedBox.shrink(),
           ),
           GoRoute(
             path: '/settings',
-            builder: (_, __) => const SizedBox.shrink(),
+            builder: (_, _) => const SizedBox.shrink(),
           ),
         ],
       ),
@@ -117,6 +117,6 @@ class _SessionDetailRoute extends ConsumerWidget {
 
 class _AuthRefreshNotifier extends ChangeNotifier {
   _AuthRefreshNotifier(Ref ref) {
-    ref.listen(authNotifierProvider, (_, __) => notifyListeners());
+    ref.listen(authNotifierProvider, (_, _) => notifyListeners());
   }
 }

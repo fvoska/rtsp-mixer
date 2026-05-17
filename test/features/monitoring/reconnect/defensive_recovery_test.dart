@@ -12,8 +12,8 @@ void main() {
             attempts++;
             throw StateError('simulated failure $attempts');
           },
-          onStatusChange: (_, __) {},
-          onEvent: (_, __, ___) {},
+          onStatusChange: (_, _) {},
+          onEvent: (_, _, _) {},
         );
         sup.requestReconnect('cam1', cause: 'player_error');
         // Cumulative elapsed well past the sum of first 5 backoffs
@@ -33,8 +33,8 @@ void main() {
             // First two throw, rest succeed.
             if (attempts <= 2) throw Exception('boom $attempts');
           },
-          onStatusChange: (_, __) {},
-          onEvent: (_, __, ___) {},
+          onStatusChange: (_, _) {},
+          onEvent: (_, _, _) {},
         );
         sup.requestReconnect('cam1', cause: 'player_error');
         async.elapse(const Duration(seconds: 10));

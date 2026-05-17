@@ -23,7 +23,7 @@ class ProtectApiClient {
     // Accept self-signed certificates (Unifi consoles use them)
     (_dio.httpClientAdapter as IOHttpClientAdapter).createHttpClient = () {
       final client = HttpClient();
-      client.badCertificateCallback = (_, __, ___) => true;
+      client.badCertificateCallback = (_, _, _) => true;
       return client;
     };
 

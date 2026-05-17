@@ -12,7 +12,7 @@ void main() {
         final sup = ReconnectSupervisor(
           onAttempt: (_) async {}, // success
           onStatusChange: (_, s) => statuses.add(s),
-          onEvent: (t, _, __) => events.add(t),
+          onEvent: (t, _, _) => events.add(t),
         );
         sup.requestReconnect('cam1', cause: 'player_error');
         async.elapse(const Duration(seconds: 2));
@@ -37,8 +37,8 @@ void main() {
             attempts++;
             throw StateError('fail'); // force re-schedule
           },
-          onStatusChange: (_, __) {},
-          onEvent: (_, __, ___) {},
+          onStatusChange: (_, _) {},
+          onEvent: (_, _, _) {},
         );
         sup.requestReconnect('cam1', cause: 'player_error');
         async.elapse(const Duration(seconds: 2)); // attempt 0 fires
