@@ -1,6 +1,8 @@
 import 'dart:convert';
+import 'dart:io';
 
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
+import 'package:path_provider/path_provider.dart';
 
 import '../logging/app_logger.dart';
 
@@ -12,8 +14,50 @@ import '../logging/app_logger.dart';
 /// (e.g. unsigned macOS builds during development).
 class StorageService {
   static const _storage = FlutterSecureStorage();
+  static const _installMarkerFilename = '.install_marker';
   final Map<String, String> _fallback = {};
   bool _useFallback = false;
+
+  /// Single-flight guard for the fresh-install check so concurrent callers
+  /// share one wipe attempt and we never re-wipe within a process.
+  Future<void>? _freshInstallCheck;
+
+  /// Wipe secure storage if no install-marker file exists in the app data
+  /// directory. On macOS/iOS, Keychain entries (credentials, was_monitoring,
+  /// cached/selected cameras) survive app uninstall — without this check, a
+  /// reinstall inherits the previous install's state and the app
+  /// auto-resumes into a stale session. The app documents directory IS
+  /// wiped on uninstall, so the marker's absence is a reliable
+  /// "first launch after fresh install" signal.
+  ///
+  /// Safe to call multiple times — only the first call does any work.
+  /// Failures are logged and swallowed (degrade to "leave Keychain alone")
+  /// so we never block app startup on a path_provider hiccup.
+  Future<void> ensureFreshInstallChecked() {
+    return _freshInstallCheck ??= _runFreshInstallCheck();
+  }
+
+  Future<void> _runFreshInstallCheck() async {
+    try {
+      final dir = await getApplicationDocumentsDirectory();
+      final marker = File(
+        '${dir.path}${Platform.pathSeparator}$_installMarkerFilename',
+      );
+      if (await marker.exists()) return;
+
+      appLog('STORAGE',
+          'install marker missing — wiping stale secure storage (likely reinstall)');
+      await deleteAll();
+
+      await marker.create(recursive: true);
+      await marker.writeAsString(
+        DateTime.now().toIso8601String(),
+        flush: true,
+      );
+    } catch (e) {
+      appLog('STORAGE', 'Fresh-install check failed (continuing): $e');
+    }
+  }
 
   Future<void> write(String key, String value) async {
     if (_useFallback) {

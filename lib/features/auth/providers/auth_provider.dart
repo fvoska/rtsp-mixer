@@ -15,6 +15,12 @@ class AuthNotifier extends AsyncNotifier<AuthState> {
   Future<AuthState> build() async {
     appLog('AUTH', 'build() — checking saved credentials');
     final storage = ref.read(storageProvider);
+    // Reset Keychain if this is the first launch after a reinstall.
+    // flutter_secure_storage on macOS/iOS is Keychain-backed, which survives
+    // app uninstall — without this, a fresh install inherits the previous
+    // install's credentials, `was_monitoring`, and camera selections, and
+    // auto-resumes into a stale session.
+    await storage.ensureFreshInstallChecked();
     final creds = await storage.loadCredentials();
     if (creds == null) {
       appLog('AUTH', 'No saved credentials');
