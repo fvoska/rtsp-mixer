@@ -5,7 +5,7 @@ milestone_name: milestone
 status: executing
 stopped_at: Phase 4 UI-SPEC approved
 last_updated: "2026-04-24T10:25:55.850Z"
-last_activity: 2026-04-24 -- Phase 04 execution started
+last_activity: 2026-05-17 -- Quick task 260516-vgb (allow >2 cameras + perf warning)
 progress:
   total_phases: 4
   completed_phases: 3
@@ -28,7 +28,7 @@ See: .planning/PROJECT.md (updated 2026-04-01)
 Phase: 04 (reliability-overnight-monitoring) — EXECUTING
 Plan: 1 of 5
 Status: Executing Phase 04
-Last activity: 2026-04-24 -- Phase 04 execution started
+Last activity: 2026-05-17 -- Completed quick task 260516-vgb: Allow more than 2 cameras with performance warning
 
 Progress: [█████░░░░░] 50%
 
@@ -93,6 +93,7 @@ None yet.
 | ID | Date | Slug | Summary | Plan |
 |----|------|------|---------|------|
 | 260514-siv | 2026-05-14 | session-history | Persist last 10 sessions to `sessions.json`; shell-based bottom NavigationBar with IndexedStack (Monitor/Sessions/Logs) keeps audio running across tabs; ActiveSessionBar mini-player; Stop moved to FAB; `startMonitoring` made idempotent | [PLAN](quick/260514-siv-session-history/260514-siv-PLAN.md) · [SUMMARY](quick/260514-siv-session-history/260514-siv-SUMMARY.md) |
+| 260516-vgb | 2026-05-17 | allow-more-than-2-cameras-with-performan | Drop hard 2-camera cap (`canStartMonitoring` now requires only `selectedIds.isNotEmpty`); add `hasPerformanceRisk` getter; remove `toggleCamera` silent-reject branch; idle picker shows tertiary-container warning banner when selection > 2; live monitoring toolbar shows compact warning Chip when active count > 2 | [PLAN](quick/260516-vgb-allow-more-than-2-cameras-with-performan/260516-vgb-PLAN.md) · [SUMMARY](quick/260516-vgb-allow-more-than-2-cameras-with-performan/260516-vgb-SUMMARY.md) |
 
 ### Blockers/Concerns
 
