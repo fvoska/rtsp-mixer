@@ -451,7 +451,7 @@ class _IdleCameraPicker extends ConsumerWidget {
                 children: [
                   Expanded(
                     child: Text(
-                      'Choose cameras to monitor — 2 recommended',
+                      'Choose cameras to monitor',
                       style: theme.textTheme.bodyLarge,
                     ),
                   ),
