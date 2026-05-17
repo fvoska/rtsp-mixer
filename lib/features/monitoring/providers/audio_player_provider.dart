@@ -35,6 +35,24 @@ class AudioPlayerNotifier extends AsyncNotifier<MonitoringState> {
   final Map<String, double> _baselineLevel = {};
   String _lastNotificationText = '';
 
+  /// Serializes lifecycle operations (start / stop / settings-driven restart)
+  /// so they can never interleave. Concurrent invocations chain on this
+  /// future and run one after the other; without it, a user-clicked Stop
+  /// could race against an in-flight settings-driven `_restartIfMonitoring`
+  /// and end up with orphaned players still emitting audio after the banner
+  /// has been torn down.
+  Future<void>? _lifecycleOp;
+
+  /// Set by `stopMonitoringAndCleanup` so a queued or in-progress
+  /// settings-driven restart bails out instead of resurrecting streams
+  /// after the user asked for a full stop. Cleared by `startMonitoring`.
+  bool _stopRequested = false;
+
+  /// Coalesces rapid settings changes (e.g. dragging the buffer slider,
+  /// which fires per snap with `divisions: 9`) into one restart at the
+  /// final value rather than N back-to-back restart cycles.
+  Timer? _settingsRestartDebounce;
+
   late final ReconnectSupervisor _reconnectSupervisor = ReconnectSupervisor(
     onAttempt: _performReconnectOpen,
     onStatusChange: _applyReconnectStatus,
@@ -115,6 +133,8 @@ class AudioPlayerNotifier extends AsyncNotifier<MonitoringState> {
   @override
   Future<MonitoringState> build() async {
     ref.onDispose(() {
+      _settingsRestartDebounce?.cancel();
+      _settingsRestartDebounce = null;
       try { _reconnectSupervisor.cancelAll(); } catch (_) {}
       try { _zombieWatchdog.resetAll(); } catch (_) {}
       try { _driftWatchdog.resetAll(); } catch (_) {}
@@ -135,22 +155,61 @@ class AudioPlayerNotifier extends AsyncNotifier<MonitoringState> {
     });
 
     // Auto-restart streams when RTSP or audio buffer settings change.
+    // Debounced so a slider drag doesn't enqueue one restart per snap.
     ref.listen(settingsProvider, (prev, next) {
       if (prev == null) return;
       if (prev.useRtsp != next.useRtsp ||
           prev.audioBufferSeconds != next.audioBufferSeconds) {
-        _restartIfMonitoring();
+        _settingsRestartDebounce?.cancel();
+        _settingsRestartDebounce = Timer(
+          const Duration(milliseconds: 400),
+          () {
+            _settingsRestartDebounce = null;
+            // ignore: unawaited_futures
+            _restartIfMonitoring();
+          },
+        );
       }
     });
 
     return const MonitoringState();
   }
 
+  /// Chain [op] onto the lifecycle operation queue so start/stop/restart
+  /// never overlap. See [_lifecycleOp].
+  Future<void> _runLifecycle(Future<void> Function() op) async {
+    final previous = _lifecycleOp;
+    final completer = Completer<void>();
+    _lifecycleOp = completer.future;
+    try {
+      if (previous != null) {
+        try {
+          await previous;
+        } catch (_) {
+          // Don't let a previous op's failure block subsequent ops.
+        }
+      }
+      await op();
+    } finally {
+      completer.complete();
+      if (identical(_lifecycleOp, completer.future)) {
+        _lifecycleOp = null;
+      }
+    }
+  }
+
   Future<void> _restartIfMonitoring() async {
-    if (_players.isEmpty) return;
-    appLog('AUDIO', 'Stream settings changed — restarting streams');
-    await stopMonitoring();
-    await startMonitoring();
+    return _runLifecycle(() async {
+      if (_stopRequested) return;
+      if (_players.isEmpty) return;
+      appLog('AUDIO', 'Stream settings changed — restarting streams');
+      await stopMonitoring();
+      if (_stopRequested) {
+        appLog('AUDIO', 'Restart aborted — user requested stop during restart');
+        return;
+      }
+      await startMonitoring();
+    });
   }
 
   /// Expose players for video preview widgets.
@@ -314,6 +373,9 @@ class AudioPlayerNotifier extends AsyncNotifier<MonitoringState> {
       );
 
   Future<void> startMonitoring({bool videoPreview = false}) async {
+    // Any new start clears the stop flag so a subsequent settings-driven
+    // restart isn't permanently suppressed by an earlier Stop.
+    _stopRequested = false;
     final cameraState = ref.read(cameraNotifierProvider).value;
     final selectedCameras = cameraState?.selectedCameras ?? [];
     if (selectedCameras.isEmpty) {
@@ -1187,22 +1249,31 @@ class AudioPlayerNotifier extends AsyncNotifier<MonitoringState> {
   ///   - tear down players via stopMonitoring()
   ///   - stop the Android foreground service
   Future<void> stopMonitoringAndCleanup() async {
-    try {
-      await ref.read(storageProvider).delete('was_monitoring');
-    } catch (e) {
-      appLog('AUDIO', 'failed to delete was_monitoring (continuing): $e');
-    }
-    try {
-      ref.read(authNotifierProvider.notifier).clearResumeFlag();
-    } catch (e) {
-      appLog('AUDIO', 'failed to clear resume flag (continuing): $e');
-    }
-    await stopMonitoring();
-    try {
-      await ForegroundServiceManager.stop();
-    } catch (e) {
-      appLog('AUDIO', 'failed to stop FGS (continuing): $e');
-    }
+    // Preempt any settings-driven restart that hasn't started yet and signal
+    // any in-flight restart to bail before it resurrects the streams. Without
+    // this, a Stop click during a buffer/RTSP-driven restart leaves orphaned
+    // players running with no banner left to stop them again.
+    _settingsRestartDebounce?.cancel();
+    _settingsRestartDebounce = null;
+    _stopRequested = true;
+    return _runLifecycle(() async {
+      try {
+        await ref.read(storageProvider).delete('was_monitoring');
+      } catch (e) {
+        appLog('AUDIO', 'failed to delete was_monitoring (continuing): $e');
+      }
+      try {
+        ref.read(authNotifierProvider.notifier).clearResumeFlag();
+      } catch (e) {
+        appLog('AUDIO', 'failed to clear resume flag (continuing): $e');
+      }
+      await stopMonitoring();
+      try {
+        await ForegroundServiceManager.stop();
+      } catch (e) {
+        appLog('AUDIO', 'failed to stop FGS (continuing): $e');
+      }
+    });
   }
 
   /// Remove a single camera from the live mix without stopping the others.
