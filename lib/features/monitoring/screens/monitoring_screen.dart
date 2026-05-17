@@ -9,6 +9,7 @@ import '../../../core/theme/app_theme.dart';
 import '../../../core/theme/spacing.dart';
 import '../../auth/providers/auth_provider.dart';
 import '../../cameras/providers/camera_provider.dart';
+import '../models/player_state.dart';
 import '../providers/audio_player_provider.dart';
 import '../providers/session_history_provider.dart';
 import '../services/audio_handler.dart';
@@ -185,7 +186,10 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen>
       body: Column(
         children: [
           if (hasCurrentSession)
-            _InlineStopBanner(onStop: _onStopPressed),
+            _InlineStopBanner(
+              status: _resolveBannerStatus(monitoringState),
+              onStop: _onStopPressed,
+            ),
           Expanded(
             child: hasCurrentSession
                 ? _LiveMonitoringView(
@@ -207,18 +211,40 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen>
   }
 }
 
-/// Sticky red banner at the top of the monitoring body that lets the user
-/// stop the session at any time.
-class _InlineStopBanner extends StatelessWidget {
-  const _InlineStopBanner({required this.onStop});
+/// Health status for the sticky monitoring banner. Drives banner color so a
+/// glance gives the user honest feedback (green = streaming, blue =
+/// connecting / reconnecting, red = error) rather than always reading as
+/// "error" the way a hard-coded red bar did.
+enum _BannerStatus { playing, connecting, error }
 
+_BannerStatus _resolveBannerStatus(AsyncValue<MonitoringState> async) {
+  if (async.hasError) return _BannerStatus.error;
+  final state = async.value;
+  if (state == null || state.cameras.isEmpty) return _BannerStatus.connecting;
+  if (state.anyError) return _BannerStatus.error;
+  if (state.allLive) return _BannerStatus.playing;
+  return _BannerStatus.connecting;
+}
+
+/// Sticky banner at the top of the monitoring body that lets the user stop
+/// the session at any time. Color reflects current stream health.
+class _InlineStopBanner extends StatelessWidget {
+  const _InlineStopBanner({required this.status, required this.onStop});
+
+  final _BannerStatus status;
   final VoidCallback onStop;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final background = switch (status) {
+      _BannerStatus.playing => AppTheme.statusOnline,
+      _BannerStatus.connecting => AppTheme.statusConnecting,
+      _BannerStatus.error => AppTheme.statusOffline,
+    };
+    const foreground = Colors.black87;
     return Material(
-      color: theme.colorScheme.errorContainer,
+      color: background,
       child: SafeArea(
         top: false,
         bottom: false,
@@ -229,25 +255,25 @@ class _InlineStopBanner extends StatelessWidget {
           ),
           child: Row(
             children: [
-              Icon(
+              const Icon(
                 Icons.fiber_manual_record,
                 size: 12,
-                color: theme.colorScheme.onErrorContainer,
+                color: foreground,
               ),
               const SizedBox(width: Spacing.sm),
               Expanded(
                 child: Text(
                   'Monitoring active',
                   style: theme.textTheme.titleSmall?.copyWith(
-                    color: theme.colorScheme.onErrorContainer,
+                    color: foreground,
                   ),
                 ),
               ),
               FilledButton.tonalIcon(
                 onPressed: onStop,
                 style: FilledButton.styleFrom(
-                  backgroundColor: theme.colorScheme.onErrorContainer,
-                  foregroundColor: theme.colorScheme.errorContainer,
+                  backgroundColor: foreground,
+                  foregroundColor: background,
                 ),
                 icon: const Icon(Icons.stop_rounded),
                 label: const Text('Stop'),

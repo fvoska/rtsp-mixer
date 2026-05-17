@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 abstract final class AppTheme {
   static const statusOnline = Color(0xFF81C784);
   static const statusOffline = Color(0xFFE57373);
+  static const statusConnecting = Color(0xFF64B5F6);
 
   static final dark = _buildDark();
 
