@@ -21,8 +21,21 @@ class LocalNotificationsManager {
     if (_initialized) return;
     try {
       const androidInit = AndroidInitializationSettings('@mipmap/ic_launcher');
+      // Windows: `flutter_local_notifications` v21+ requires explicit
+      // initialization settings when the plugin loads on Windows, otherwise
+      // every show()/cancel() throws "must be initialized before use". The
+      // GUID is a stable random identifier for the notification activation
+      // callback; appUserModelId mirrors the Android/macOS bundle ID.
+      const windowsInit = WindowsInitializationSettings(
+        appName: 'RTSP Mixer',
+        appUserModelId: 'tech.voska.rtsp_mixer',
+        guid: '9b5e3f8a-7c4d-4a2e-bf91-8d6c5e4f3a2b',
+      );
       await _plugin.initialize(
-        settings: const InitializationSettings(android: androidInit),
+        settings: const InitializationSettings(
+          android: androidInit,
+          windows: windowsInit,
+        ),
       );
       const channel = AndroidNotificationChannel(
         'baby_monitor_alert',
@@ -68,11 +81,17 @@ class LocalNotificationsManager {
         ongoing: false,
         ticker: 'Camera offline',
       );
+      const windowsDetails = WindowsNotificationDetails(
+        scenario: WindowsNotificationScenario.alarm,
+      );
       await _plugin.show(
         id: cameraId.hashCode,
         title: 'Camera offline: $cameraName',
         body: 'No audio for 5 minutes. Tap to check.',
-        notificationDetails: const NotificationDetails(android: details),
+        notificationDetails: const NotificationDetails(
+          android: details,
+          windows: windowsDetails,
+        ),
       );
     } catch (e) {
       // Defensive: never let notification failures kill the monitoring loop.

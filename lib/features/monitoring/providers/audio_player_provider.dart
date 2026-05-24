@@ -357,6 +357,15 @@ class AudioPlayerNotifier extends AsyncNotifier<MonitoringState> {
              log.text.contains('no frame'))) {
           return;
         }
+        // Windows: VideoController is created eagerly so a later
+        // user toggle to video=auto works without recreating the player,
+        // but with vid=no the EGL surface init fails harmlessly. Filter the
+        // dxva2-egl "Failed to create EGL surface" line so it doesn't spam
+        // the log every reconnect.
+        if (log.prefix.contains('libmpv_render/dxva2-egl') &&
+            log.text.contains('Failed to create EGL surface')) {
+          return;
+        }
         appLog('MPV', '$cameraName [${log.prefix}] ${log.level}: ${log.text}');
       }),
     );
