@@ -1,3 +1,6 @@
+import 'dart:io' show Platform;
+
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter_foreground_task/flutter_foreground_task.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -51,20 +54,25 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen>
   /// reconnect streams.
   Future<void> _maybeAutoResume() async {
     // Notification + battery permissions — fine to request on every mount,
-    // they're idempotent on the platform side.
-    try {
-      final notifPerm =
-          await FlutterForegroundTask.checkNotificationPermission();
-      if (notifPerm != NotificationPermission.granted) {
-        appLog('FGS', 'Requesting notification permission');
-        await FlutterForegroundTask.requestNotificationPermission();
+    // they're idempotent on the platform side. Skip entirely on non-Android
+    // platforms (Windows desktop, etc.) since FlutterForegroundTask has no
+    // implementation there. Per CLAUDE.md "Defensive error handling":
+    // wrap in try/catch even inside the platform guard.
+    if (!kIsWeb && Platform.isAndroid) {
+      try {
+        final notifPerm =
+            await FlutterForegroundTask.checkNotificationPermission();
+        if (notifPerm != NotificationPermission.granted) {
+          appLog('FGS', 'Requesting notification permission');
+          await FlutterForegroundTask.requestNotificationPermission();
+        }
+        if (!await FlutterForegroundTask.isIgnoringBatteryOptimizations) {
+          appLog('FGS', 'Requesting battery optimization exemption');
+          await FlutterForegroundTask.requestIgnoreBatteryOptimization();
+        }
+      } catch (e) {
+        appLog('FGS', 'Permission request failed (continuing): $e');
       }
-      if (!await FlutterForegroundTask.isIgnoringBatteryOptimizations) {
-        appLog('FGS', 'Requesting battery optimization exemption');
-        await FlutterForegroundTask.requestIgnoreBatteryOptimization();
-      }
-    } catch (e) {
-      appLog('FGS', 'Permission request failed (continuing): $e');
     }
 
     final resume = ref.read(authNotifierProvider).value?.resumeMonitoring ?? false;
