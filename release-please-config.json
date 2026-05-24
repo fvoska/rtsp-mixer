@@ -1,0 +1,24 @@
+{
+  "$schema": "https://raw.githubusercontent.com/googleapis/release-please/main/schemas/config.json",
+  "packages": {
+    ".": {
+      "release-type": "dart",
+      "package-name": "rtsp_mixer",
+      "draft": true,
+      "include-v-in-tag": true,
+      "include-component-in-tag": false,
+      "changelog-sections": [
+        { "type": "feat",     "section": "Features" },
+        { "type": "fix",      "section": "Bug Fixes" },
+        { "type": "perf",     "section": "Performance" },
+        { "type": "refactor", "section": "Refactors" },
+        { "type": "docs",     "section": "Documentation", "hidden": false },
+        { "type": "chore",    "section": "Chores",        "hidden": false },
+        { "type": "build",    "section": "Build",         "hidden": false },
+        { "type": "ci",       "section": "CI",            "hidden": true  },
+        { "type": "style",    "section": "Style",         "hidden": true  },
+        { "type": "test",     "section": "Tests",         "hidden": true  }
+      ]
+    }
+  }
+}

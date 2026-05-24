@@ -43,3 +43,11 @@ app.*.map.json
 /android/app/debug
 /android/app/profile
 /android/app/release
+
+# Release signing — never commit
+/android/key.properties
+/android/app/release.jks
+
+# Local release artifacts
+*.dmg
+*.apk
