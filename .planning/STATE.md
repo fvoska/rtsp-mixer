@@ -28,7 +28,7 @@ See: .planning/PROJECT.md (updated 2026-04-01)
 Phase: 04 (reliability-overnight-monitoring) — EXECUTING
 Plan: 1 of 5
 Status: Executing Phase 04
-Last activity: 2026-05-17 -- Completed quick task 260516-vgb: Allow more than 2 cameras with performance warning
+Last activity: 2026-05-24 -- Completed quick task 260524-ffx: Guard Android-only call sites for Windows desktop compatibility
 
 Progress: [█████░░░░░] 50%
 
@@ -94,6 +94,7 @@ None yet.
 |----|------|------|---------|------|
 | 260514-siv | 2026-05-14 | session-history | Persist last 10 sessions to `sessions.json`; shell-based bottom NavigationBar with IndexedStack (Monitor/Sessions/Logs) keeps audio running across tabs; ActiveSessionBar mini-player; Stop moved to FAB; `startMonitoring` made idempotent | [PLAN](quick/260514-siv-session-history/260514-siv-PLAN.md) · [SUMMARY](quick/260514-siv-session-history/260514-siv-SUMMARY.md) |
 | 260516-vgb | 2026-05-17 | allow-more-than-2-cameras-with-performan | Drop hard 2-camera cap (`canStartMonitoring` now requires only `selectedIds.isNotEmpty`); add `hasPerformanceRisk` getter; remove `toggleCamera` silent-reject branch; idle picker shows tertiary-container warning banner when selection > 2; live monitoring toolbar shows compact warning Chip when active count > 2 | [PLAN](quick/260516-vgb-allow-more-than-2-cameras-with-performan/260516-vgb-PLAN.md) · [SUMMARY](quick/260516-vgb-allow-more-than-2-cameras-with-performan/260516-vgb-SUMMARY.md) |
+| 260524-ffx | 2026-05-24 | guard-android-only-call-sites-for-window | Add `!kIsWeb && Platform.isAndroid` guards so `flutter build windows` compiles; two-layer guarding — `ForegroundServiceManager` and `audioHandlerProvider` are internal no-ops on non-Android, and direct `FlutterForegroundTask.*` call sites in `main.dart`/`app.dart`/`monitoring_screen.dart` are gated explicitly; Android behavior unchanged | [PLAN](quick/260524-ffx-guard-android-only-call-sites-for-window/260524-ffx-PLAN.md) · [SUMMARY](quick/260524-ffx-guard-android-only-call-sites-for-window/260524-ffx-SUMMARY.md) |
 
 ### Blockers/Concerns
 
