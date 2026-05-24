@@ -1,3 +1,6 @@
+import 'dart:io' show Platform;
+
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter_foreground_task/flutter_foreground_task.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -9,10 +12,13 @@ import 'core/services/foreground_service.dart';
 import 'core/services/local_notifications.dart';
 
 void main() {
-  FlutterForegroundTask.initCommunicationPort();
+  if (!kIsWeb && Platform.isAndroid) {
+    FlutterForegroundTask.initCommunicationPort();
+  }
   WidgetsFlutterBinding.ensureInitialized();
   MediaKit.ensureInitialized();
   AppLogger.instance.init();
+  // Safe to call unconditionally — internally a no-op on non-Android.
   ForegroundServiceManager.init();
   // ignore: unawaited_futures
   LocalNotificationsManager.init();

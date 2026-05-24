@@ -1,3 +1,6 @@
+import 'dart:io' show Platform;
+
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter_foreground_task/flutter_foreground_task.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -19,12 +22,16 @@ class _AppState extends ConsumerState<App> {
   @override
   void initState() {
     super.initState();
-    FlutterForegroundTask.addTaskDataCallback(_onTaskData);
+    if (!kIsWeb && Platform.isAndroid) {
+      FlutterForegroundTask.addTaskDataCallback(_onTaskData);
+    }
   }
 
   @override
   void dispose() {
-    FlutterForegroundTask.removeTaskDataCallback(_onTaskData);
+    if (!kIsWeb && Platform.isAndroid) {
+      FlutterForegroundTask.removeTaskDataCallback(_onTaskData);
+    }
     super.dispose();
   }
 
@@ -76,13 +83,16 @@ class _AppState extends ConsumerState<App> {
   @override
   Widget build(BuildContext context) {
     final router = ref.watch(appRouterProvider);
-    return WithForegroundTask(
-      child: MaterialApp.router(
-        title: 'RTSP Mixer',
-        theme: AppTheme.dark,
-        routerConfig: router,
-        debugShowCheckedModeBanner: false,
-      ),
+    final Widget app = MaterialApp.router(
+      title: 'RTSP Mixer',
+      theme: AppTheme.dark,
+      routerConfig: router,
+      debugShowCheckedModeBanner: false,
     );
+    // WithForegroundTask is an Android-only widget — wrapping with it on
+    // Windows/web would reach into flutter_foreground_task at runtime.
+    return (!kIsWeb && Platform.isAndroid)
+        ? WithForegroundTask(child: app)
+        : app;
   }
 }
