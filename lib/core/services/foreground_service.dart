@@ -1,4 +1,7 @@
 // ignore_for_file: avoid_print
+import 'dart:io' show Platform;
+
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter_foreground_task/flutter_foreground_task.dart';
 
 import '../logging/app_logger.dart';
@@ -17,7 +20,13 @@ class ForegroundServiceManager {
 
   /// Initialize FlutterForegroundTask options. Call once during app startup
   /// or before first use. Safe to call multiple times (idempotent).
+  ///
+  /// On non-Android platforms (Windows desktop, macOS, web) the foreground
+  /// service layer is unsupported — this returns immediately so the rest of
+  /// the app keeps running with media_kit audio only. Per CLAUDE.md
+  /// "Defensive error handling — prefer degraded functionality over crash."
   static void init() {
+    if (kIsWeb || !Platform.isAndroid) return;
     if (_initialized) return;
     FlutterForegroundTask.init(
       androidNotificationOptions: AndroidNotificationOptions(
@@ -41,6 +50,11 @@ class ForegroundServiceManager {
 
   /// Start the foreground service with camera names in the notification.
   static Future<void> start(List<String> cameraNames) async {
+    if (kIsWeb || !Platform.isAndroid) {
+      appLog('FGS',
+          'Foreground service unsupported on this platform — skipping start');
+      return;
+    }
     init();
     final notificationText = 'Monitoring: ${cameraNames.join(", ")}';
     await FlutterForegroundTask.startService(
@@ -64,6 +78,9 @@ class ForegroundServiceManager {
     String title = 'Baby Monitor Active',
     List<NotificationButton>? notificationButtons,
   }) async {
+    // Silent no-op on non-Android — this is a high-frequency caller and
+    // logging every skip would spam.
+    if (kIsWeb || !Platform.isAndroid) return;
     appLog('FGS', 'Notification update: $text');
     await FlutterForegroundTask.updateService(
       notificationTitle: title,
@@ -74,13 +91,16 @@ class ForegroundServiceManager {
 
   /// Stop the foreground service. Releases wake lock and WiFi lock.
   static Future<void> stop() async {
+    if (kIsWeb || !Platform.isAndroid) return;
     await FlutterForegroundTask.stopService();
     appLog('FGS', 'Foreground service stopped');
   }
 
   /// Whether the foreground service is currently running.
-  static Future<bool> get isRunning =>
-      FlutterForegroundTask.isRunningService;
+  static Future<bool> get isRunning {
+    if (kIsWeb || !Platform.isAndroid) return Future.value(false);
+    return FlutterForegroundTask.isRunningService;
+  }
 }
 
 /// TaskHandler callback that runs inside the foreground **service isolate**.

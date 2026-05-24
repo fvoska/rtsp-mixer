@@ -1,4 +1,7 @@
+import 'dart:io' show Platform;
+
 import 'package:audio_service/audio_service.dart';
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/logging/app_logger.dart';
@@ -105,8 +108,19 @@ class MonitoringAudioHandler extends BaseAudioHandler {
 
 /// Riverpod provider for the AudioHandler. Initialized once.
 /// Usage: final handler = await ref.read(audioHandlerProvider.future);
+///
+/// On non-Android platforms (Windows desktop, etc.) the MediaSession layer
+/// is unsupported — the handler is returned without calling
+/// `AudioService.init`. Its public methods (`setCameraNames`, `setPlaying`,
+/// `setIdle`, `play`, `pause`, `stop`) all push to the inherited streams
+/// from `BaseAudioHandler`, which is safe without platform init.
 final audioHandlerProvider = FutureProvider<MonitoringAudioHandler>((ref) async {
   final handler = MonitoringAudioHandler(ref);
+  if (kIsWeb || !Platform.isAndroid) {
+    appLog('AUDIO_SERVICE',
+        'MediaSession unsupported on this platform — skipping AudioService.init');
+    return handler;
+  }
   await AudioService.init(
     builder: () => handler,
     config: const AudioServiceConfig(
