@@ -1,4 +1,5 @@
 import 'dart:io' show Platform;
+import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
@@ -11,12 +12,37 @@ import '../../../core/services/foreground_service.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../core/theme/spacing.dart';
 import '../../auth/providers/auth_provider.dart';
+import '../../cameras/models/protect_camera.dart';
 import '../../cameras/providers/camera_provider.dart';
 import '../models/player_state.dart';
 import '../providers/audio_player_provider.dart';
 import '../providers/session_history_provider.dart';
 import '../services/audio_handler.dart';
 import '../widgets/camera_audio_card.dart';
+
+/// Width at which we switch the idle picker from list to grid layout.
+const double _kWideLayoutBreakpoint = 600;
+
+/// Lays out [count] items in as many columns as fit at `targetMax` per item,
+/// without letting any item shrink below `floor`. Returns the resulting
+/// column count and the per-item width.
+({int cols, double itemWidth}) _fluidGrid({
+  required double available,
+  required double targetMax,
+  required double floor,
+  required double spacing,
+}) {
+  if (available <= 0) return (cols: 1, itemWidth: math.max(0, available));
+  int cols =
+      math.max(1, ((available + spacing) / (targetMax + spacing)).ceil());
+  double itemWidth = (available - (cols - 1) * spacing) / cols;
+  // Don't let items collapse below the minimum usable width.
+  while (cols > 1 && itemWidth < floor) {
+    cols--;
+    itemWidth = (available - (cols - 1) * spacing) / cols;
+  }
+  return (cols: cols, itemWidth: itemWidth);
+}
 
 class MonitoringScreen extends ConsumerStatefulWidget {
   const MonitoringScreen({super.key});
@@ -328,34 +354,58 @@ class _LiveMonitoringView extends ConsumerWidget {
           // while the new state lands.
           return const Center(child: CircularProgressIndicator());
         }
-        return SingleChildScrollView(
-          padding: const EdgeInsets.all(Spacing.lg),
-          child: Column(
-            children: [
-              _LiveToolbar(
-                globalVideoOn: globalVideo,
-                showDetails: showDetails,
-                cameraCount: state.cameras.length,
-                onToggleGlobalVideo: onToggleGlobalVideo,
-                onToggleShowDetails: onToggleShowDetails,
+        return LayoutBuilder(
+          builder: (context, constraints) {
+            // Fluid card grid: target ~480dp per card, never below ~340dp.
+            // Variable-height cards rule out GridView (which forces an
+            // aspect ratio), so we use a Wrap with a computed item width.
+            // Items in the same row align to top edges, which is fine when
+            // an open video preview makes one card taller than its row-mates.
+            final available = constraints.maxWidth - Spacing.lg * 2;
+            final grid = _fluidGrid(
+              available: available,
+              targetMax: 480,
+              floor: 340,
+              spacing: Spacing.lg,
+            );
+            return SingleChildScrollView(
+              padding: const EdgeInsets.all(Spacing.lg),
+              child: Column(
+                children: [
+                  _LiveToolbar(
+                    globalVideoOn: globalVideo,
+                    showDetails: showDetails,
+                    cameraCount: state.cameras.length,
+                    onToggleGlobalVideo: onToggleGlobalVideo,
+                    onToggleShowDetails: onToggleShowDetails,
+                  ),
+                  const SizedBox(height: Spacing.md),
+                  Wrap(
+                    spacing: Spacing.lg,
+                    runSpacing: Spacing.lg,
+                    children: [
+                      for (int i = 0; i < state.cameras.length; i++)
+                        SizedBox(
+                          width: grid.itemWidth,
+                          child: CameraAudioCard(
+                            cameraState: state.cameras[i],
+                            cameraIndex: i,
+                            showVideoPreview:
+                                isVideoOn(state.cameras[i].cameraId),
+                            showDebugInfo: showDetails,
+                            activityThreshold: activityThreshold,
+                            onToggleVideo: () => onToggleCameraVideo(
+                                state.cameras[i].cameraId),
+                            onRemove: () =>
+                                onRemoveCamera(state.cameras[i].cameraId),
+                          ),
+                        ),
+                    ],
+                  ),
+                ],
               ),
-              const SizedBox(height: Spacing.md),
-              for (int i = 0; i < state.cameras.length; i++) ...[
-                CameraAudioCard(
-                  cameraState: state.cameras[i],
-                  cameraIndex: i,
-                  showVideoPreview: isVideoOn(state.cameras[i].cameraId),
-                  showDebugInfo: showDetails,
-                  activityThreshold: activityThreshold,
-                  onToggleVideo: () =>
-                      onToggleCameraVideo(state.cameras[i].cameraId),
-                  onRemove: () => onRemoveCamera(state.cameras[i].cameraId),
-                ),
-                if (i < state.cameras.length - 1)
-                  const SizedBox(height: Spacing.lg),
-              ],
-            ],
-          ),
+            );
+          },
         );
       },
     );
@@ -506,27 +556,63 @@ class _IdleCameraPicker extends ConsumerWidget {
               ),
             ),
             Expanded(
-              child: ListView.builder(
-                itemCount: state.cameras.length,
-                itemBuilder: (_, i) {
-                  final cam = state.cameras[i];
-                  final selected = state.selectedIds.contains(cam.id);
-                  return CheckboxListTile(
-                    value: selected,
-                    onChanged: (_) => ref
-                        .read(cameraNotifierProvider.notifier)
-                        .toggleCamera(cam.id),
-                    title: Text(cam.name ?? 'Unnamed Camera'),
-                    subtitle: Text(cam.state),
-                    secondary: Container(
-                      width: 8,
-                      height: 8,
-                      decoration: BoxDecoration(
-                        shape: BoxShape.circle,
-                        color: cam.isConnected
-                            ? AppTheme.statusOnline
-                            : AppTheme.statusOffline,
-                      ),
+              child: LayoutBuilder(
+                builder: (context, constraints) {
+                  final isWide =
+                      constraints.maxWidth >= _kWideLayoutBreakpoint;
+                  if (!isWide) {
+                    return ListView.builder(
+                      itemCount: state.cameras.length,
+                      itemBuilder: (_, i) {
+                        final cam = state.cameras[i];
+                        final selected = state.selectedIds.contains(cam.id);
+                        return CheckboxListTile(
+                          value: selected,
+                          onChanged: (_) => ref
+                              .read(cameraNotifierProvider.notifier)
+                              .toggleCamera(cam.id),
+                          title: Text(cam.name ?? 'Unnamed Camera'),
+                          subtitle: Text(cam.state),
+                          secondary: Container(
+                            width: 8,
+                            height: 8,
+                            decoration: BoxDecoration(
+                              shape: BoxShape.circle,
+                              color: cam.isConnected
+                                  ? AppTheme.statusOnline
+                                  : AppTheme.statusOffline,
+                            ),
+                          ),
+                        );
+                      },
+                    );
+                  }
+                  final available = constraints.maxWidth - Spacing.lg * 2;
+                  final grid = _fluidGrid(
+                    available: available,
+                    targetMax: 280,
+                    floor: 220,
+                    spacing: Spacing.md,
+                  );
+                  return SingleChildScrollView(
+                    padding: const EdgeInsets.fromLTRB(
+                        Spacing.lg, 0, Spacing.lg, Spacing.lg),
+                    child: Wrap(
+                      spacing: Spacing.md,
+                      runSpacing: Spacing.md,
+                      children: [
+                        for (final cam in state.cameras)
+                          SizedBox(
+                            width: grid.itemWidth,
+                            child: _CameraPickerTile(
+                              camera: cam,
+                              selected: state.selectedIds.contains(cam.id),
+                              onToggle: () => ref
+                                  .read(cameraNotifierProvider.notifier)
+                                  .toggleCamera(cam.id),
+                            ),
+                          ),
+                      ],
                     ),
                   );
                 },
@@ -576,6 +662,97 @@ class _IdleCameraPicker extends ConsumerWidget {
           ],
         );
       },
+    );
+  }
+}
+
+/// Wide-layout checkable camera tile used by the idle picker grid.
+class _CameraPickerTile extends StatelessWidget {
+  const _CameraPickerTile({
+    required this.camera,
+    required this.selected,
+    required this.onToggle,
+  });
+
+  final ProtectCamera camera;
+  final bool selected;
+  final VoidCallback onToggle;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final borderColor = selected
+        ? theme.colorScheme.primary
+        : theme.colorScheme.outlineVariant;
+    return Material(
+      color: selected
+          ? theme.colorScheme.primaryContainer.withValues(alpha: 0.4)
+          : theme.colorScheme.surfaceContainerHighest,
+      borderRadius: BorderRadius.circular(12),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(12),
+        onTap: onToggle,
+        child: Container(
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(
+              color: borderColor,
+              width: selected ? 2 : 1,
+            ),
+          ),
+          padding: const EdgeInsets.all(Spacing.md),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.center,
+            children: [
+              Checkbox(
+                value: selected,
+                onChanged: (_) => onToggle(),
+              ),
+              const SizedBox(width: Spacing.xs),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      camera.name ?? 'Unnamed Camera',
+                      style: theme.textTheme.titleSmall,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    const SizedBox(height: 2),
+                    Row(
+                      children: [
+                        Container(
+                          width: 8,
+                          height: 8,
+                          decoration: BoxDecoration(
+                            shape: BoxShape.circle,
+                            color: camera.isConnected
+                                ? AppTheme.statusOnline
+                                : AppTheme.statusOffline,
+                          ),
+                        ),
+                        const SizedBox(width: Spacing.xs),
+                        Flexible(
+                          child: Text(
+                            camera.state,
+                            style: theme.textTheme.bodySmall?.copyWith(
+                              color: theme.colorScheme.onSurfaceVariant,
+                            ),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
     );
   }
 }
