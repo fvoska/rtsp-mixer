@@ -1,0 +1,79 @@
+name: Setup Android Signing Key (one-off)
+
+# Run this manually ONCE from the Actions tab to generate a release keystore
+# and store all four Android signing secrets. It requires a repo secret named
+# GH_ADMIN_TOKEN containing a PAT with "Secrets: Read and write" permission,
+# because the default Actions token cannot write repository secrets.
+#
+# Safe to delete this workflow (and the GH_ADMIN_TOKEN secret) after a
+# successful run.
+
+on:
+  workflow_dispatch:
+    inputs:
+      key_alias:
+        description: "Key alias to create in the keystore"
+        required: true
+        default: "upload"
+
+jobs:
+  setup:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Generate keystore and set signing secrets
+        env:
+          GH_TOKEN: ${{ secrets.GH_ADMIN_TOKEN }}
+          REPO: ${{ github.repository }}
+          KEY_ALIAS: ${{ inputs.key_alias }}
+        run: |
+          set -euo pipefail
+
+          if [ -z "${GH_TOKEN:-}" ]; then
+            echo "::error::GH_ADMIN_TOKEN secret is not set. Create a fine-grained PAT (Repository permissions -> Secrets: Read and write) for this repo, add it as a repo secret named GH_ADMIN_TOKEN, then re-run."
+            exit 1
+          fi
+
+          # Strong random passwords, generated on the runner and never printed.
+          STORE_PASS="$(openssl rand -base64 24)"
+
+          keytool -genkeypair \
+            -alias "$KEY_ALIAS" \
+            -keyalg RSA -keysize 2048 -validity 10000 \
+            -keystore release.jks -storetype PKCS12 \
+            -storepass "$STORE_PASS" -keypass "$STORE_PASS" \
+            -dname "CN=RTSP Mixer"
+
+          # Sanity check: confirm the store parses (same check release.yml does).
+          keytool -list -keystore release.jks -storepass "$STORE_PASS" >/dev/null
+
+          # Set all four secrets consistently (single base64 pass, no newlines).
+          gh secret set ANDROID_KEYSTORE_BASE64   --repo "$REPO" --body "$(base64 -w0 release.jks)"
+          gh secret set ANDROID_KEYSTORE_PASSWORD --repo "$REPO" --body "$STORE_PASS"
+          gh secret set ANDROID_KEY_PASSWORD      --repo "$REPO" --body "$STORE_PASS"
+          gh secret set ANDROID_KEY_ALIAS         --repo "$REPO" --body "$KEY_ALIAS"
+
+          echo "Set ANDROID_KEYSTORE_BASE64, ANDROID_KEYSTORE_PASSWORD, ANDROID_KEY_PASSWORD, ANDROID_KEY_ALIAS."
+
+          # Bundle a backup (keystore + its password) to download and keep safe.
+          # Secrets are write-only, so this artifact is the only copy of the
+          # password you can retrieve later.
+          mkdir -p keystore-backup
+          cp release.jks keystore-backup/
+          cat > keystore-backup/key.properties <<EOF
+          storeFile=release.jks
+          storePassword=$STORE_PASS
+          keyAlias=$KEY_ALIAS
+          keyPassword=$STORE_PASS
+          EOF
+
+      - name: Upload keystore backup (download and keep this safe)
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-release-keystore
+          path: keystore-backup/
+          retention-days: 7
