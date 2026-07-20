@@ -10,6 +10,16 @@ class CameraState {
 
   bool get hasPerformanceRisk => selectedIds.length > 2;
 
+  bool get hasUnifiCameras => cameras.any((c) => c.source == CameraSource.unifi);
+
+  bool get hasManualCameras =>
+      cameras.any((c) => c.source == CameraSource.manual);
+
+  /// Both Unifi and manual cameras are present — only then does the UI need to
+  /// label each camera's source (per requirement: no distinction when there is
+  /// only one type).
+  bool get hasMixedSources => hasUnifiCameras && hasManualCameras;
+
   List<ProtectCamera> get selectedCameras =>
       cameras.where((c) => selectedIds.contains(c.id)).toList();
 

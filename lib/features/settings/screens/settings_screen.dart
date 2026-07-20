@@ -14,6 +14,8 @@ class SettingsScreen extends ConsumerWidget {
     final settings = ref.watch(settingsProvider);
     final notifier = ref.read(settingsProvider.notifier);
     final theme = Theme.of(context);
+    final isManualMode =
+        ref.watch(authNotifierProvider).value?.isManualMode ?? false;
 
     return Scaffold(
       appBar: AppBar(title: const Text('Settings')),
@@ -86,11 +88,15 @@ class SettingsScreen extends ConsumerWidget {
           ListTile(
             leading: Icon(Icons.logout, color: theme.colorScheme.error),
             title: Text(
-              'Sign out',
+              isManualMode ? 'Reset setup' : 'Sign out',
               style: TextStyle(color: theme.colorScheme.error),
             ),
-            subtitle: const Text('Forget the saved Protect API key.'),
-            onTap: () => _confirmSignOut(context, ref),
+            subtitle: Text(
+              isManualMode
+                  ? 'Remove manual cameras and return to setup.'
+                  : 'Forget the saved Protect API key.',
+            ),
+            onTap: () => _confirmSignOut(context, ref, isManualMode),
           ),
         ],
       ),
@@ -103,14 +109,18 @@ class SettingsScreen extends ConsumerWidget {
     return 'Low sensitivity — highlight only loud sounds';
   }
 
-  Future<void> _confirmSignOut(BuildContext context, WidgetRef ref) async {
+  Future<void> _confirmSignOut(
+      BuildContext context, WidgetRef ref, bool isManualMode) async {
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('Sign out?'),
-        content: const Text(
-          'Active monitoring will be stopped. You will need to re-enter your '
-          'Protect API key to sign back in.',
+        title: Text(isManualMode ? 'Reset setup?' : 'Sign out?'),
+        content: Text(
+          isManualMode
+              ? 'Active monitoring will be stopped and your manually-added '
+                  'cameras will be removed. You will return to the setup screen.'
+              : 'Active monitoring will be stopped. You will need to re-enter '
+                  'your Protect API key to sign back in.',
         ),
         actions: [
           TextButton(
@@ -122,7 +132,7 @@ class SettingsScreen extends ConsumerWidget {
               foregroundColor: Theme.of(ctx).colorScheme.error,
             ),
             onPressed: () => Navigator.of(ctx).pop(true),
-            child: const Text('Sign out'),
+            child: Text(isManualMode ? 'Reset' : 'Sign out'),
           ),
         ],
       ),

@@ -133,4 +133,27 @@ class StorageService {
     if (raw == null) return [];
     return (jsonDecode(raw) as List<dynamic>).cast<String>();
   }
+
+  /// Manually-entered RTSP cameras. Persisted independently of the Unifi
+  /// camera cache so they survive across Unifi refreshes and exist even when
+  /// no Unifi console is configured. Each entry is a ProtectCamera JSON map.
+  Future<void> saveManualCameras(List<Map<String, dynamic>> cameras) async {
+    await write('manual_cameras', jsonEncode(cameras));
+  }
+
+  Future<List<Map<String, dynamic>>> loadManualCameras() async {
+    final raw = await read('manual_cameras');
+    if (raw == null) return [];
+    try {
+      return (jsonDecode(raw) as List<dynamic>).cast<Map<String, dynamic>>();
+    } catch (_) {
+      return [];
+    }
+  }
+
+  /// Setup mode: 'unifi' (logged in via API key) or 'manual' (user skipped
+  /// Unifi login and uses manual RTSP URLs only). Absent → not yet set up.
+  Future<void> saveAuthMode(String mode) async => write('auth_mode', mode);
+
+  Future<String?> loadAuthMode() async => read('auth_mode');
 }

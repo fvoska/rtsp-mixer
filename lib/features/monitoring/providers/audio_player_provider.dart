@@ -449,24 +449,30 @@ class AudioPlayerNotifier extends AsyncNotifier<MonitoringState> {
       final cameraName = camera.name ?? 'Camera';
       appLog('AUDIO', 'Connecting to $cameraName (${camera.id})');
 
+      // Manual cameras use their URL verbatim — the RTSPS→RTSP port/scheme
+      // rewrite in resolveStreamUrl is Unifi-specific and would corrupt an
+      // arbitrary user-entered stream URL.
+      String resolveFor(String raw) => camera.isManual
+          ? raw
+          : resolveStreamUrl(raw, useRtsp: settings.useRtsp);
+
       final quality = camera.defaultQuality;
       final rtspsUrl = camera.defaultStreamUrl;
-      final url = rtspsUrl != null
-          ? resolveStreamUrl(rtspsUrl, useRtsp: settings.useRtsp)
-          : null;
+      final url = rtspsUrl != null ? resolveFor(rtspsUrl) : null;
 
       var camState = CameraAudioState(
         cameraId: camera.id,
         cameraName: cameraName,
         connectionStatus: CameraConnectionStatus.connecting,
         availableQualities: camera.rtspsStreamUrls.map(
-          (k, v) => MapEntry(k, resolveStreamUrl(v, useRtsp: settings.useRtsp)),
+          (k, v) => MapEntry(k, resolveFor(v)),
         ),
         activeQuality: quality,
         activeStreamUrl: url,
         mac: camera.mac,
         modelKey: camera.modelKey,
         micVolume: camera.micVolume,
+        isManual: camera.isManual,
       );
 
       if (!camera.isMicEnabled) {

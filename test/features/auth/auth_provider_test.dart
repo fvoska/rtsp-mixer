@@ -131,6 +131,30 @@ void main() {
       expect(c.read(authNotifierProvider).value?.errorType, AppErrorType.connectionRefused);
     });
 
+    test('skipUnifi enters manual mode and persists the choice', () async {
+      final c = createContainer(storage: storage, api: api);
+      addTearDown(c.dispose);
+      await waitForAuth(c);
+
+      await c.read(authNotifierProvider.notifier).skipUnifi();
+      final state = c.read(authNotifierProvider).value!;
+      expect(state.isAuthenticated, true);
+      expect(state.isManualMode, true);
+      expect(state.host, isNull);
+      expect(await storage.loadAuthMode(), 'manual');
+    });
+
+    test('auto-enters manual mode on launch when auth_mode is manual', () async {
+      await storage.saveAuthMode('manual');
+      final c = createContainer(storage: storage, api: api);
+      addTearDown(c.dispose);
+
+      final state = await waitForAuth(c);
+      expect(state.isAuthenticated, true);
+      expect(state.isManualMode, true);
+      expect(state.host, isNull);
+    });
+
     test('logout clears credentials', () async {
       await storage.saveCredentials('10.0.0.1', 'key');
       api.verifyResult = true;

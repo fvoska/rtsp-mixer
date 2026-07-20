@@ -23,6 +23,14 @@ class AuthNotifier extends AsyncNotifier<AuthState> {
     await storage.ensureFreshInstallChecked();
     final creds = await storage.loadCredentials();
     if (creds == null) {
+      // No Unifi credentials — but the user may have set up manual mode.
+      final mode = await storage.loadAuthMode();
+      if (mode == 'manual') {
+        appLog('AUTH', 'Manual mode (no Unifi credentials)');
+        await ref.read(cameraNotifierProvider.notifier).loadCameras();
+        final wasMonitoring = await storage.read('was_monitoring') == 'true';
+        return AuthState.manual(resumeMonitoring: wasMonitoring);
+      }
       appLog('AUTH', 'No saved credentials');
       return const AuthState.unauthenticated();
     }
@@ -76,6 +84,7 @@ class AuthNotifier extends AsyncNotifier<AuthState> {
         appLog('AUTH', 'Login succeeded');
         final storage = ref.read(storageProvider);
         await storage.saveCredentials(host, apiKey);
+        await storage.saveAuthMode('unifi');
         await ref.read(cameraNotifierProvider.notifier).loadCameras(host);
         state = AsyncData(AuthState.authenticated(host: host));
       } else {
@@ -100,6 +109,17 @@ class AuthNotifier extends AsyncNotifier<AuthState> {
     }
   }
 
+  /// Skip Unifi login and use manually-entered RTSP URLs only. Persists the
+  /// choice so the app returns to manual mode on next launch instead of the
+  /// login screen.
+  Future<void> skipUnifi() async {
+    appLog('AUTH', 'Skipping Unifi login — entering manual mode');
+    final storage = ref.read(storageProvider);
+    await storage.saveAuthMode('manual');
+    await ref.read(cameraNotifierProvider.notifier).loadCameras();
+    state = const AsyncData(AuthState.manual());
+  }
+
   Future<void> logout() async {
     appLog('AUTH', 'Logging out');
     final storage = ref.read(storageProvider);
@@ -119,10 +139,12 @@ class AuthNotifier extends AsyncNotifier<AuthState> {
     final current = state.value;
     if (current == null || !current.isAuthenticated) return;
     if (!current.resumeMonitoring) return;
-    state = AsyncData(AuthState.authenticated(
-      host: current.host,
-      resumeMonitoring: false,
-    ));
+    state = AsyncData(current.isManualMode
+        ? const AuthState.manual(resumeMonitoring: false)
+        : AuthState.authenticated(
+            host: current.host,
+            resumeMonitoring: false,
+          ));
     appLog('AUTH', 'Cleared resumeMonitoring flag');
   }
 }

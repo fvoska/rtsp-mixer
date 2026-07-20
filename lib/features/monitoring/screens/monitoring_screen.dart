@@ -14,6 +14,7 @@ import '../../../core/theme/spacing.dart';
 import '../../auth/providers/auth_provider.dart';
 import '../../cameras/models/protect_camera.dart';
 import '../../cameras/providers/camera_provider.dart';
+import '../../cameras/widgets/camera_source_badge.dart';
 import '../models/player_state.dart';
 import '../providers/audio_player_provider.dart';
 import '../providers/session_history_provider.dart';
@@ -354,6 +355,9 @@ class _LiveMonitoringView extends ConsumerWidget {
           // while the new state lands.
           return const Center(child: CircularProgressIndicator());
         }
+        // Only distinguish sources when both types are actually being monitored.
+        final showSourceBadge = state.cameras.any((c) => c.isManual) &&
+            state.cameras.any((c) => !c.isManual);
         return LayoutBuilder(
           builder: (context, constraints) {
             // Fluid card grid: target ~480dp per card, never below ~340dp.
@@ -394,6 +398,7 @@ class _LiveMonitoringView extends ConsumerWidget {
                                 isVideoOn(state.cameras[i].cameraId),
                             showDebugInfo: showDetails,
                             activityThreshold: activityThreshold,
+                            showSourceBadge: showSourceBadge,
                             onToggleVideo: () => onToggleCameraVideo(
                                 state.cameras[i].cameraId),
                             onRemove: () =>
@@ -468,6 +473,93 @@ class _LiveToolbar extends StatelessWidget {
   }
 }
 
+/// Validate a manually-entered RTSP/RTSPS URL. Returns an error string for an
+/// invalid form field, or null when acceptable.
+String? _validateRtspUrl(String? v) {
+  final value = v?.trim() ?? '';
+  if (value.isEmpty) return 'Required';
+  final uri = Uri.tryParse(value);
+  if (uri == null ||
+      (uri.scheme != 'rtsp' && uri.scheme != 'rtsps') ||
+      uri.host.isEmpty) {
+    return 'Enter a valid rtsp:// or rtsps:// URL';
+  }
+  return null;
+}
+
+/// Prompt for a manual RTSP camera (name + URL) and add it on confirm.
+Future<void> _showAddManualCameraDialog(
+    BuildContext context, WidgetRef ref) async {
+  final nameController = TextEditingController();
+  final urlController = TextEditingController();
+  final formKey = GlobalKey<FormState>();
+  try {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Add RTSP camera'),
+        content: Form(
+          key: formKey,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              TextFormField(
+                controller: nameController,
+                decoration: const InputDecoration(
+                  labelText: 'Name (optional)',
+                  hintText: 'Nursery',
+                  border: OutlineInputBorder(),
+                ),
+                textInputAction: TextInputAction.next,
+              ),
+              const SizedBox(height: Spacing.md),
+              TextFormField(
+                controller: urlController,
+                autofocus: true,
+                decoration: const InputDecoration(
+                  labelText: 'RTSP URL',
+                  hintText: 'rtsp://192.168.1.50:554/stream',
+                  border: OutlineInputBorder(),
+                ),
+                autocorrect: false,
+                validator: _validateRtspUrl,
+                onFieldSubmitted: (_) {
+                  if (formKey.currentState!.validate()) {
+                    Navigator.of(ctx).pop(true);
+                  }
+                },
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () {
+              if (formKey.currentState!.validate()) {
+                Navigator.of(ctx).pop(true);
+              }
+            },
+            child: const Text('Add'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed == true) {
+      await ref.read(cameraNotifierProvider.notifier).addManualCamera(
+            url: urlController.text,
+            name: nameController.text,
+          );
+    }
+  } finally {
+    nameController.dispose();
+    urlController.dispose();
+  }
+}
+
 /// Idle state: pick cameras to monitor + Start Monitoring.
 class _IdleCameraPicker extends ConsumerWidget {
   const _IdleCameraPicker({required this.onStart});
@@ -478,6 +570,17 @@ class _IdleCameraPicker extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final theme = Theme.of(context);
     final cameraState = ref.watch(cameraNotifierProvider);
+    // Manual-only setups have no Unifi console to refresh against.
+    final isManualMode =
+        ref.watch(authNotifierProvider).value?.isManualMode ?? false;
+    final canRefresh = !isManualMode;
+
+    void refresh() {
+      final host = ref.read(authNotifierProvider).value?.host;
+      if (host != null) {
+        ref.read(cameraNotifierProvider.notifier).loadCameras(host);
+      }
+    }
 
     return cameraState.when(
       loading: () => const Center(child: CircularProgressIndicator()),
@@ -497,30 +600,34 @@ class _IdleCameraPicker extends ConsumerWidget {
                       size: 64,
                       color: theme.colorScheme.onSurfaceVariant),
                   const SizedBox(height: Spacing.lg),
-                  Text('No cameras found',
+                  Text('No cameras yet',
                       style: theme.textTheme.titleLarge),
                   const SizedBox(height: Spacing.sm),
                   Text(
-                    'Pull to refresh, or enable RTSP on a Protect camera.',
+                    isManualMode
+                        ? 'Add a camera by entering its RTSP stream URL.'
+                        : 'Add an RTSP URL manually, or enable RTSP on a '
+                            'Protect camera and refresh.',
                     textAlign: TextAlign.center,
                     style: theme.textTheme.bodyMedium?.copyWith(
                       color: theme.colorScheme.onSurfaceVariant,
                     ),
                   ),
                   const SizedBox(height: Spacing.lg),
-                  TextButton.icon(
-                    onPressed: () {
-                      final host =
-                          ref.read(authNotifierProvider).value?.host;
-                      if (host != null) {
-                        ref
-                            .read(cameraNotifierProvider.notifier)
-                            .loadCameras(host);
-                      }
-                    },
-                    icon: const Icon(Icons.refresh),
-                    label: const Text('Refresh'),
+                  FilledButton.icon(
+                    onPressed: () =>
+                        _showAddManualCameraDialog(context, ref),
+                    icon: const Icon(Icons.add),
+                    label: const Text('Add RTSP camera'),
                   ),
+                  if (canRefresh) ...[
+                    const SizedBox(height: Spacing.sm),
+                    TextButton.icon(
+                      onPressed: refresh,
+                      icon: const Icon(Icons.refresh),
+                      label: const Text('Refresh'),
+                    ),
+                  ],
                 ],
               ),
             ),
@@ -540,18 +647,17 @@ class _IdleCameraPicker extends ConsumerWidget {
                     ),
                   ),
                   IconButton(
-                    icon: const Icon(Icons.refresh),
-                    tooltip: 'Refresh cameras',
-                    onPressed: () {
-                      final host =
-                          ref.read(authNotifierProvider).value?.host;
-                      if (host != null) {
-                        ref
-                            .read(cameraNotifierProvider.notifier)
-                            .loadCameras(host);
-                      }
-                    },
+                    icon: const Icon(Icons.add),
+                    tooltip: 'Add RTSP camera',
+                    onPressed: () =>
+                        _showAddManualCameraDialog(context, ref),
                   ),
+                  if (canRefresh)
+                    IconButton(
+                      icon: const Icon(Icons.refresh),
+                      tooltip: 'Refresh cameras',
+                      onPressed: refresh,
+                    ),
                 ],
               ),
             ),
@@ -566,23 +672,52 @@ class _IdleCameraPicker extends ConsumerWidget {
                       itemBuilder: (_, i) {
                         final cam = state.cameras[i];
                         final selected = state.selectedIds.contains(cam.id);
+                        final url = cam.defaultStreamUrl;
                         return CheckboxListTile(
                           value: selected,
                           onChanged: (_) => ref
                               .read(cameraNotifierProvider.notifier)
                               .toggleCamera(cam.id),
-                          title: Text(cam.name ?? 'Unnamed Camera'),
-                          subtitle: Text(cam.state),
-                          secondary: Container(
-                            width: 8,
-                            height: 8,
-                            decoration: BoxDecoration(
-                              shape: BoxShape.circle,
-                              color: cam.isConnected
-                                  ? AppTheme.statusOnline
-                                  : AppTheme.statusOffline,
-                            ),
+                          title: Row(
+                            children: [
+                              Flexible(
+                                child: Text(
+                                  cam.name ?? 'Unnamed Camera',
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                              ),
+                              if (state.hasMixedSources) ...[
+                                const SizedBox(width: Spacing.sm),
+                                CameraSourceBadge(isManual: cam.isManual),
+                              ],
+                            ],
                           ),
+                          subtitle: Text(
+                            cam.isManual ? (url ?? 'RTSP stream') : cam.state,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                          secondary: cam.isManual
+                              ? IconButton(
+                                  icon: Icon(
+                                    Icons.delete_outline,
+                                    color: theme.colorScheme.error,
+                                  ),
+                                  tooltip: 'Remove camera',
+                                  onPressed: () => ref
+                                      .read(cameraNotifierProvider.notifier)
+                                      .removeManualCamera(cam.id),
+                                )
+                              : Container(
+                                  width: 8,
+                                  height: 8,
+                                  decoration: BoxDecoration(
+                                    shape: BoxShape.circle,
+                                    color: cam.isConnected
+                                        ? AppTheme.statusOnline
+                                        : AppTheme.statusOffline,
+                                  ),
+                                ),
                         );
                       },
                     );
@@ -607,9 +742,15 @@ class _IdleCameraPicker extends ConsumerWidget {
                             child: _CameraPickerTile(
                               camera: cam,
                               selected: state.selectedIds.contains(cam.id),
+                              showSource: state.hasMixedSources,
                               onToggle: () => ref
                                   .read(cameraNotifierProvider.notifier)
                                   .toggleCamera(cam.id),
+                              onDelete: cam.isManual
+                                  ? () => ref
+                                      .read(cameraNotifierProvider.notifier)
+                                      .removeManualCamera(cam.id)
+                                  : null,
                             ),
                           ),
                       ],
@@ -672,11 +813,15 @@ class _CameraPickerTile extends StatelessWidget {
     required this.camera,
     required this.selected,
     required this.onToggle,
+    this.showSource = false,
+    this.onDelete,
   });
 
   final ProtectCamera camera;
   final bool selected;
+  final bool showSource;
   final VoidCallback onToggle;
+  final VoidCallback? onDelete;
 
   @override
   Widget build(BuildContext context) {
@@ -684,6 +829,8 @@ class _CameraPickerTile extends StatelessWidget {
     final borderColor = selected
         ? theme.colorScheme.primary
         : theme.colorScheme.outlineVariant;
+    final subtitle =
+        camera.isManual ? (camera.defaultStreamUrl ?? 'RTSP stream') : camera.state;
     return Material(
       color: selected
           ? theme.colorScheme.primaryContainer.withValues(alpha: 0.4)
@@ -714,29 +861,41 @@ class _CameraPickerTile extends StatelessWidget {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    Text(
-                      camera.name ?? 'Unnamed Camera',
-                      style: theme.textTheme.titleSmall,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
+                    Row(
+                      children: [
+                        Flexible(
+                          child: Text(
+                            camera.name ?? 'Unnamed Camera',
+                            style: theme.textTheme.titleSmall,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                        if (showSource) ...[
+                          const SizedBox(width: Spacing.xs),
+                          CameraSourceBadge(isManual: camera.isManual),
+                        ],
+                      ],
                     ),
                     const SizedBox(height: 2),
                     Row(
                       children: [
-                        Container(
-                          width: 8,
-                          height: 8,
-                          decoration: BoxDecoration(
-                            shape: BoxShape.circle,
-                            color: camera.isConnected
-                                ? AppTheme.statusOnline
-                                : AppTheme.statusOffline,
+                        if (!camera.isManual) ...[
+                          Container(
+                            width: 8,
+                            height: 8,
+                            decoration: BoxDecoration(
+                              shape: BoxShape.circle,
+                              color: camera.isConnected
+                                  ? AppTheme.statusOnline
+                                  : AppTheme.statusOffline,
+                            ),
                           ),
-                        ),
-                        const SizedBox(width: Spacing.xs),
+                          const SizedBox(width: Spacing.xs),
+                        ],
                         Flexible(
                           child: Text(
-                            camera.state,
+                            subtitle,
                             style: theme.textTheme.bodySmall?.copyWith(
                               color: theme.colorScheme.onSurfaceVariant,
                             ),
@@ -749,6 +908,16 @@ class _CameraPickerTile extends StatelessWidget {
                   ],
                 ),
               ),
+              if (onDelete != null)
+                IconButton(
+                  icon: Icon(
+                    Icons.delete_outline,
+                    size: 20,
+                    color: theme.colorScheme.error,
+                  ),
+                  tooltip: 'Remove camera',
+                  onPressed: onDelete,
+                ),
             ],
           ),
         ),
