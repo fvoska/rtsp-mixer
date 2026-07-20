@@ -25,7 +25,10 @@ jobs:
 
   build-android:
     needs: release-please
-    if: needs.release-please.outputs.release_created == 'true'
+    # Build on a real release (release-please cut a tag) OR on a manual
+    # workflow_dispatch run. Manual runs let us produce a testable APK from
+    # any branch without waiting for a release to be created.
+    if: needs.release-please.outputs.release_created == 'true' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -41,6 +44,16 @@ jobs:
           cache: true
 
       - run: flutter pub get
+
+      - name: Resolve build version
+        env:
+          RELEASE_VERSION: ${{ needs.release-please.outputs.version }}
+        run: |
+          # On a release run this is the release-please version; on a manual
+          # dispatch (no release) it is empty, so fall back to a dev version
+          # tagged with the run number for traceability.
+          VERSION="${RELEASE_VERSION:-0.0.0-dev}"
+          echo "APP_VERSION=$VERSION" >> "$GITHUB_ENV"
 
       - name: Decode release keystore
         env:
@@ -93,20 +106,30 @@ jobs:
       - name: Build signed APK
         run: |
           flutter build apk --release \
-            --build-name=${{ needs.release-please.outputs.version }} \
+            --build-name="$APP_VERSION" \
             --build-number=${{ github.run_number }}
 
       - name: Rename artifact
         run: |
           mv build/app/outputs/flutter-apk/app-release.apk \
-             rtsp-mixer-${{ needs.release-please.outputs.version }}-android.apk
+             "rtsp-mixer-$APP_VERSION-android.apk"
+
+      - name: Upload APK as workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: rtsp-mixer-${{ env.APP_VERSION }}-android
+          path: rtsp-mixer-${{ env.APP_VERSION }}-android.apk
+          if-no-files-found: error
 
       - name: Upload to release
+        # Only when release-please actually cut a release; a manual dispatch
+        # has no tag to upload against.
+        if: needs.release-please.outputs.release_created == 'true'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           gh release upload "${{ needs.release-please.outputs.tag_name }}" \
-            "rtsp-mixer-${{ needs.release-please.outputs.version }}-android.apk" \
+            "rtsp-mixer-$APP_VERSION-android.apk" \
             --clobber
 
   build-macos:
