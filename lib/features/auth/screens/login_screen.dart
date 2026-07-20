@@ -73,6 +73,12 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
     }
   }
 
+  Future<void> _handleSkip() async {
+    appLog('UI', 'Skip UniFi pressed — manual RTSP setup');
+    await ref.read(authNotifierProvider.notifier).skipUnifi();
+    // Router redirect on auth-state change lands the user in /monitoring.
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
@@ -135,6 +141,40 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                     child: isLoading
                         ? const SizedBox(height: 20, width: 20, child: CircularProgressIndicator(strokeWidth: 2))
                         : const Text('Connect to Console'),
+                  ),
+                ),
+                const SizedBox(height: Spacing.lg),
+                Row(
+                  children: [
+                    const Expanded(child: Divider()),
+                    Padding(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: Spacing.md),
+                      child: Text(
+                        'or',
+                        style: theme.textTheme.bodySmall?.copyWith(
+                          color: theme.colorScheme.onSurfaceVariant,
+                        ),
+                      ),
+                    ),
+                    const Expanded(child: Divider()),
+                  ],
+                ),
+                const SizedBox(height: Spacing.lg),
+                SizedBox(
+                  height: 48,
+                  child: OutlinedButton.icon(
+                    onPressed: isLoading ? null : _handleSkip,
+                    icon: const Icon(Icons.link),
+                    label: const Text('Skip — add RTSP URLs manually'),
+                  ),
+                ),
+                const SizedBox(height: Spacing.sm),
+                Text(
+                  'No UniFi console? Enter camera RTSP stream URLs yourself. '
+                  'You can add UniFi later by signing out.',
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: theme.colorScheme.onSurfaceVariant,
                   ),
                 ),
                 if (logs.isNotEmpty) ...[

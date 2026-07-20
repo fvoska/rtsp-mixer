@@ -104,7 +104,7 @@ void main() {
       expect(c.read(cameraNotifierProvider).value!.selectedIds, isEmpty);
     });
 
-    test('toggleCamera enforces max 2', () async {
+    test('toggleCamera allows more than 2 selections', () async {
       final c = createContainer(storage: storage, api: api);
       addTearDown(c.dispose);
       await waitForCameras(c);
@@ -114,10 +114,10 @@ void main() {
       final n = c.read(cameraNotifierProvider.notifier);
       n.toggleCamera('c1');
       n.toggleCamera('c2');
-      n.toggleCamera('c3'); // should be no-op
+      n.toggleCamera('c3');
       final ids = c.read(cameraNotifierProvider).value!.selectedIds;
-      expect(ids, hasLength(2));
-      expect(ids, containsAll(['c1', 'c2']));
+      expect(ids, hasLength(3));
+      expect(ids, containsAll(['c1', 'c2', 'c3']));
     });
 
     test('canStartMonitoring true with 1-2 selected', () async {
@@ -168,6 +168,98 @@ void main() {
       c.read(cameraNotifierProvider.notifier).toggleCamera('c1');
       await Future.delayed(const Duration(milliseconds: 50));
       expect(await storage.loadSelectedCameraIds(), ['c1']);
+    });
+  });
+
+  group('CameraNotifier manual cameras', () {
+    test('addManualCamera appends a manual camera, selects it, and persists',
+        () async {
+      final c = createContainer(storage: storage, api: api);
+      addTearDown(c.dispose);
+      await waitForCameras(c);
+      await c.read(cameraNotifierProvider.notifier).loadCameras('h');
+      await waitForCamerasWithUrls(c);
+
+      final n = c.read(cameraNotifierProvider.notifier);
+      await n.addManualCamera(url: 'rtsp://10.0.0.9:554/live', name: 'Attic');
+
+      final state = c.read(cameraNotifierProvider).value!;
+      final manual = state.cameras.where((cam) => cam.isManual).toList();
+      expect(manual, hasLength(1));
+      expect(manual.first.name, 'Attic');
+      expect(manual.first.defaultStreamUrl, 'rtsp://10.0.0.9:554/live');
+      // Manual camera is appended after the Unifi cameras.
+      expect(state.cameras.last.isManual, true);
+      // Auto-selected and mixed-source flag flips on.
+      expect(state.selectedIds, contains(manual.first.id));
+      expect(state.hasMixedSources, true);
+      // Persisted.
+      expect(await storage.loadManualCameras(), hasLength(1));
+    });
+
+    test('removeManualCamera removes it and clears selection', () async {
+      final c = createContainer(storage: storage, api: api);
+      addTearDown(c.dispose);
+      await waitForCameras(c);
+      await c.read(cameraNotifierProvider.notifier).loadCameras('h');
+      await waitForCamerasWithUrls(c);
+
+      final n = c.read(cameraNotifierProvider.notifier);
+      await n.addManualCamera(url: 'rtsp://10.0.0.9:554/live');
+      final added = c
+          .read(cameraNotifierProvider)
+          .value!
+          .cameras
+          .firstWhere((cam) => cam.isManual);
+
+      await n.removeManualCamera(added.id);
+      final state = c.read(cameraNotifierProvider).value!;
+      expect(state.cameras.where((cam) => cam.isManual), isEmpty);
+      expect(state.selectedIds, isNot(contains(added.id)));
+      expect(await storage.loadManualCameras(), isEmpty);
+    });
+
+    test('loadCameras() with no host shows only manual cameras', () async {
+      await storage.saveManualCameras([
+        ProtectCamera.manual(id: 'manual-1', url: 'rtsp://x/y', name: 'Shed')
+            .toJson(),
+      ]);
+      final c = createContainer(storage: storage, api: api);
+      addTearDown(c.dispose);
+      await waitForCameras(c);
+
+      await c.read(cameraNotifierProvider.notifier).loadCameras();
+      final state = c.read(cameraNotifierProvider).value!;
+      expect(state.cameras, hasLength(1));
+      expect(state.cameras.first.isManual, true);
+      expect(state.cameras.first.name, 'Shed');
+      // Only one source type — no distinction needed.
+      expect(state.hasMixedSources, false);
+    });
+
+    test('manual cameras survive a Unifi API refresh', () async {
+      await storage.saveManualCameras([
+        ProtectCamera.manual(id: 'manual-1', url: 'rtsp://x/y', name: 'Shed')
+            .toJson(),
+      ]);
+      final c = createContainer(storage: storage, api: api);
+      addTearDown(c.dispose);
+      await waitForCameras(c);
+
+      await c.read(cameraNotifierProvider.notifier).loadCameras('h');
+      // The list starts with just the manual camera, then the Unifi API
+      // refresh appends the 3 fake cameras — wait for the full merged list.
+      for (var i = 0; i < 100; i++) {
+        final s = c.read(cameraNotifierProvider).value;
+        if (s != null && s.cameras.length == 4) break;
+        await Future.delayed(const Duration(milliseconds: 10));
+      }
+
+      final state = c.read(cameraNotifierProvider).value!;
+      // 3 Unifi (fake) + 1 manual.
+      expect(state.cameras, hasLength(4));
+      expect(state.cameras.where((cam) => cam.isManual), hasLength(1));
+      expect(state.hasMixedSources, true);
     });
   });
 }

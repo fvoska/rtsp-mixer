@@ -80,6 +80,10 @@ class CameraAudioState {
   final String? modelKey;
   final int? micVolume;
 
+  /// True when this camera came from a manually-entered RTSP URL rather than
+  /// the Unifi API. Drives the source badge in the UI.
+  final bool isManual;
+
   const CameraAudioState({
     required this.cameraId,
     required this.cameraName,
@@ -99,6 +103,7 @@ class CameraAudioState {
     this.mac,
     this.modelKey,
     this.micVolume,
+    this.isManual = false,
   });
 
   CameraAudioState copyWith({
@@ -135,6 +140,7 @@ class CameraAudioState {
         mac: mac,
         modelKey: modelKey,
         micVolume: micVolume,
+        isManual: isManual,
       );
 
   double get effectiveVolume => isMuted ? 0.0 : volume;

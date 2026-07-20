@@ -10,12 +10,34 @@ import 'camera_state.dart';
 class CameraNotifier extends AsyncNotifier<CameraState> {
   bool _loading = false;
 
+  /// Cameras discovered from the Unifi Protect API (empty in manual-only mode).
+  List<ProtectCamera> _unifiCameras = [];
+
+  /// Manually-entered RTSP cameras, persisted locally.
+  List<ProtectCamera> _manualCameras = [];
+
+  /// Authoritative selection set, kept in sync with storage. Composed state's
+  /// selectedIds is always this filtered down to cameras that still exist.
+  Set<String> _selectedIds = {};
+
   @override
   Future<CameraState> build() async => const CameraState();
 
-  /// Load cameras from cache (fast) then refresh from API (background).
-  /// Returns after cache is loaded so callers don't wait for the network.
-  Future<void> loadCameras(String host) async {
+  /// The full camera list = Unifi cameras first, then manual cameras appended.
+  CameraState _compose() {
+    final all = [..._unifiCameras, ..._manualCameras];
+    final validIds =
+        _selectedIds.where((id) => all.any((c) => c.id == id)).toSet();
+    return CameraState(cameras: all, selectedIds: validIds);
+  }
+
+  void _publish() => state = AsyncData(_compose());
+
+  /// Load cameras. Always loads manual cameras (and the saved selection). When
+  /// [host] is non-null (Unifi mode) it also loads the Unifi cache instantly
+  /// then refreshes from the API in the background. When [host] is null
+  /// (manual-only mode) only manual cameras are shown.
+  Future<void> loadCameras([String? host]) async {
     if (_loading) {
       appLog('CAM', 'loadCameras already in progress, skipping');
       return;
@@ -24,21 +46,36 @@ class CameraNotifier extends AsyncNotifier<CameraState> {
 
     try {
       final storage = ref.read(storageProvider);
-      final savedIds = await storage.loadSelectedCameraIds();
+      _selectedIds = (await storage.loadSelectedCameraIds()).toSet();
+      _manualCameras = await _loadManualCameras(storage);
+      appLog('CAM', 'Loaded ${_manualCameras.length} manual cameras');
 
-      // Phase 1: Load from cache — instant UI
+      if (host == null) {
+        // Manual-only mode — no Unifi console configured.
+        _unifiCameras = [];
+        _publish();
+        _loading = false;
+        return;
+      }
+
+      // Phase 1: Load Unifi cameras from cache — instant UI.
       final cached = await _loadCachedCameras(storage);
       if (cached != null && cached.isNotEmpty) {
-        final validIds = savedIds.where((id) => cached.any((c) => c.id == id)).toSet();
-        state = AsyncData(CameraState(cameras: cached, selectedIds: validIds));
+        _unifiCameras = cached;
+        _publish();
         final withUrls = cached.where((c) => c.rtspsStreamUrls.isNotEmpty).length;
-        appLog('CAM', 'Loaded ${cached.length} cameras from cache ($withUrls with RTSPS URLs)');
+        appLog('CAM', 'Loaded ${cached.length} Unifi cameras from cache ($withUrls with RTSPS URLs)');
+      } else if (_manualCameras.isNotEmpty) {
+        // No Unifi cache yet but we have manual cameras — show them immediately
+        // instead of a blank loading spinner.
+        _unifiCameras = [];
+        _publish();
       } else {
         state = const AsyncLoading();
       }
 
-      // Phase 2: Refresh from API — updates state when done
-      _refreshFromApi(host, savedIds);
+      // Phase 2: Refresh Unifi cameras from API — updates state when done.
+      _refreshFromApi(host);
     } catch (e) {
       _loading = false;
       appLog('CAM', 'Error in loadCameras: $e');
@@ -48,7 +85,7 @@ class CameraNotifier extends AsyncNotifier<CameraState> {
     }
   }
 
-  Future<void> _refreshFromApi(String host, List<String> savedIds) async {
+  Future<void> _refreshFromApi(String host) async {
     try {
       final client = ref.read(apiClientProvider);
       final storage = ref.read(storageProvider);
@@ -65,11 +102,11 @@ class CameraNotifier extends AsyncNotifier<CameraState> {
 
       await _saveCachedCameras(storage, enrichedCameras);
 
-      final validIds = savedIds.where((id) => enrichedCameras.any((c) => c.id == id)).toSet();
-      state = AsyncData(CameraState(cameras: enrichedCameras, selectedIds: validIds));
+      _unifiCameras = enrichedCameras;
+      _publish();
     } catch (e) {
       appLog('CAM', 'Error refreshing cameras from API: $e');
-      if (state.hasValue && state.value!.cameras.isNotEmpty) {
+      if (_unifiCameras.isNotEmpty || _manualCameras.isNotEmpty) {
         appLog('CAM', 'Keeping cached camera list');
       }
     } finally {
@@ -88,8 +125,39 @@ class CameraNotifier extends AsyncNotifier<CameraState> {
       newIds.add(cameraId);
       appLog('CAM', 'Selected camera $cameraId (${newIds.length} selected)');
     }
+    _selectedIds = newIds;
     state = AsyncData(current.copyWith(selectedIds: newIds));
     ref.read(storageProvider).saveSelectedCameraIds(newIds.toList());
+  }
+
+  /// Add a manually-entered RTSP camera and persist it. The newly-added camera
+  /// is auto-selected so the user can start monitoring it right away.
+  Future<void> addManualCamera({required String url, String? name}) async {
+    final trimmedUrl = url.trim();
+    final trimmedName = name?.trim();
+    final id = 'manual-${DateTime.now().microsecondsSinceEpoch}';
+    final camera = ProtectCamera.manual(
+      id: id,
+      url: trimmedUrl,
+      name: (trimmedName == null || trimmedName.isEmpty) ? null : trimmedName,
+    );
+    _manualCameras = [..._manualCameras, camera];
+    _selectedIds = {..._selectedIds, id};
+    appLog('CAM', 'Added manual camera "${camera.name ?? id}" ($trimmedUrl)');
+    await _saveManualCameras();
+    await ref.read(storageProvider).saveSelectedCameraIds(_selectedIds.toList());
+    _publish();
+  }
+
+  /// Remove a manually-entered camera. No-op for Unifi cameras.
+  Future<void> removeManualCamera(String cameraId) async {
+    if (!_manualCameras.any((c) => c.id == cameraId)) return;
+    _manualCameras = _manualCameras.where((c) => c.id != cameraId).toList();
+    _selectedIds = {..._selectedIds}..remove(cameraId);
+    appLog('CAM', 'Removed manual camera $cameraId');
+    await _saveManualCameras();
+    await ref.read(storageProvider).saveSelectedCameraIds(_selectedIds.toList());
+    _publish();
   }
 
   Future<List<ProtectCamera>?> _loadCachedCameras(dynamic storage) async {
@@ -109,6 +177,26 @@ class CameraNotifier extends AsyncNotifier<CameraState> {
       await storage.write('cached_cameras', jsonEncode(cameras.map((c) => c.toJson()).toList()));
     } catch (e) {
       appLog('CAM', 'Failed to save camera cache: $e');
+    }
+  }
+
+  Future<List<ProtectCamera>> _loadManualCameras(dynamic storage) async {
+    try {
+      final list = await storage.loadManualCameras() as List<Map<String, dynamic>>;
+      return list.map(ProtectCamera.fromJson).toList();
+    } catch (e) {
+      appLog('CAM', 'Failed to load manual cameras: $e');
+      return [];
+    }
+  }
+
+  Future<void> _saveManualCameras() async {
+    try {
+      await ref
+          .read(storageProvider)
+          .saveManualCameras(_manualCameras.map((c) => c.toJson()).toList());
+    } catch (e) {
+      appLog('CAM', 'Failed to save manual cameras: $e');
     }
   }
 }

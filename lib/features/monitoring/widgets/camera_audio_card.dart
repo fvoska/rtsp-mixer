@@ -4,6 +4,7 @@ import 'package:media_kit_video/media_kit_video.dart';
 
 import '../../../core/theme/app_theme.dart';
 import '../../../core/theme/spacing.dart';
+import '../../cameras/widgets/camera_source_badge.dart';
 import '../models/player_state.dart';
 import '../providers/audio_player_provider.dart';
 
@@ -15,6 +16,7 @@ class CameraAudioCard extends ConsumerStatefulWidget {
   final bool showVideoPreview;
   final bool showDebugInfo;
   final double activityThreshold;
+  final bool showSourceBadge;
   final VoidCallback? onToggleVideo;
   final VoidCallback? onRemove;
 
@@ -25,6 +27,7 @@ class CameraAudioCard extends ConsumerStatefulWidget {
     this.showVideoPreview = false,
     this.showDebugInfo = false,
     this.activityThreshold = 0.05,
+    this.showSourceBadge = false,
     this.onToggleVideo,
     this.onRemove,
   });
@@ -179,9 +182,20 @@ class _CameraAudioCardState extends ConsumerState<CameraAudioCard> {
                   ),
                   const SizedBox(width: Spacing.sm),
                   Expanded(
-                    child: Text(
-                      cs.cameraName,
-                      style: theme.textTheme.titleMedium,
+                    child: Row(
+                      children: [
+                        Flexible(
+                          child: Text(
+                            cs.cameraName,
+                            style: theme.textTheme.titleMedium,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                        if (widget.showSourceBadge) ...[
+                          const SizedBox(width: Spacing.sm),
+                          CameraSourceBadge(isManual: cs.isManual),
+                        ],
+                      ],
                     ),
                   ),
                   // Status text — exactly one branch renders per UI-SPEC

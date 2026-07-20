@@ -70,5 +70,52 @@ void main() {
       final cam = ProtectCamera.fromJson({'id': 'x', 'state': 'CONNECTED'});
       expect(cam.isMicEnabled, false);
     });
+
+    test('source defaults to unifi (including legacy JSON without source)', () {
+      final cam = ProtectCamera.fromJson({'id': 'x', 'state': 'CONNECTED'});
+      expect(cam.source, CameraSource.unifi);
+      expect(cam.isManual, false);
+    });
+  });
+
+  group('ProtectCamera manual', () {
+    test('manual factory sets source, single stream URL, and mic assumed on', () {
+      final cam = ProtectCamera.manual(
+        id: 'm1',
+        url: 'rtsp://host/live',
+        name: 'Attic',
+      );
+      expect(cam.isManual, true);
+      expect(cam.source, CameraSource.manual);
+      expect(cam.name, 'Attic');
+      expect(cam.isMicEnabled, true);
+      expect(cam.defaultStreamUrl, 'rtsp://host/live');
+      expect(cam.defaultQuality, 'stream');
+    });
+
+    test('manual camera round-trips through JSON preserving source', () {
+      final cam = ProtectCamera.manual(id: 'm1', url: 'rtsp://host/live');
+      final restored = ProtectCamera.fromJson(cam.toJson());
+      expect(restored.source, CameraSource.manual);
+      expect(restored.isManual, true);
+      expect(restored.defaultStreamUrl, 'rtsp://host/live');
+    });
+
+    test('defaultStreamUrl falls back to first entry when no standard quality',
+        () {
+      final cam = ProtectCamera(
+        id: 'x',
+        state: 'CONNECTED',
+        rtspsStreamUrls: {'stream': 'rtsp://h/s'},
+      );
+      expect(cam.defaultStreamUrl, 'rtsp://h/s');
+      expect(cam.defaultQuality, 'stream');
+    });
+
+    test('copyWith preserves manual source', () {
+      final cam = ProtectCamera.manual(id: 'm1', url: 'rtsp://host/live');
+      final updated = cam.copyWith(rtspsStreamUrls: {'stream': 'rtsp://host/x'});
+      expect(updated.source, CameraSource.manual);
+    });
   });
 }
