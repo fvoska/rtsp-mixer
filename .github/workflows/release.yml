@@ -45,8 +45,37 @@ jobs:
       - name: Decode release keystore
         env:
           KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          KS_PASS: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
         run: |
-          echo "$KEYSTORE_B64" | base64 -d > android/app/release.jks
+          set -euo pipefail
+
+          if [ -z "${KEYSTORE_B64:-}" ]; then
+            echo "::error::ANDROID_KEYSTORE_BASE64 secret is empty or not set."
+            exit 1
+          fi
+
+          # Decode the base64 secret into the keystore. --decode ignores
+          # whitespace/newlines that GitHub may introduce in the secret value.
+          printf '%s' "$KEYSTORE_B64" | base64 --decode > android/app/release.jks
+
+          # Fail fast with a clear message if the decoded file is not a real
+          # keystore. Without this, an invalid keystore only surfaces ~9 min
+          # later as a cryptic "Tag number over 30 is not supported" during
+          # :app:packageRelease. A common cause is a double base64-encoded
+          # secret: `printf '%s' "$B64" | base64 --decode` still leaves base64
+          # *text* in the file, which keytool cannot parse.
+          if ! keytool -list \
+                 -keystore android/app/release.jks \
+                 -storepass "$KS_PASS" >/dev/null 2>keytool-err.log; then
+            echo "::error::release.jks is not a readable keystore. The ANDROID_KEYSTORE_BASE64 secret is likely corrupt, double base64-encoded, or the store password is wrong."
+            echo "Regenerate the secret with a SINGLE base64 pass over the .jks, e.g.:"
+            echo "  base64 -w0 upload-keystore.jks | gh secret set ANDROID_KEYSTORE_BASE64"
+            echo "keytool output:"
+            cat keytool-err.log
+            exit 1
+          fi
+
+          echo "Keystore decoded and verified."
 
       - name: Write key.properties
         env:
