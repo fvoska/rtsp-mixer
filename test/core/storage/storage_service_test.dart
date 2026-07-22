@@ -29,6 +29,23 @@ void main() {
       });
     });
 
+    group('remote host', () {
+      test('save then load round-trips', () async {
+        await storage.saveRemoteHost('100.64.0.9');
+        expect(await storage.loadRemoteHost(), '100.64.0.9');
+      });
+
+      test('returns null when never saved', () async {
+        expect(await storage.loadRemoteHost(), isNull);
+      });
+
+      test('delete then load returns null', () async {
+        await storage.saveRemoteHost('100.64.0.9');
+        await storage.deleteRemoteHost();
+        expect(await storage.loadRemoteHost(), isNull);
+      });
+    });
+
     group('selected cameras', () {
       test('saves and loads camera IDs', () async {
         await storage.saveSelectedCameraIds(['cam-1', 'cam-2']);
