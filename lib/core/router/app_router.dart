@@ -6,6 +6,10 @@ import '../../features/auth/providers/auth_provider.dart';
 import '../../features/auth/screens/login_screen.dart';
 import '../../features/monitoring/providers/session_history_provider.dart';
 import '../../features/monitoring/screens/health_summary_screen.dart';
+import '../../features/monitoring/screens/log_screen.dart';
+import '../../features/monitoring/screens/monitoring_screen.dart';
+import '../../features/monitoring/screens/sessions_list_screen.dart';
+import '../../features/settings/screens/settings_screen.dart';
 import '../widgets/main_shell.dart';
 
 final appRouterProvider = Provider<GoRouter>((ref) {
@@ -59,31 +63,48 @@ final appRouterProvider = Provider<GoRouter>((ref) {
           );
         },
       ),
-      // ShellRoute hosts the three primary tabs. MainShell uses an IndexedStack
-      // internally so MonitoringScreen stays mounted across tab switches
-      // (260514-siv). Sub-route builders return SizedBox.shrink() — the actual
-      // widgets live in MainShell's IndexedStack. EXCEPTION: /sessions/:id uses
-      // a pageBuilder so it stacks ON TOP of the shell as a MaterialPage.
-      ShellRoute(
-        builder: (context, state, _) => MainShell(
-          currentLocation: state.matchedLocation,
-        ),
-        routes: [
-          GoRoute(
-            path: '/monitoring',
-            builder: (_, _) => const SizedBox.shrink(),
+      // StatefulShellRoute.indexedStack hosts the four primary tabs. Unlike a
+      // plain ShellRoute + hand-rolled IndexedStack, it owns one Navigator per
+      // branch and keeps their state alive across router refreshes (the
+      // auth refreshListenable fires several times during start-up), tab
+      // switches, and the rail/bottom-nav breakpoint — so MonitoringScreen is
+      // no longer torn down and remounted mid-session. EXCEPTION: /sessions/:id
+      // uses a top-level pageBuilder so it stacks ON TOP of the shell.
+      StatefulShellRoute.indexedStack(
+        builder: (context, state, navigationShell) =>
+            MainShell(navigationShell: navigationShell),
+        branches: [
+          StatefulShellBranch(
+            routes: [
+              GoRoute(
+                path: '/monitoring',
+                builder: (_, _) => const MonitoringScreen(),
+              ),
+            ],
           ),
-          GoRoute(
-            path: '/sessions',
-            builder: (_, _) => const SizedBox.shrink(),
+          StatefulShellBranch(
+            routes: [
+              GoRoute(
+                path: '/sessions',
+                builder: (_, _) => const SessionsListScreen(),
+              ),
+            ],
           ),
-          GoRoute(
-            path: '/logs',
-            builder: (_, _) => const SizedBox.shrink(),
+          StatefulShellBranch(
+            routes: [
+              GoRoute(
+                path: '/logs',
+                builder: (_, _) => const LogScreen(),
+              ),
+            ],
           ),
-          GoRoute(
-            path: '/settings',
-            builder: (_, _) => const SizedBox.shrink(),
+          StatefulShellBranch(
+            routes: [
+              GoRoute(
+                path: '/settings',
+                builder: (_, _) => const SettingsScreen(),
+              ),
+            ],
           ),
         ],
       ),

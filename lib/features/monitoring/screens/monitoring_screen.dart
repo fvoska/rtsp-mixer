@@ -435,40 +435,74 @@ class _LiveToolbar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    return Row(
-      children: [
-        if (cameraCount > 2) ...[
-          Chip(
-            avatar: Icon(
-              Icons.warning_amber_outlined,
-              size: 16,
-              color: theme.colorScheme.onTertiaryContainer,
-            ),
-            label: Text(
-              'More than 2 cameras may degrade performance and battery life.',
-              style: theme.textTheme.labelSmall?.copyWith(
-                color: theme.colorScheme.onTertiaryContainer,
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        // Below this width the two labelled toggle buttons + the title no
+        // longer fit on one line, so collapse the toggles to icon-only.
+        final compact = constraints.maxWidth < 460;
+        final detailsIcon = showDetails ? Icons.info : Icons.info_outline;
+        final detailsLabel = showDetails ? 'Hide details' : 'Show details';
+        final videoIcon =
+            globalVideoOn ? Icons.videocam : Icons.videocam_off;
+        final videoLabel = globalVideoOn ? 'Hide video' : 'Show video';
+        return Row(
+          children: [
+            if (cameraCount > 2) ...[
+              Flexible(
+                child: Chip(
+                  avatar: Icon(
+                    Icons.warning_amber_outlined,
+                    size: 16,
+                    color: theme.colorScheme.onTertiaryContainer,
+                  ),
+                  label: Text(
+                    'More than 2 cameras may degrade performance and battery life.',
+                    style: theme.textTheme.labelSmall?.copyWith(
+                      color: theme.colorScheme.onTertiaryContainer,
+                    ),
+                  ),
+                  backgroundColor: theme.colorScheme.tertiaryContainer,
+                  visualDensity: VisualDensity.compact,
+                ),
+              ),
+              const SizedBox(width: Spacing.sm),
+            ],
+            Expanded(
+              child: Text(
+                'Cameras',
+                style: theme.textTheme.titleMedium,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
               ),
             ),
-            backgroundColor: theme.colorScheme.tertiaryContainer,
-            visualDensity: VisualDensity.compact,
-          ),
-          const SizedBox(width: Spacing.sm),
-        ],
-        Expanded(
-          child: Text('Cameras', style: theme.textTheme.titleMedium),
-        ),
-        TextButton.icon(
-          onPressed: onToggleShowDetails,
-          icon: Icon(showDetails ? Icons.info : Icons.info_outline),
-          label: Text(showDetails ? 'Hide details' : 'Show details'),
-        ),
-        TextButton.icon(
-          onPressed: onToggleGlobalVideo,
-          icon: Icon(globalVideoOn ? Icons.videocam : Icons.videocam_off),
-          label: Text(globalVideoOn ? 'Hide video' : 'Show video'),
-        ),
-      ],
+            if (compact) ...[
+              IconButton(
+                onPressed: onToggleShowDetails,
+                icon: Icon(detailsIcon),
+                tooltip: detailsLabel,
+                visualDensity: VisualDensity.compact,
+              ),
+              IconButton(
+                onPressed: onToggleGlobalVideo,
+                icon: Icon(videoIcon),
+                tooltip: videoLabel,
+                visualDensity: VisualDensity.compact,
+              ),
+            ] else ...[
+              TextButton.icon(
+                onPressed: onToggleShowDetails,
+                icon: Icon(detailsIcon),
+                label: Text(detailsLabel),
+              ),
+              TextButton.icon(
+                onPressed: onToggleGlobalVideo,
+                icon: Icon(videoIcon),
+                label: Text(videoLabel),
+              ),
+            ],
+          ],
+        );
+      },
     );
   }
 }

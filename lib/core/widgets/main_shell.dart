@@ -2,11 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
-import '../../features/monitoring/screens/log_screen.dart';
-import '../../features/monitoring/screens/monitoring_screen.dart';
-import '../../features/monitoring/screens/sessions_list_screen.dart';
 import '../../features/monitoring/widgets/active_session_bar.dart';
-import '../../features/settings/screens/settings_screen.dart';
 
 /// Width at which we swap the bottom NavigationBar for a side NavigationRail.
 /// 600dp is the canonical Material 3 "compact → medium" breakpoint.
@@ -14,64 +10,58 @@ const double _kRailBreakpoint = 600;
 
 /// Top-level shell hosting the four primary tabs.
 ///
-/// IndexedStack keeps MonitoringScreen mounted across tab switches so the
-/// audio pipeline, video controllers, and ConsumerStatefulWidget state are
-/// not torn down on every navigation. We deliberately ignore the
-/// `ShellRoute.builder`'s `child` parameter — that pattern only renders the
-/// active route's widget, which would unmount the others.
+/// Backed by go_router's [StatefulShellRoute.indexedStack]: the injected
+/// [navigationShell] owns one Navigator per branch (each keyed with a
+/// GlobalKey) and keeps their state alive across router refreshes — the auth
+/// `refreshListenable` fires several times during start-up — as well as tab
+/// switches and the rail/bottom-nav breakpoint. MonitoringScreen's audio
+/// pipeline, video controllers, and State are therefore never torn down by
+/// navigation, unlike the previous hand-rolled ShellRoute + IndexedStack.
 ///
 /// Layout:
 /// - Width < 600dp → bottom NavigationBar (phone)
 /// - Width ≥ 600dp → collapsible NavigationRail at the leading edge
 ///
-/// Routing contract:
-/// - `/monitoring` → index 0
-/// - `/sessions` (and prefix-matches like `/sessions/`) → index 1
-/// - `/logs` → index 2
-/// - `/settings` → index 3
-/// - `/sessions/:id` is NOT in the IndexedStack — it pushes on top of the
-///   shell via go_router's `MaterialPage` pageBuilder.
+/// Routing contract (branch index):
+/// - `/monitoring` → 0
+/// - `/sessions` → 1
+/// - `/logs` → 2
+/// - `/settings` → 3
+/// - `/sessions/:id` is NOT a branch — it stacks ON TOP of the shell via a
+///   top-level `MaterialPage` pageBuilder (its own AppBar + back button).
 class MainShell extends ConsumerStatefulWidget {
-  const MainShell({super.key, required this.currentLocation});
+  const MainShell({super.key, required this.navigationShell});
 
-  final String currentLocation;
+  /// The stateful shell created by [StatefulShellRoute.indexedStack]; renders
+  /// the active branch and exposes [StatefulNavigationShell.goBranch].
+  final StatefulNavigationShell navigationShell;
 
   @override
   ConsumerState<MainShell> createState() => _MainShellState();
 }
 
 class _MainShellState extends ConsumerState<MainShell> {
-  static const _tabs = ['/monitoring', '/sessions', '/logs', '/settings'];
-
   /// User-controlled rail expansion (icon-only vs icon+label). Applies only
   /// when the rail is shown (width ≥ _kRailBreakpoint).
   bool _railExtended = false;
 
-  int _indexFor(String loc) {
-    if (loc.startsWith('/sessions')) return 1;
-    if (loc.startsWith('/logs')) return 2;
-    if (loc.startsWith('/settings')) return 3;
-    return 0; // default to monitoring
+  /// Switch to branch [index]. Tapping the already-selected tab pops that
+  /// branch back to its initial location — standard bottom-nav behaviour.
+  void _goBranch(int index) {
+    widget.navigationShell.goBranch(
+      index,
+      initialLocation: index == widget.navigationShell.currentIndex,
+    );
   }
 
   @override
   Widget build(BuildContext context) {
-    final selectedIndex = _indexFor(widget.currentLocation);
+    final selectedIndex = widget.navigationShell.currentIndex;
     final useRail = MediaQuery.sizeOf(context).width >= _kRailBreakpoint;
 
     final body = Column(
       children: [
-        Expanded(
-          child: IndexedStack(
-            index: selectedIndex,
-            children: const [
-              MonitoringScreen(),
-              SessionsListScreen(),
-              LogScreen(),
-              SettingsScreen(),
-            ],
-          ),
-        ),
+        Expanded(child: widget.navigationShell),
         // ActiveSessionBar sits at the bottom of the body column. On phones it
         // visually floats just above the NavigationBar; on tablet/desktop it
         // floats at the bottom of the main content area, next to the rail.
@@ -86,7 +76,7 @@ class _MainShellState extends ConsumerState<MainShell> {
         body: body,
         bottomNavigationBar: NavigationBar(
           selectedIndex: selectedIndex,
-          onDestinationSelected: (i) => context.go(_tabs[i]),
+          onDestinationSelected: _goBranch,
           destinations: const [
             NavigationDestination(
               icon: Icon(Icons.monitor_heart_outlined),
@@ -119,7 +109,7 @@ class _MainShellState extends ConsumerState<MainShell> {
             NavigationRail(
               extended: _railExtended,
               selectedIndex: selectedIndex,
-              onDestinationSelected: (i) => context.go(_tabs[i]),
+              onDestinationSelected: _goBranch,
               labelType: _railExtended
                   ? NavigationRailLabelType.none
                   : NavigationRailLabelType.selected,
