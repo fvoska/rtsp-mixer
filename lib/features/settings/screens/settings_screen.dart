@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 
 import '../../../core/providers/settings_provider.dart';
 import '../../../core/theme/spacing.dart';
@@ -83,6 +84,15 @@ class SettingsScreen extends ConsumerWidget {
               'RTSP and audio-buffer changes take effect on next stream start.',
               style: TextStyle(fontSize: 12),
             ),
+          ),
+          const Divider(height: 1),
+          ListTile(
+            leading: const Icon(Icons.help_outline),
+            title: const Text('Help & setup guides'),
+            subtitle: const Text(
+              'UniFi API keys, RTSP for Reolink, Tapo, and more.',
+            ),
+            onTap: () => context.push('/help'),
           ),
           const Divider(height: 1),
           ListTile(
