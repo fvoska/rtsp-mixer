@@ -124,6 +124,17 @@ class StorageService {
 
   Future<void> clearAll() async => deleteAll();
 
+  /// Optional remote (VPN/Tailscale) address for the Unifi console. `host`
+  /// (saved via [saveCredentials]) remains the local/primary address; this is
+  /// only tried as a fallback when the local address is unreachable.
+  Future<void> saveRemoteHost(String host) async {
+    await write('remote_host', host);
+  }
+
+  Future<String?> loadRemoteHost() async => read('remote_host');
+
+  Future<void> deleteRemoteHost() async => delete('remote_host');
+
   Future<void> saveSelectedCameraIds(List<String> ids) async {
     await write('selected_cameras', jsonEncode(ids));
   }

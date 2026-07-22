@@ -18,6 +18,38 @@ String rtspsUrl(String nvrHost, String cameraId) {
   return 'rtsps://$host:7441/$cameraId?enableSrtp';
 }
 
+/// Replace only the host portion of [url] with [newHost], preserving scheme,
+/// port, path, and query. Used to derive a remote (VPN/Tailscale) stream
+/// candidate from a local-address URL.
+///
+/// [newHost] is normalized first: surrounding whitespace is trimmed, a pasted
+/// scheme prefix (e.g. `https://` or `rtsp://`) is stripped, and trailing
+/// slashes are removed.
+///
+/// Defensive by contract (CLAUDE.md): this helper must NEVER throw. On any
+/// parse failure — or when the normalized host is empty — the input [url] is
+/// returned unchanged.
+String replaceUrlHost(String url, String newHost) {
+  try {
+    var host = newHost.trim();
+    // Strip a pasted scheme prefix like "https://" or "rtsp://".
+    final schemeMatch = RegExp(r'^[a-zA-Z][a-zA-Z0-9+.\-]*://').firstMatch(host);
+    if (schemeMatch != null) host = host.substring(schemeMatch.end);
+    // Strip trailing slashes.
+    while (host.endsWith('/')) {
+      host = host.substring(0, host.length - 1);
+    }
+    if (host.isEmpty) return url;
+
+    final uri = Uri.tryParse(url);
+    if (uri == null || !uri.hasScheme || uri.host.isEmpty) return url;
+    return uri.replace(host: host).toString();
+  } catch (_) {
+    // Never throw — a malformed URL simply passes through unchanged.
+    return url;
+  }
+}
+
 /// Convert an RTSPS URL (from the Protect API) to plain RTSP.
 /// rtsps://host:7441/alias?enableSrtp → rtsp://host:7447/alias
 String rtspsToRtsp(String rtspsUrl) {

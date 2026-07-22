@@ -10,6 +10,24 @@ import '../models/auth_state.dart';
 final apiClientProvider = Provider((_) => ProtectApiClient());
 final storageProvider = Provider((_) => StorageService());
 
+/// Normalize a user-entered console address: trim whitespace, strip a pasted
+/// scheme prefix (e.g. `https://`), and strip trailing slashes. Returns null
+/// when the result is empty. Never throws.
+String? normalizeHostInput(String? raw) {
+  try {
+    var host = (raw ?? '').trim();
+    final schemeMatch =
+        RegExp(r'^[a-zA-Z][a-zA-Z0-9+.\-]*://').firstMatch(host);
+    if (schemeMatch != null) host = host.substring(schemeMatch.end);
+    while (host.endsWith('/')) {
+      host = host.substring(0, host.length - 1);
+    }
+    return host.isEmpty ? null : host;
+  } catch (_) {
+    return raw?.trim().isEmpty ?? true ? null : raw!.trim();
+  }
+}
+
 class AuthNotifier extends AsyncNotifier<AuthState> {
   @override
   Future<AuthState> build() async {
@@ -39,32 +57,94 @@ class AuthNotifier extends AsyncNotifier<AuthState> {
     final client = ref.read(apiClientProvider);
     client.setApiKey(creds.apiKey);
 
+    final remoteHost = await _loadRemoteHostSafe(storage);
+
     // Load cached cameras (instant, no network)
-    await ref.read(cameraNotifierProvider.notifier).loadCameras(creds.host);
+    await ref
+        .read(cameraNotifierProvider.notifier)
+        .loadCameras(creds.host, remoteHost);
 
     final wasMonitoring = await storage.read('was_monitoring') == 'true';
     appLog('AUTH', 'Cached credentials found (wasMonitoring=$wasMonitoring), validating in background...');
 
     // Validate credentials in background — interrupt if invalid
-    _validateInBackground(creds.host, creds.apiKey);
+    _validateInBackground(creds.host, remoteHost, creds.apiKey);
 
-    return AuthState.authenticated(host: creds.host, resumeMonitoring: wasMonitoring);
+    return AuthState.authenticated(
+      host: creds.host,
+      remoteHost: remoteHost,
+      resumeMonitoring: wasMonitoring,
+    );
   }
 
-  void _validateInBackground(String host, String apiKey) {
+  /// Read the persisted remote console address. Defensive: storage failures
+  /// degrade to "no remote configured" rather than blocking auth.
+  Future<String?> _loadRemoteHostSafe(StorageService storage) async {
+    try {
+      final remote = await storage.loadRemoteHost();
+      return (remote == null || remote.trim().isEmpty) ? null : remote.trim();
+    } catch (e) {
+      appLog('AUTH', 'Failed to load remote host (continuing without): $e');
+      return null;
+    }
+  }
+
+  /// Whether an [AppError] represents "host unreachable" — the only class of
+  /// failure where trying the remote address makes sense. Auth errors (bad
+  /// key) would fail identically on both addresses.
+  static bool _isReachabilityError(AppError e) =>
+      e.type == AppErrorType.connectionRefused ||
+      e.type == AppErrorType.timeout;
+
+  /// Verify the connection against the local host first, falling back to the
+  /// remote host when the local attempt fails with a reachability error.
+  ///
+  /// Returns the verification result plus whichever host answered. When both
+  /// hosts fail, the LOCAL attempt's error is surfaced (the remote failure is
+  /// logged, never escalated — it must not mask the primary error).
+  Future<({bool ok, String host})> _verifyWithFallback(
+    ProtectApiClient client,
+    String localHost,
+    String? remoteHost,
+  ) async {
+    try {
+      final ok = await client.verifyConnection(localHost);
+      return (ok: ok, host: localHost);
+    } on AppError catch (localError) {
+      if (_isReachabilityError(localError) &&
+          remoteHost != null &&
+          remoteHost.isNotEmpty &&
+          remoteHost != localHost) {
+        appLog('AUTH',
+            'Local host $localHost unreachable (${localError.type.name}) — trying remote host $remoteHost');
+        try {
+          final ok = await client.verifyConnection(remoteHost);
+          appLog('AUTH', 'Remote host $remoteHost answered (ok=$ok)');
+          return (ok: ok, host: remoteHost);
+        } catch (remoteError) {
+          // Never mask the local error with the remote one.
+          appLog('AUTH', 'Remote host attempt also failed: $remoteError');
+        }
+      }
+      rethrow;
+    }
+  }
+
+  void _validateInBackground(String host, String? remoteHost, String apiKey) {
     Future(() async {
       // Let the UI settle with cached state before potentially revoking
       await Future.delayed(const Duration(seconds: 2));
       try {
         final client = ref.read(apiClientProvider);
-        final ok = await client.verifyConnection(host);
-        if (!ok) {
+        final result = await _verifyWithFallback(client, host, remoteHost);
+        if (!result.ok) {
           appLog('AUTH', 'Background validation failed — credentials invalid');
           state = const AsyncData(AuthState.unauthenticated(
             errorMessage: 'API key is no longer valid. Please re-enter.',
           ));
         } else {
-          appLog('AUTH', 'Background validation succeeded');
+          appLog('AUTH',
+              'Background validation succeeded via ${result.host == host ? "local" : "remote"} host');
         }
       } catch (e) {
         appLog('AUTH', 'Background validation error: $e');
@@ -78,15 +158,24 @@ class AuthNotifier extends AsyncNotifier<AuthState> {
     state = const AsyncLoading();
     final client = ref.read(apiClientProvider);
     client.setApiKey(apiKey);
+    final storage = ref.read(storageProvider);
+    final remoteHost = await _loadRemoteHostSafe(storage);
     try {
-      final ok = await client.verifyConnection(host);
-      if (ok) {
-        appLog('AUTH', 'Login succeeded');
-        final storage = ref.read(storageProvider);
+      final result = await _verifyWithFallback(client, host, remoteHost);
+      if (result.ok) {
+        appLog('AUTH',
+            'Login succeeded via ${result.host == host ? "local" : "remote"} host');
         await storage.saveCredentials(host, apiKey);
         await storage.saveAuthMode('unifi');
-        await ref.read(cameraNotifierProvider.notifier).loadCameras(host);
-        state = AsyncData(AuthState.authenticated(host: host));
+        // Lead with whichever host answered so the camera refresh doesn't
+        // sit through another connect timeout; the other host stays as the
+        // fallback candidate.
+        final fallback = result.host == host ? remoteHost : host;
+        await ref
+            .read(cameraNotifierProvider.notifier)
+            .loadCameras(result.host, fallback);
+        state = AsyncData(
+            AuthState.authenticated(host: host, remoteHost: remoteHost));
       } else {
         appLog('AUTH', 'Login failed — bad response');
         state = const AsyncData(AuthState.unauthenticated(
@@ -106,6 +195,77 @@ class AuthNotifier extends AsyncNotifier<AuthState> {
         errorMessage: 'Unexpected error: $e',
         errorType: AppErrorType.unknown,
       ));
+    }
+  }
+
+  /// Update the console's local (primary) address. Persists it, updates the
+  /// in-memory state, and reloads cameras against the new address. Covers
+  /// the "set up away from home via the remote address, add the real local
+  /// address later" flow — the user can also swap values between the fields.
+  Future<void> updateLocalHost(String host) async {
+    final normalized = normalizeHostInput(host);
+    if (normalized == null) {
+      appLog('AUTH', 'updateLocalHost ignored — empty input');
+      return;
+    }
+    appLog('AUTH', 'updateLocalHost($normalized)');
+    final storage = ref.read(storageProvider);
+    try {
+      // saveCredentials owns the 'host' key; write it directly so we don't
+      // need to re-read + re-write the API key.
+      await storage.write('host', normalized);
+    } catch (e) {
+      appLog('AUTH', 'Failed to persist local host (continuing): $e');
+    }
+    final current = state.value;
+    if (current != null && current.isAuthenticated && !current.isManualMode) {
+      state = AsyncData(AuthState.authenticated(
+        host: normalized,
+        remoteHost: current.remoteHost,
+        resumeMonitoring: current.resumeMonitoring,
+      ));
+    }
+    await _reloadCamerasSafe(normalized);
+  }
+
+  /// Set or clear the console's remote (VPN/Tailscale) address. Null or an
+  /// empty string clears it. Persists, updates state, reloads cameras.
+  Future<void> updateRemoteHost(String? host) async {
+    final normalized = normalizeHostInput(host);
+    appLog('AUTH', 'updateRemoteHost(${normalized ?? "<clear>"})');
+    final storage = ref.read(storageProvider);
+    try {
+      if (normalized == null) {
+        await storage.deleteRemoteHost();
+      } else {
+        await storage.saveRemoteHost(normalized);
+      }
+    } catch (e) {
+      appLog('AUTH', 'Failed to persist remote host (continuing): $e');
+    }
+    final current = state.value;
+    if (current != null && current.isAuthenticated && !current.isManualMode) {
+      state = AsyncData(AuthState.authenticated(
+        host: current.host,
+        remoteHost: normalized,
+        resumeMonitoring: current.resumeMonitoring,
+      ));
+    }
+    await _reloadCamerasSafe(current?.host);
+  }
+
+  /// Trigger a camera reload with the current local + remote addresses.
+  /// Defensive: a reload failure never surfaces to the settings UI.
+  Future<void> _reloadCamerasSafe(String? localHost) async {
+    if (localHost == null || localHost.isEmpty) return;
+    try {
+      final storage = ref.read(storageProvider);
+      final remote = await _loadRemoteHostSafe(storage);
+      await ref
+          .read(cameraNotifierProvider.notifier)
+          .loadCameras(localHost, remote);
+    } catch (e) {
+      appLog('AUTH', 'Camera reload after host update failed (continuing): $e');
     }
   }
 
@@ -143,6 +303,7 @@ class AuthNotifier extends AsyncNotifier<AuthState> {
         ? const AuthState.manual(resumeMonitoring: false)
         : AuthState.authenticated(
             host: current.host,
+            remoteHost: current.remoteHost,
             resumeMonitoring: false,
           ));
     appLog('AUTH', 'Cleared resumeMonitoring flag');

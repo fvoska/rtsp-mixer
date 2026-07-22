@@ -10,6 +10,11 @@ class AuthState {
   final AuthStatus status;
   final AuthMode mode;
   final String? host;
+
+  /// Optional remote (VPN/Tailscale) address for the Unifi console. Tried as
+  /// a fallback whenever [host] (the local address) is unreachable. Always
+  /// null in manual and unauthenticated states.
+  final String? remoteHost;
   final String? errorMessage;
   final AppErrorType? errorType;
   final bool resumeMonitoring;
@@ -18,10 +23,14 @@ class AuthState {
       : status = AuthStatus.unauthenticated,
         mode = AuthMode.unifi,
         host = null,
+        remoteHost = null,
         resumeMonitoring = false;
 
-  const AuthState.authenticated({required this.host, this.resumeMonitoring = false})
-      : status = AuthStatus.authenticated,
+  const AuthState.authenticated({
+    required this.host,
+    this.remoteHost,
+    this.resumeMonitoring = false,
+  })  : status = AuthStatus.authenticated,
         mode = AuthMode.unifi,
         errorMessage = null,
         errorType = null;
@@ -32,6 +41,7 @@ class AuthState {
       : status = AuthStatus.authenticated,
         mode = AuthMode.manual,
         host = null,
+        remoteHost = null,
         errorMessage = null,
         errorType = null;
 

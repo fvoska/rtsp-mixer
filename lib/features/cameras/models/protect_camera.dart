@@ -24,6 +24,12 @@ class ProtectCamera {
   /// Manual cameras store their single URL under the `stream` key.
   final Map<String, String> rtspsStreamUrls;
 
+  /// Optional remote (VPN/Tailscale) stream URL for manual cameras. Playback
+  /// prefers the local URL and falls back to this when the local address is
+  /// unreachable. Always null for Unifi cameras — their remote candidates are
+  /// derived from the console's remote host at playback time.
+  final String? remoteUrl;
+
   const ProtectCamera({
     required this.id,
     this.name,
@@ -34,6 +40,7 @@ class ProtectCamera {
     this.micVolume,
     this.rtspsStreamUrls = const {},
     this.source = CameraSource.unifi,
+    this.remoteUrl,
   });
 
   /// Build a manually-entered camera from a raw RTSP/RTSPS URL. The URL is
@@ -43,6 +50,7 @@ class ProtectCamera {
     required String id,
     required String url,
     String? name,
+    String? remoteUrl,
   }) =>
       ProtectCamera(
         id: id,
@@ -55,6 +63,7 @@ class ProtectCamera {
         isMicEnabled: true,
         rtspsStreamUrls: {'stream': url},
         source: CameraSource.manual,
+        remoteUrl: remoteUrl,
       );
 
   bool get isConnected => state == 'CONNECTED';
@@ -78,7 +87,14 @@ class ProtectCamera {
     return rtspsStreamUrls.keys.isNotEmpty ? rtspsStreamUrls.keys.first : null;
   }
 
-  ProtectCamera copyWith({Map<String, String>? rtspsStreamUrls}) =>
+  /// Sentinel distinguishing "not passed" from an explicit null so
+  /// [copyWith] can both preserve and clear [remoteUrl].
+  static const Object _unset = Object();
+
+  ProtectCamera copyWith({
+    Map<String, String>? rtspsStreamUrls,
+    Object? remoteUrl = _unset,
+  }) =>
       ProtectCamera(
         id: id,
         name: name,
@@ -89,6 +105,8 @@ class ProtectCamera {
         micVolume: micVolume,
         rtspsStreamUrls: rtspsStreamUrls ?? this.rtspsStreamUrls,
         source: source,
+        remoteUrl:
+            identical(remoteUrl, _unset) ? this.remoteUrl : remoteUrl as String?,
       );
 
   Map<String, dynamic> toJson() => {
@@ -101,6 +119,7 @@ class ProtectCamera {
         'micVolume': micVolume,
         'rtspsStreamUrls': rtspsStreamUrls,
         'source': source.name,
+        'remoteUrl': remoteUrl,
       };
 
   factory ProtectCamera.fromJson(Map<String, dynamic> json) => ProtectCamera(
@@ -118,5 +137,7 @@ class ProtectCamera {
         source: (json['source'] as String?) == 'manual'
             ? CameraSource.manual
             : CameraSource.unifi,
+        // Absent key (legacy JSON from before remote URLs) → null.
+        remoteUrl: json['remoteUrl'] as String?,
       );
 }
