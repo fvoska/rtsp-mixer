@@ -1,5 +1,24 @@
 # Changelog
 
+## [1.3.0](https://github.com/fvoska/rtsp-mixer/compare/v1.2.1...v1.3.0) (2026-07-22)
+
+
+### Features
+
+* **help:** add Help & Setup page with UniFi API key and Reolink/Tapo RTSP guides ([9045777](https://github.com/fvoska/rtsp-mixer/commit/90457778d5bd750f7e3717211054e593ca90e75f))
+
+
+### Bug Fixes
+
+* **monitoring:** card text wrapping, toolbar overflow, and shell remount churn ([ea6bea7](https://github.com/fvoska/rtsp-mixer/commit/ea6bea77e4148399f3715a12d1acd74a76c4db05))
+* **monitoring:** stop card text wrapping and toolbar overflow on phones ([a71a3d7](https://github.com/fvoska/rtsp-mixer/commit/a71a3d7872cbbeb87cde6bd892ec1a9d18ca98d6))
+* **nav:** migrate shell to StatefulShellRoute.indexedStack ([b8e3433](https://github.com/fvoska/rtsp-mixer/commit/b8e34339a7c040a80bd89da2caf4c376e00db9d7))
+
+
+### Documentation
+
+* require Conventional Commits PR titles in CLAUDE.md ([7b2e749](https://github.com/fvoska/rtsp-mixer/commit/7b2e749a8968f84f159ac2a4cb7454af73229b0a))
+
 ## [1.2.1](https://github.com/fvoska/rtsp-mixer/compare/v1.2.0...v1.2.1) (2026-07-22)
 
 
