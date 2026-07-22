@@ -77,6 +77,32 @@ log "Fetching project dependencies (flutter pub get) ..."
 log "Precaching universal + linux artifacts ..."
 flutter precache --universal --linux >/dev/null 2>&1 || true
 
+# --- Set up GSD (open-gsd/gsd-core) -------------------------------------------
+# GSD is installed REPO-LEVEL: its payload (commands, agents, hook scripts
+# under .claude/) is committed to the repo, so the /gsd-* workflow commands
+# that CLAUDE.md's "GSD Workflow Enforcement" section expects work in any
+# session out of the box. The one piece that is NOT committed is
+# .claude/settings.local.json — the installer writes machine-specific hook
+# registrations there (absolute node path), so it is gitignored and has to be
+# regenerated once per container by re-running the installer.
+#
+# Pinned to the version of the committed payload. To upgrade GSD: bump this
+# pin, run the installer locally, and commit the changed .claude/ files —
+# otherwise a newer installer at session start would dirty the work tree.
+GSD_VERSION="1.8.0"
+if grep -qs "gsd-" "${CLAUDE_PROJECT_DIR}/.claude/settings.local.json"; then
+  log "GSD hooks already registered; skipping."
+elif command -v npx >/dev/null 2>&1; then
+  log "Registering GSD ${GSD_VERSION} hooks (repo-local install) ..."
+  if (cd "${CLAUDE_PROJECT_DIR}" && npx -y "@opengsd/gsd-core@${GSD_VERSION}" --claude --local >/dev/null 2>&1); then
+    log "GSD ready."
+  else
+    log "WARNING: GSD setup failed; /gsd-* commands may run without hook support."
+  fi
+else
+  log "WARNING: npx not found; skipping GSD setup."
+fi
+
 # --- Persist PATH for the rest of the session --------------------------------
 if [ -n "${CLAUDE_ENV_FILE:-}" ]; then
   {
