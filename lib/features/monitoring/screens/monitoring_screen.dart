@@ -333,7 +333,7 @@ class _LiveMonitoringView extends ConsumerWidget {
     required this.onRemoveCamera,
   });
 
-  final AsyncValue monitoringState;
+  final AsyncValue<MonitoringState> monitoringState;
   final bool globalVideo;
   final bool showDetails;
   final VoidCallback onToggleGlobalVideo;

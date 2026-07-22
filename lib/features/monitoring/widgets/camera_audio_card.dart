@@ -300,7 +300,9 @@ class _CameraAudioCardState extends ConsumerState<CameraAudioCard> {
                       return DropdownMenuItem(
                         value: q,
                         child: Text(
-                          q[0].toUpperCase() + q.substring(1),
+                          q.isEmpty
+                              ? q
+                              : q[0].toUpperCase() + q.substring(1),
                           style: theme.textTheme.bodySmall,
                         ),
                       );
