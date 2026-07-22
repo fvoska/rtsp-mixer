@@ -1,5 +1,15 @@
 # Changelog
 
+## [1.2.1](https://github.com/fvoska/rtsp-mixer/compare/v1.2.0...v1.2.1) (2026-07-22)
+
+
+### Bug Fixes
+
+* clear media notification on every stop path ([953f7eb](https://github.com/fvoska/rtsp-mixer/commit/953f7ebabab3d80e31a4b187de5583265edd5c12))
+* clear media notification on every stop path ([7d72103](https://github.com/fvoska/rtsp-mixer/commit/7d721035ea3fae12710c3661724b7626d1ed77d3))
+* **monitoring:** stop gray screen on start — type the live-view AsyncValue ([693eeea](https://github.com/fvoska/rtsp-mixer/commit/693eeeac2d9911476bb95a00bdd49d896a1bff06))
+* **monitoring:** stop gray screen on start — type the live-view AsyncValue ([f0bef7f](https://github.com/fvoska/rtsp-mixer/commit/f0bef7f7e8794f85d1418d3d7743344d476d6c68))
+
 ## [1.2.0](https://github.com/fvoska/rtsp-mixer/compare/v1.1.0...v1.2.0) (2026-07-20)
 
 
