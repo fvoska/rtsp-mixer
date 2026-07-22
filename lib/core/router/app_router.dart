@@ -4,6 +4,7 @@ import 'package:go_router/go_router.dart';
 
 import '../../features/auth/providers/auth_provider.dart';
 import '../../features/auth/screens/login_screen.dart';
+import '../../features/help/screens/help_screen.dart';
 import '../../features/monitoring/providers/session_history_provider.dart';
 import '../../features/monitoring/screens/health_summary_screen.dart';
 import '../../features/monitoring/screens/log_screen.dart';
@@ -26,9 +27,12 @@ final appRouterProvider = Provider<GoRouter>((ref) {
       // Still loading auth (and cameras) — stay on login
       if (auth.isLoading && !auth.hasValue) return null;
 
-      // Not authenticated — go to login
+      // Not authenticated — go to login. /help stays reachable so setup
+      // instructions are available before any credentials exist.
       if (!authenticated) {
-        return location == '/login' ? null : '/login';
+        return (location == '/login' || location == '/help')
+            ? null
+            : '/login';
       }
 
       // Authenticated — always land in the shell on /monitoring. The Monitor
@@ -48,6 +52,10 @@ final appRouterProvider = Provider<GoRouter>((ref) {
     },
     routes: [
       GoRoute(path: '/login', builder: (_, _) => const LoginScreen()),
+      // Help lives ABOVE the shell (like /sessions/:id) so it stacks as a
+      // normal detail page with its own AppBar + back button, and is
+      // reachable both before login and from inside the app.
+      GoRoute(path: '/help', builder: (_, _) => const HelpScreen()),
       // Session detail lives ABOVE the shell so it stacks like a normal
       // detail page (its own AppBar + back button, no tab bar — standard
       // mobile pattern). Keeping it inside the ShellRoute hid it because

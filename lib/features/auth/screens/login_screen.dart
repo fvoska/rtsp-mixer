@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 
 import '../../../core/logging/app_logger.dart';
 import '../../../core/models/app_error.dart';
@@ -175,6 +176,16 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                   'You can add UniFi later by signing out.',
                   style: theme.textTheme.bodySmall?.copyWith(
                     color: theme.colorScheme.onSurfaceVariant,
+                  ),
+                ),
+                const SizedBox(height: Spacing.lg),
+                Center(
+                  child: TextButton.icon(
+                    onPressed: () => context.push('/help'),
+                    icon: const Icon(Icons.help_outline),
+                    label: const Text(
+                      'Setup help — API keys & camera RTSP',
+                    ),
                   ),
                 ),
                 if (logs.isNotEmpty) ...[
