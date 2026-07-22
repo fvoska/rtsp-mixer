@@ -5,7 +5,7 @@ milestone_name: milestone
 status: executing
 stopped_at: Phase 4 UI-SPEC approved
 last_updated: "2026-04-24T10:25:55.850Z"
-last_activity: 2026-07-20 -- Quick task 260720-mrc (manual RTSP cameras + skip-Unifi setup)
+last_activity: 2026-07-22 -- Quick task 260722-pdb (remote URL fallback connectivity for console + manual cameras)
 progress:
   total_phases: 4
   completed_phases: 3
@@ -96,6 +96,7 @@ None yet.
 | 260516-vgb | 2026-05-17 | allow-more-than-2-cameras-with-performan | Drop hard 2-camera cap (`canStartMonitoring` now requires only `selectedIds.isNotEmpty`); add `hasPerformanceRisk` getter; remove `toggleCamera` silent-reject branch; idle picker shows tertiary-container warning banner when selection > 2; live monitoring toolbar shows compact warning Chip when active count > 2 | [PLAN](quick/260516-vgb-allow-more-than-2-cameras-with-performan/260516-vgb-PLAN.md) · [SUMMARY](quick/260516-vgb-allow-more-than-2-cameras-with-performan/260516-vgb-SUMMARY.md) |
 | 260524-ffx | 2026-05-24 | guard-android-only-call-sites-for-window | Add `!kIsWeb && Platform.isAndroid` guards so `flutter build windows` compiles; two-layer guarding — `ForegroundServiceManager` and `audioHandlerProvider` are internal no-ops on non-Android, and direct `FlutterForegroundTask.*` call sites in `main.dart`/`app.dart`/`monitoring_screen.dart` are gated explicitly; Android behavior unchanged | [PLAN](quick/260524-ffx-guard-android-only-call-sites-for-window/260524-ffx-PLAN.md) · [SUMMARY](quick/260524-ffx-guard-android-only-call-sites-for-window/260524-ffx-SUMMARY.md) |
 | 260720-mrc | 2026-07-20 | manual-rtsp-cameras | Open the app to non-Unifi users: `CameraSource {unifi, manual}` + `ProtectCamera.manual()`; manual RTSP cameras persisted locally (`manual_cameras`) and composed with Unifi cameras in `CameraNotifier`; `AuthMode {unifi, manual}` + `skipUnifi()` + persisted `auth_mode`; login-screen skip action; idle-picker Add-RTSP-camera dialog, delete, and `CameraSourceBadge` shown only when sources are mixed; manual URLs played verbatim (skip Unifi RTSPS↔RTSP rewrite) | [PLAN](quick/260720-mrc-manual-rtsp-cameras/260720-mrc-PLAN.md) · [SUMMARY](quick/260720-mrc-manual-rtsp-cameras/260720-mrc-SUMMARY.md) |
+| 260722-pdb | 2026-07-22 | add-remote-url-fallback-connectivity-loc | Local-preferred/remote-fallback (VPN/Tailscale) connectivity: console + manual cameras carry an optional remote address; auth verify, camera refresh, stream open, reconnect, and quality switch iterate ordered [local, remote] candidates with per-candidate timeouts, failing only when both fail; Settings Connection section (edit/clear all addresses), add-camera Remote URL field, Help "Remote access" section; `replaceUrlHost` helper + `remote_host` storage + `ProtectCamera.remoteUrl` | [PLAN](quick/260722-pdb-add-remote-url-fallback-connectivity-loc/260722-pdb-PLAN.md) · [SUMMARY](quick/260722-pdb-add-remote-url-fallback-connectivity-loc/260722-pdb-SUMMARY.md) |
 
 ### Blockers/Concerns
 
