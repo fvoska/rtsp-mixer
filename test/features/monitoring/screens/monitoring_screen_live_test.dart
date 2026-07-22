@@ -32,9 +32,13 @@ class _FakeAuth extends AuthNotifier {
       AuthState.authenticated(host: 'h', resumeMonitoring: false);
 }
 
-Future<void> _pumpLive(WidgetTester tester, List<CameraAudioState> cams) async {
-  tester.view.physicalSize = const Size(1600, 2000);
-  tester.view.devicePixelRatio = 2.0; // 800 x 1000 dp
+Future<void> _pumpLive(
+  WidgetTester tester,
+  List<CameraAudioState> cams, {
+  double widthDp = 800,
+}) async {
+  tester.view.physicalSize = Size(widthDp * 2, 2000);
+  tester.view.devicePixelRatio = 2.0;
   addTearDown(() => tester.view.reset());
 
   final session = Session.start(
@@ -115,6 +119,32 @@ void main() {
       availableQualities: {'': 'a'},
     );
     await _pumpLive(tester, [blank]);
+    expect(tester.takeException(), isNull);
+    expect(find.byType(ErrorWidget), findsNothing);
+  });
+
+  // Regression: the live-view toolbar ("Cameras" + Show details / Show video)
+  // overflowed on a phone-width card. It must collapse to icon-only toggles
+  // instead of overflowing.
+  for (final w in [340.0, 360.0, 411.0]) {
+    testWidgets('live toolbar + cards fit at ${w}dp (2 cameras)',
+        (tester) async {
+      await _pumpLive(tester, [fiona, porch], widthDp: w);
+      expect(tester.takeException(), isNull);
+      expect(find.byType(ErrorWidget), findsNothing);
+    });
+  }
+
+  testWidgets('live toolbar fits at 360dp with the >2-camera warning',
+      (tester) async {
+    const third = CameraAudioState(
+      cameraId: 'third',
+      cameraName: 'Backyard',
+      connectionStatus: CameraConnectionStatus.playing,
+      activeQuality: 'low',
+      availableQualities: {'low': 'a'},
+    );
+    await _pumpLive(tester, [fiona, porch, third], widthDp: 360);
     expect(tester.takeException(), isNull);
     expect(find.byType(ErrorWidget), findsNothing);
   });

@@ -182,12 +182,17 @@ class _CameraAudioCardState extends ConsumerState<CameraAudioCard> {
                   ),
                   const SizedBox(width: Spacing.sm),
                   Expanded(
+                    // Give the name + badge group priority over the status
+                    // indicator so a source badge on a ~340dp card doesn't
+                    // squeeze the name into an overflow.
+                    flex: 2,
                     child: Row(
                       children: [
                         Flexible(
                           child: Text(
                             cs.cameraName,
                             style: theme.textTheme.titleMedium,
+                            maxLines: 1,
                             overflow: TextOverflow.ellipsis,
                           ),
                         ),
@@ -198,48 +203,74 @@ class _CameraAudioCardState extends ConsumerState<CameraAudioCard> {
                       ],
                     ),
                   ),
-                  // Status text — exactly one branch renders per UI-SPEC
-                  // Interaction States Matrix (idle renders nothing).
+                  // Status indicator — exactly one branch renders per UI-SPEC
+                  // Interaction States Matrix (idle renders nothing). Each
+                  // branch is Flexible + single-line so it shrinks/ellipsizes
+                  // on a narrow card rather than overflowing the header row.
                   if (cs.isLive)
-                    Text(
-                      'Live',
-                      style: theme.textTheme.bodyMedium
-                          ?.copyWith(color: AppTheme.statusOnline),
+                    Flexible(
+                      child: Text(
+                        'Live',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: theme.textTheme.bodyMedium
+                            ?.copyWith(color: AppTheme.statusOnline),
+                      ),
                     )
                   else if (cs.isError)
                     Flexible(
                       child: Text(
                         cs.errorMessage ?? 'Stream failed',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
                         style: theme.textTheme.bodyMedium
                             ?.copyWith(color: AppTheme.statusOffline),
-                        overflow: TextOverflow.ellipsis,
                       ),
                     )
                   else if (cs.connectionStatus ==
                       CameraConnectionStatus.reconnecting)
-                    Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        SizedBox(
-                          width: 14,
-                          height: 14,
-                          child: CircularProgressIndicator(
-                            strokeWidth: 2.0,
-                            valueColor: AlwaysStoppedAnimation(
-                                theme.colorScheme.tertiary),
+                    Flexible(
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          SizedBox(
+                            width: 14,
+                            height: 14,
+                            child: CircularProgressIndicator(
+                              strokeWidth: 2.0,
+                              valueColor: AlwaysStoppedAnimation(
+                                  theme.colorScheme.tertiary),
+                            ),
                           ),
-                        ),
-                        const SizedBox(width: Spacing.xs),
-                        Text(
-                          'Reconnecting…',
-                          style: theme.textTheme.bodyMedium
-                              ?.copyWith(color: theme.colorScheme.tertiary),
-                        ),
-                      ],
+                          const SizedBox(width: Spacing.xs),
+                          Flexible(
+                            child: Text(
+                              'Reconnecting…',
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: theme.textTheme.bodyMedium?.copyWith(
+                                  color: theme.colorScheme.tertiary),
+                            ),
+                          ),
+                        ],
+                      ),
                     )
                   else if (isConnecting)
-                    Text('Connecting…', style: theme.textTheme.bodyMedium),
+                    Flexible(
+                      child: Text(
+                        'Connecting…',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: theme.textTheme.bodyMedium,
+                      ),
+                    ),
+                  // Compact action buttons so the name + status + three
+                  // controls fit on a ~340dp phone card without overflowing.
                   IconButton(
+                    visualDensity: VisualDensity.compact,
+                    padding: EdgeInsets.zero,
+                    constraints:
+                        const BoxConstraints(minWidth: 36, minHeight: 36),
                     icon: Icon(
                       cs.isMuted ? Icons.volume_off : Icons.volume_up,
                     ),
@@ -250,6 +281,10 @@ class _CameraAudioCardState extends ConsumerState<CameraAudioCard> {
                   ),
                   if (widget.onToggleVideo != null)
                     IconButton(
+                      visualDensity: VisualDensity.compact,
+                      padding: EdgeInsets.zero,
+                      constraints:
+                          const BoxConstraints(minWidth: 36, minHeight: 36),
                       icon: Icon(
                         widget.showVideoPreview
                             ? Icons.videocam
@@ -263,6 +298,10 @@ class _CameraAudioCardState extends ConsumerState<CameraAudioCard> {
                     ),
                   if (widget.onRemove != null)
                     IconButton(
+                      visualDensity: VisualDensity.compact,
+                      padding: EdgeInsets.zero,
+                      constraints:
+                          const BoxConstraints(minWidth: 36, minHeight: 36),
                       icon: Icon(
                         Icons.close_rounded,
                         size: 20,
@@ -447,11 +486,14 @@ class _CameraAudioCardState extends ConsumerState<CameraAudioCard> {
                     ),
                   ),
                   SizedBox(
-                    width: 40,
+                    width: 48,
                     child: Text(
                       '${cs.volume.round()}%',
                       style: theme.textTheme.bodySmall,
                       textAlign: TextAlign.right,
+                      maxLines: 1,
+                      softWrap: false,
+                      overflow: TextOverflow.clip,
                     ),
                   ),
                 ],
