@@ -4,7 +4,10 @@ import 'package:go_router/go_router.dart';
 
 import '../../../core/providers/settings_provider.dart';
 import '../../../core/theme/spacing.dart';
+import '../../auth/models/auth_state.dart';
 import '../../auth/providers/auth_provider.dart';
+import '../../cameras/models/protect_camera.dart';
+import '../../cameras/providers/camera_provider.dart';
 import '../../monitoring/providers/audio_player_provider.dart';
 
 class SettingsScreen extends ConsumerWidget {
@@ -15,8 +18,16 @@ class SettingsScreen extends ConsumerWidget {
     final settings = ref.watch(settingsProvider);
     final notifier = ref.read(settingsProvider.notifier);
     final theme = Theme.of(context);
-    final isManualMode =
-        ref.watch(authNotifierProvider).value?.isManualMode ?? false;
+    final authState = ref.watch(authNotifierProvider).value;
+    final isManualMode = authState?.isManualMode ?? false;
+    final isUnifiMode = authState != null &&
+        authState.isAuthenticated &&
+        authState.mode == AuthMode.unifi;
+    final manualCameras = (ref.watch(cameraNotifierProvider).value?.cameras ??
+            const <ProtectCamera>[])
+        .where((c) => c.isManual)
+        .toList();
+    final showConnectionSection = isUnifiMode || manualCameras.isNotEmpty;
 
     return Scaffold(
       appBar: AppBar(title: const Text('Settings')),
@@ -85,6 +96,72 @@ class SettingsScreen extends ConsumerWidget {
               style: TextStyle(fontSize: 12),
             ),
           ),
+          if (showConnectionSection) ...[
+            const Divider(height: 1),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(
+                Spacing.lg,
+                Spacing.md,
+                Spacing.lg,
+                0,
+              ),
+              child: Text(
+                'Connection',
+                style: theme.textTheme.labelLarge?.copyWith(
+                  color: theme.colorScheme.primary,
+                ),
+              ),
+            ),
+            if (isUnifiMode) ...[
+              ListTile(
+                leading: const Icon(Icons.lan_outlined),
+                title: const Text('Console local address'),
+                subtitle: Text(
+                  authState.host ?? 'Not set',
+                  style: theme.textTheme.bodySmall,
+                ),
+                onTap: () => _editLocalHost(context, ref, authState.host),
+              ),
+              ListTile(
+                leading: const Icon(Icons.vpn_lock_outlined),
+                title: const Text('Console remote URL'),
+                subtitle: Text(
+                  authState.remoteHost ?? 'Not set',
+                  style: theme.textTheme.bodySmall,
+                ),
+                onTap: () =>
+                    _editRemoteHost(context, ref, authState.remoteHost),
+              ),
+            ],
+            if (manualCameras.isNotEmpty) ...[
+              Padding(
+                padding: const EdgeInsets.fromLTRB(
+                  Spacing.lg,
+                  Spacing.md,
+                  Spacing.lg,
+                  0,
+                ),
+                child: Text(
+                  'Camera remote URLs',
+                  style: theme.textTheme.labelMedium?.copyWith(
+                    color: theme.colorScheme.onSurfaceVariant,
+                  ),
+                ),
+              ),
+              for (final camera in manualCameras)
+                ListTile(
+                  leading: const Icon(Icons.videocam_outlined),
+                  title: Text(camera.name ?? 'Unnamed Camera'),
+                  subtitle: Text(
+                    camera.remoteUrl ?? 'Not set',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: theme.textTheme.bodySmall,
+                  ),
+                  onTap: () => _editCameraRemoteUrl(context, ref, camera),
+                ),
+            ],
+          ],
           const Divider(height: 1),
           ListTile(
             leading: const Icon(Icons.help_outline),
@@ -117,6 +194,132 @@ class SettingsScreen extends ConsumerWidget {
     if (v < 0.05) return 'High sensitivity — highlight even quiet sounds';
     if (v < 0.15) return 'Medium sensitivity';
     return 'Low sensitivity — highlight only loud sounds';
+  }
+
+  Future<void> _editLocalHost(
+      BuildContext context, WidgetRef ref, String? current) async {
+    final result = await _showEditAddressDialog(
+      context,
+      title: 'Console local address',
+      initialValue: current,
+      hint: '192.168.1.1',
+      helperText: 'IP or hostname of the console on your home network.',
+      validator: (v) => v.trim().isEmpty ? 'Required' : null,
+    );
+    if (result == null || result.value == null) return;
+    await ref.read(authNotifierProvider.notifier).updateLocalHost(result.value!);
+  }
+
+  Future<void> _editRemoteHost(
+      BuildContext context, WidgetRef ref, String? current) async {
+    final result = await _showEditAddressDialog(
+      context,
+      title: 'Console remote URL',
+      initialValue: current,
+      hint: '100.64.0.9 or nvr.tailnet.ts.net',
+      helperText: 'VPN/Tailscale address tried when the local address is '
+          'unreachable. Leave empty or Clear to remove.',
+      allowClear: true,
+    );
+    if (result == null) return;
+    await ref.read(authNotifierProvider.notifier).updateRemoteHost(result.value);
+  }
+
+  Future<void> _editCameraRemoteUrl(
+      BuildContext context, WidgetRef ref, ProtectCamera camera) async {
+    final result = await _showEditAddressDialog(
+      context,
+      title: '${camera.name ?? 'Camera'} remote URL',
+      initialValue: camera.remoteUrl,
+      hint: 'rtsp://100.64.0.9:554/stream',
+      helperText: 'VPN/Tailscale stream URL tried when the primary URL is '
+          'unreachable. Leave empty or Clear to remove.',
+      allowClear: true,
+      validator: (v) {
+        final value = v.trim();
+        if (value.isEmpty) return null; // empty = clear
+        final uri = Uri.tryParse(value);
+        if (uri == null ||
+            (uri.scheme != 'rtsp' && uri.scheme != 'rtsps') ||
+            uri.host.isEmpty) {
+          return 'Enter a valid rtsp:// or rtsps:// URL';
+        }
+        return null;
+      },
+    );
+    if (result == null) return;
+    // Empty string clears remoteUrl (see updateManualCamera semantics).
+    await ref
+        .read(cameraNotifierProvider.notifier)
+        .updateManualCamera(camera.id, remoteUrl: result.value ?? '');
+  }
+
+  /// Single-field edit dialog. Returns:
+  /// - null when cancelled
+  /// - (value: non-empty string) when saved
+  /// - (value: null) when cleared (or saved empty with [allowClear])
+  Future<({String? value})?> _showEditAddressDialog(
+    BuildContext context, {
+    required String title,
+    String? initialValue,
+    String? hint,
+    String? helperText,
+    bool allowClear = false,
+    String? Function(String value)? validator,
+  }) async {
+    final controller = TextEditingController(text: initialValue ?? '');
+    final formKey = GlobalKey<FormState>();
+    try {
+      return await showDialog<({String? value})>(
+        context: context,
+        builder: (ctx) {
+          void save() {
+            if (formKey.currentState!.validate()) {
+              final text = controller.text.trim();
+              Navigator.of(ctx).pop((value: text.isEmpty ? null : text));
+            }
+          }
+
+          return AlertDialog(
+            title: Text(title),
+            content: Form(
+              key: formKey,
+              child: TextFormField(
+                controller: controller,
+                autofocus: true,
+                decoration: InputDecoration(
+                  hintText: hint,
+                  helperText: helperText,
+                  helperMaxLines: 3,
+                  border: const OutlineInputBorder(),
+                ),
+                autocorrect: false,
+                validator:
+                    validator == null ? null : (v) => validator(v ?? ''),
+                onFieldSubmitted: (_) => save(),
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(ctx).pop(),
+                child: const Text('Cancel'),
+              ),
+              if (allowClear)
+                TextButton(
+                  onPressed: () => Navigator.of(ctx).pop((value: null)),
+                  child: const Text('Clear'),
+                ),
+              FilledButton(
+                onPressed: save,
+                child: const Text('Save'),
+              ),
+            ],
+          );
+        },
+      );
+    } finally {
+      controller.dispose();
+    }
   }
 
   Future<void> _confirmSignOut(
