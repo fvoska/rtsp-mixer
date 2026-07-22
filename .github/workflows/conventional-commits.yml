@@ -1,0 +1,60 @@
+name: Conventional Commits
+
+# release-please builds the CHANGELOG and version bumps by parsing commit
+# messages on main. A commit that isn't Conventional-Commits formatted is
+# silently dropped from the release notes (this bit us in PR #15). This
+# workflow rejects such commits at the PR stage:
+#
+#   - commit-messages: lints every commit in the PR (matters because PRs are
+#     merged with a merge commit, so the individual commits land on main and
+#     are what release-please reads). Merge commits themselves ("Merge pull
+#     request #N ...", "Merge branch ...") are ignored by commitlint's
+#     default ignores — release-please skips them harmlessly too.
+#
+#   - pr-title: lints the PR title, so a squash merge (which uses the PR
+#     title as the commit message) is also safe.
+#
+# To make this blocking, add both jobs as required status checks in the
+# main branch protection rule.
+
+on:
+  pull_request:
+    types: [opened, edited, reopened, synchronize]
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  commit-messages:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # commitlint needs the full history of the PR range to lint
+          # every commit, not just the head.
+          fetch-depth: 0
+      - uses: wagoid/commitlint-github-action@v6
+        with:
+          configFile: commitlint.config.mjs
+
+  pr-title:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: amannn/action-semantic-pull-request@v5
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          # Same set as commitlint.config.mjs / release-please-config.json.
+          types: |
+            feat
+            fix
+            perf
+            refactor
+            docs
+            chore
+            build
+            ci
+            style
+            test
+            revert
