@@ -15,6 +15,7 @@ import '../helpers/rtsp_url.dart';
 import '../models/health_event.dart';
 import '../models/player_state.dart';
 import '../services/alert_policy.dart';
+import '../services/audio_handler.dart';
 import '../services/connectivity_listener.dart';
 import '../services/drift_watchdog.dart';
 import '../services/reconnect_supervisor.dart';
@@ -1287,6 +1288,20 @@ class AudioPlayerNotifier extends AsyncNotifier<MonitoringState> {
         await ForegroundServiceManager.stop();
       } catch (e) {
         appLog('AUDIO', 'failed to stop FGS (continuing): $e');
+      }
+      // Flip the MediaSession/audio_service notification to idle. Without this
+      // the media notification ("Baby Monitor Active" with Pause/Stop controls)
+      // keeps showing an active-looking state and re-surfaces when the app is
+      // backgrounded — only the media notification's own Stop button called
+      // setIdle() before, so stopping from the inline banner or the FGS
+      // notification left it lingering. This is the shared stop path for every
+      // entry point, so setting idle here covers all of them.
+      try {
+        final handler = await ref.read(audioHandlerProvider.future);
+        handler.setIdle();
+      } catch (e) {
+        appLog('AUDIO_SERVICE',
+            'failed to set media handler idle (continuing): $e');
       }
     });
   }
