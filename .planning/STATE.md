@@ -28,7 +28,7 @@ See: .planning/PROJECT.md (updated 2026-04-01)
 Phase: 04 (reliability-overnight-monitoring) — EXECUTING
 Plan: 1 of 5
 Status: Executing Phase 04
-Last activity: 2026-05-24 -- Completed quick task 260524-ffx: Guard Android-only call sites for Windows desktop compatibility
+Last activity: 2026-07-23 -- Completed quick task 260723-hk2: Camera card redesign (hybrid A+B status banner)
 
 Progress: [█████░░░░░] 50%
 
@@ -97,6 +97,7 @@ None yet.
 | 260524-ffx | 2026-05-24 | guard-android-only-call-sites-for-window | Add `!kIsWeb && Platform.isAndroid` guards so `flutter build windows` compiles; two-layer guarding — `ForegroundServiceManager` and `audioHandlerProvider` are internal no-ops on non-Android, and direct `FlutterForegroundTask.*` call sites in `main.dart`/`app.dart`/`monitoring_screen.dart` are gated explicitly; Android behavior unchanged | [PLAN](quick/260524-ffx-guard-android-only-call-sites-for-window/260524-ffx-PLAN.md) · [SUMMARY](quick/260524-ffx-guard-android-only-call-sites-for-window/260524-ffx-SUMMARY.md) |
 | 260720-mrc | 2026-07-20 | manual-rtsp-cameras | Open the app to non-Unifi users: `CameraSource {unifi, manual}` + `ProtectCamera.manual()`; manual RTSP cameras persisted locally (`manual_cameras`) and composed with Unifi cameras in `CameraNotifier`; `AuthMode {unifi, manual}` + `skipUnifi()` + persisted `auth_mode`; login-screen skip action; idle-picker Add-RTSP-camera dialog, delete, and `CameraSourceBadge` shown only when sources are mixed; manual URLs played verbatim (skip Unifi RTSPS↔RTSP rewrite) | [PLAN](quick/260720-mrc-manual-rtsp-cameras/260720-mrc-PLAN.md) · [SUMMARY](quick/260720-mrc-manual-rtsp-cameras/260720-mrc-SUMMARY.md) |
 | 260722-pdb | 2026-07-22 | add-remote-url-fallback-connectivity-loc | Local-preferred/remote-fallback (VPN/Tailscale) connectivity: console + manual cameras carry an optional remote address; auth verify, camera refresh, stream open, reconnect, and quality switch iterate ordered [local, remote] candidates with per-candidate timeouts, failing only when both fail; Settings Connection section (edit/clear all addresses), add-camera Remote URL field, Help "Remote access" section; `replaceUrlHost` helper + `remote_host` storage + `ProtectCamera.remoteUrl` | [PLAN](quick/260722-pdb-add-remote-url-fallback-connectivity-loc/260722-pdb-PLAN.md) · [SUMMARY](quick/260722-pdb-add-remote-url-fallback-connectivity-loc/260722-pdb-SUMMARY.md) |
+| 260723-hk2 | 2026-07-23 | card-redesign | Hybrid A+B camera card redesign: edge-to-edge tinted status banner for problem states (amber reconnecting / red error), identity-only header, full-width status line for Live/Connecting…, "Muted" in volume row; fixes "Re…" truncation and inconsistent header tint | [PLAN](quick/260723-hk2-redesign-camera-card-on-monitoring-scree/260723-hk2-PLAN.md) · [SUMMARY](quick/260723-hk2-redesign-camera-card-on-monitoring-scree/260723-hk2-SUMMARY.md) |
 
 ### Blockers/Concerns
 

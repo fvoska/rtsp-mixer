@@ -142,177 +142,127 @@ class _CameraAudioCardState extends ConsumerState<CameraAudioCard> {
       ),
       child: Card.filled(
         margin: EdgeInsets.zero,
-        child: Padding(
+        // Clip so the edge-to-edge status banner honours the card's rounded
+        // top corners.
+        clipBehavior: Clip.antiAlias,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // Zone 0: edge-to-edge status BANNER for problem states only
+            // (reconnecting / error). Healthy states carry no banner and start
+            // with the header. Both problem states share the SAME slot/widget
+            // so cards stay structurally consistent — differing only in colour
+            // and copy. This replaces the old per-state header tint box.
+            if (cs.connectionStatus == CameraConnectionStatus.reconnecting ||
+                cs.isError)
+              _StatusBanner(
+                status: cs.connectionStatus,
+                errorMessage: cs.errorMessage,
+              ),
+            Padding(
         padding: const EdgeInsets.all(Spacing.md),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // Row 1: Status dot + Camera name + Status text + Buttons
-            // When reconnecting, the header row is wrapped in a tinted container
-            // (UI-SPEC §Component Inventory #1). Tint stays on the inner row so
-            // the outer AnimatedContainer border animation is unaffected.
-            Container(
-              padding: cs.connectionStatus == CameraConnectionStatus.reconnecting
-                  ? const EdgeInsets.all(Spacing.sm)
-                  : EdgeInsets.zero,
-              decoration: cs.connectionStatus == CameraConnectionStatus.reconnecting
-                  ? BoxDecoration(
-                      color: theme.colorScheme.tertiaryContainer
-                          .withValues(alpha: 0.3),
-                      borderRadius: BorderRadius.circular(8),
-                    )
-                  : null,
-              child: Row(
-                children: [
-                  Container(
-                    width: 8,
-                    height: 8,
-                    decoration: BoxDecoration(
-                      shape: BoxShape.circle,
-                      color: cs.isLive
-                          ? AppTheme.statusOnline
-                          : cs.isError
-                              ? AppTheme.statusOffline
-                              : cs.connectionStatus ==
-                                      CameraConnectionStatus.reconnecting
-                                  ? theme.colorScheme.tertiary
-                                  : theme.colorScheme.onSurface
-                                      .withValues(alpha: 0.5),
-                    ),
+            // Zone 1: HEADER — identity (status dot + name + optional badge)
+            // and the three action buttons only. No status text lives here and
+            // the row is never tinted, so every state's header is identical.
+            Row(
+              children: [
+                Container(
+                  width: 8,
+                  height: 8,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    color: cs.isLive
+                        ? AppTheme.statusOnline
+                        : cs.isError
+                            ? AppTheme.statusOffline
+                            : cs.connectionStatus ==
+                                    CameraConnectionStatus.reconnecting
+                                ? theme.colorScheme.tertiary
+                                : theme.colorScheme.onSurface
+                                    .withValues(alpha: 0.5),
                   ),
-                  const SizedBox(width: Spacing.sm),
-                  Expanded(
-                    // Give the name + badge group priority over the status
-                    // indicator so a source badge on a ~340dp card doesn't
-                    // squeeze the name into an overflow.
-                    flex: 2,
-                    child: Row(
-                      children: [
-                        Flexible(
-                          child: Text(
-                            cs.cameraName,
-                            style: theme.textTheme.titleMedium,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                          ),
+                ),
+                const SizedBox(width: Spacing.sm),
+                Expanded(
+                  // With the status text gone from this row, a plain Expanded
+                  // gives the name maximal room.
+                  child: Row(
+                    children: [
+                      Flexible(
+                        child: Text(
+                          cs.cameraName,
+                          style: theme.textTheme.titleMedium,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
                         ),
-                        if (widget.showSourceBadge) ...[
-                          const SizedBox(width: Spacing.sm),
-                          CameraSourceBadge(isManual: cs.isManual),
-                        ],
+                      ),
+                      if (widget.showSourceBadge) ...[
+                        const SizedBox(width: Spacing.sm),
+                        CameraSourceBadge(isManual: cs.isManual),
                       ],
-                    ),
+                    ],
                   ),
-                  // Status indicator — exactly one branch renders per UI-SPEC
-                  // Interaction States Matrix (idle renders nothing). Each
-                  // branch is Flexible + single-line so it shrinks/ellipsizes
-                  // on a narrow card rather than overflowing the header row.
-                  if (cs.isLive)
-                    Flexible(
-                      child: Text(
-                        'Live',
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: theme.textTheme.bodyMedium
-                            ?.copyWith(color: AppTheme.statusOnline),
-                      ),
-                    )
-                  else if (cs.isError)
-                    Flexible(
-                      child: Text(
-                        cs.errorMessage ?? 'Stream failed',
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: theme.textTheme.bodyMedium
-                            ?.copyWith(color: AppTheme.statusOffline),
-                      ),
-                    )
-                  else if (cs.connectionStatus ==
-                      CameraConnectionStatus.reconnecting)
-                    Flexible(
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          SizedBox(
-                            width: 14,
-                            height: 14,
-                            child: CircularProgressIndicator(
-                              strokeWidth: 2.0,
-                              valueColor: AlwaysStoppedAnimation(
-                                  theme.colorScheme.tertiary),
-                            ),
-                          ),
-                          const SizedBox(width: Spacing.xs),
-                          Flexible(
-                            child: Text(
-                              'Reconnecting…',
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: theme.textTheme.bodyMedium?.copyWith(
-                                  color: theme.colorScheme.tertiary),
-                            ),
-                          ),
-                        ],
-                      ),
-                    )
-                  else if (isConnecting)
-                    Flexible(
-                      child: Text(
-                        'Connecting…',
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: theme.textTheme.bodyMedium,
-                      ),
-                    ),
-                  // Compact action buttons so the name + status + three
-                  // controls fit on a ~340dp phone card without overflowing.
-                  IconButton(
-                    visualDensity: VisualDensity.compact,
-                    padding: EdgeInsets.zero,
-                    constraints:
-                        const BoxConstraints(minWidth: 36, minHeight: 36),
-                    icon: Icon(
-                      cs.isMuted ? Icons.volume_off : Icons.volume_up,
-                    ),
-                    tooltip: cs.isMuted ? 'Unmute' : 'Mute',
-                    onPressed: () => ref
-                        .read(audioPlayerProvider.notifier)
-                        .toggleMute(idx),
-                  ),
-                  if (widget.onToggleVideo != null)
+                ),
+                // Compact action buttons; nothing else competes on this row.
+                Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
                     IconButton(
                       visualDensity: VisualDensity.compact,
                       padding: EdgeInsets.zero,
                       constraints:
                           const BoxConstraints(minWidth: 36, minHeight: 36),
                       icon: Icon(
-                        widget.showVideoPreview
-                            ? Icons.videocam
-                            : Icons.videocam_off,
-                        size: 20,
+                        cs.isMuted ? Icons.volume_off : Icons.volume_up,
                       ),
-                      tooltip: widget.showVideoPreview
-                          ? 'Hide video'
-                          : 'Show video',
-                      onPressed: widget.onToggleVideo,
+                      tooltip: cs.isMuted ? 'Unmute' : 'Mute',
+                      onPressed: () => ref
+                          .read(audioPlayerProvider.notifier)
+                          .toggleMute(idx),
                     ),
-                  if (widget.onRemove != null)
-                    IconButton(
-                      visualDensity: VisualDensity.compact,
-                      padding: EdgeInsets.zero,
-                      constraints:
-                          const BoxConstraints(minWidth: 36, minHeight: 36),
-                      icon: Icon(
-                        Icons.close_rounded,
-                        size: 20,
-                        color: theme.colorScheme.error,
+                    if (widget.onToggleVideo != null)
+                      IconButton(
+                        visualDensity: VisualDensity.compact,
+                        padding: EdgeInsets.zero,
+                        constraints:
+                            const BoxConstraints(minWidth: 36, minHeight: 36),
+                        icon: Icon(
+                          widget.showVideoPreview
+                              ? Icons.videocam
+                              : Icons.videocam_off,
+                          size: 20,
+                        ),
+                        tooltip: widget.showVideoPreview
+                            ? 'Hide video'
+                            : 'Show video',
+                        onPressed: widget.onToggleVideo,
                       ),
-                      tooltip: 'Remove from mix',
-                      onPressed: () => _confirmRemove(context),
-                    ),
-                ],
-              ),
+                    if (widget.onRemove != null)
+                      IconButton(
+                        visualDensity: VisualDensity.compact,
+                        padding: EdgeInsets.zero,
+                        constraints:
+                            const BoxConstraints(minWidth: 36, minHeight: 36),
+                        icon: Icon(
+                          Icons.close_rounded,
+                          size: 20,
+                          color: theme.colorScheme.error,
+                        ),
+                        tooltip: 'Remove from mix',
+                        onPressed: () => _confirmRemove(context),
+                      ),
+                  ],
+                ),
+              ],
             ),
+
+            // Zone 2: STATUS LINE — healthy states only (Live / Connecting…)
+            // get a dedicated full-width line below the header. Reconnecting /
+            // error are carried by the banner; idle renders nothing.
+            _StatusLine(status: cs.connectionStatus),
 
             // Audio level indicator
             if (cs.isLive) ...[
@@ -488,8 +438,13 @@ class _CameraAudioCardState extends ConsumerState<CameraAudioCard> {
                   SizedBox(
                     width: 48,
                     child: Text(
-                      '${cs.volume.round()}%',
-                      style: theme.textTheme.bodySmall,
+                      // Muted clarity: show the word "Muted" in the volume row
+                      // so the state reads without relying on the header icon.
+                      cs.isMuted ? 'Muted' : '${cs.volume.round()}%',
+                      style: cs.isMuted
+                          ? theme.textTheme.bodySmall
+                              ?.copyWith(color: AppTheme.statusOffline)
+                          : theme.textTheme.bodySmall,
                       textAlign: TextAlign.right,
                       maxLines: 1,
                       softWrap: false,
@@ -500,11 +455,155 @@ class _CameraAudioCardState extends ConsumerState<CameraAudioCard> {
               ),
 
             ],
-          ],
-        ),
-      ),
+          ],  // close inner Column children
+        ),  // close inner Column
+            ),  // close Padding
+          ],  // close outer Column children
+        ),  // close outer Column
       ),  // close Card.filled
     );  // close AnimatedContainer
+  }
+}
+
+/// Edge-to-edge tinted status strip at the very top of the card, used only for
+/// the problem states (reconnecting / error). Both states share this one widget
+/// in the same slot — differing only in colour and copy — so problem cards stay
+/// structurally consistent while being scannable by colour from a distance.
+class _StatusBanner extends StatelessWidget {
+  final CameraConnectionStatus status;
+  final String? errorMessage;
+
+  const _StatusBanner({required this.status, this.errorMessage});
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    final bool isReconnecting =
+        status == CameraConnectionStatus.reconnecting;
+
+    // D-10: the amber accent (tertiary) is reserved for reconnecting only.
+    final Color background = isReconnecting
+        ? scheme.tertiaryContainer.withValues(alpha: 0.3)
+        : AppTheme.statusOffline.withValues(alpha: 0.12);
+    final Color foreground =
+        isReconnecting ? scheme.tertiary : AppTheme.statusOffline;
+
+    final Widget leading = isReconnecting
+        ? SizedBox(
+            width: 14,
+            height: 14,
+            child: CircularProgressIndicator(
+              strokeWidth: 2.0,
+              valueColor: AlwaysStoppedAnimation(scheme.tertiary),
+            ),
+          )
+        : const Icon(
+            Icons.error_outline,
+            size: 14,
+            color: AppTheme.statusOffline,
+          );
+
+    // D-11: reconnecting is status-ONLY — no attempt count, countdown, or
+    // error text. Error wraps up to 3 lines across the full card width.
+    final String label =
+        isReconnecting ? 'Reconnecting…' : (errorMessage ?? 'Stream failed');
+    final int maxLines = isReconnecting ? 1 : 3;
+
+    return Container(
+      key: const ValueKey('status-banner'),
+      width: double.infinity,
+      color: background,
+      padding: const EdgeInsets.symmetric(
+        horizontal: Spacing.md,
+        vertical: Spacing.sm,
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          SizedBox(width: 14, height: 14, child: Center(child: leading)),
+          const SizedBox(width: Spacing.xs),
+          Expanded(
+            child: Text(
+              label,
+              maxLines: maxLines,
+              overflow: TextOverflow.ellipsis,
+              style: theme.textTheme.bodyMedium?.copyWith(color: foreground),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Full-width status line below the header for the healthy states
+/// (playing → "Live", connecting → "Connecting…"). All other states render
+/// nothing (problem states use the banner; idle shows no status). Because the
+/// label sits in an Expanded on its own line it gets the full card width and
+/// never truncates.
+class _StatusLine extends StatelessWidget {
+  final CameraConnectionStatus status;
+
+  const _StatusLine({required this.status});
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+
+    late final Widget leading;
+    late final String label;
+    late final Color color;
+
+    switch (status) {
+      case CameraConnectionStatus.playing:
+        leading = const Icon(
+          Icons.graphic_eq,
+          size: 14,
+          color: AppTheme.statusOnline,
+        );
+        label = 'Live';
+        color = AppTheme.statusOnline;
+        break;
+      case CameraConnectionStatus.connecting:
+        leading = SizedBox(
+          width: 14,
+          height: 14,
+          child: CircularProgressIndicator(
+            strokeWidth: 2.0,
+            valueColor: AlwaysStoppedAnimation(scheme.primary),
+          ),
+        );
+        label = 'Connecting…';
+        color = scheme.primary;
+        break;
+      case CameraConnectionStatus.idle:
+      case CameraConnectionStatus.reconnecting:
+      case CameraConnectionStatus.error:
+        return const SizedBox.shrink();
+    }
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const SizedBox(height: Spacing.xs),
+        Row(
+          children: [
+            SizedBox(width: 14, height: 14, child: Center(child: leading)),
+            const SizedBox(width: Spacing.xs),
+            Expanded(
+              child: Text(
+                label,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: theme.textTheme.bodyMedium?.copyWith(color: color),
+              ),
+            ),
+          ],
+        ),
+      ],
+    );
   }
 }
 
