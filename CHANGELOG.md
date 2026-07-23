@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.4.0](https://github.com/fvoska/rtsp-mixer/compare/v1.3.0...v1.4.0) (2026-07-23)
+
+
+### Features
+
+* **connectivity:** add remote URL fallback for console and cameras ([#17](https://github.com/fvoska/rtsp-mixer/issues/17)) ([b361715](https://github.com/fvoska/rtsp-mixer/commit/b361715431168720b5b243a4d4262d10c234017d))
+
 ## [1.3.0](https://github.com/fvoska/rtsp-mixer/compare/v1.2.1...v1.3.0) (2026-07-22)
 
 
