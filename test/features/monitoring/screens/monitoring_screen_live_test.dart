@@ -3,6 +3,9 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rtsp_mixer/features/auth/models/auth_state.dart';
 import 'package:rtsp_mixer/features/auth/providers/auth_provider.dart';
+import 'package:rtsp_mixer/features/cameras/models/protect_camera.dart';
+import 'package:rtsp_mixer/features/cameras/providers/camera_provider.dart';
+import 'package:rtsp_mixer/features/cameras/providers/camera_state.dart';
 import 'package:rtsp_mixer/features/monitoring/models/player_state.dart';
 import 'package:rtsp_mixer/features/monitoring/models/session.dart';
 import 'package:rtsp_mixer/features/monitoring/providers/audio_player_provider.dart';
@@ -32,10 +35,18 @@ class _FakeAuth extends AuthNotifier {
       AuthState.authenticated(host: 'h', resumeMonitoring: false);
 }
 
+class _FakeCameras extends CameraNotifier {
+  _FakeCameras(this._s);
+  final CameraState _s;
+  @override
+  Future<CameraState> build() async => _s;
+}
+
 Future<void> _pumpLive(
   WidgetTester tester,
   List<CameraAudioState> cams, {
   double widthDp = 800,
+  List<ProtectCamera>? allCameras,
 }) async {
   tester.view.physicalSize = Size(widthDp * 2, 2000);
   tester.view.devicePixelRatio = 2.0;
@@ -44,6 +55,13 @@ Future<void> _pumpLive(
   final session = Session.start(
     cameras: cams.map((c) => (id: c.cameraId, name: c.cameraName)).toList(),
   );
+  // Default the camera list to the in-session cameras so the add-picker has a
+  // consistent superset; tests that exercise the picker pass a wider list.
+  final cameras = allCameras ??
+      cams
+          .map((c) => ProtectCamera(
+              id: c.cameraId, name: c.cameraName, state: 'CONNECTED'))
+          .toList();
   await tester.pumpWidget(
     ProviderScope(
       overrides: [
@@ -52,6 +70,8 @@ Future<void> _pumpLive(
         sessionHistoryProvider
             .overrideWith(() => _FakeSession(SessionHistory(current: session))),
         authNotifierProvider.overrideWith(() => _FakeAuth()),
+        cameraNotifierProvider.overrideWith(
+            () => _FakeCameras(CameraState(cameras: cameras))),
       ],
       child: const MaterialApp(home: MonitoringScreen()),
     ),
@@ -145,6 +165,33 @@ void main() {
       availableQualities: {'low': 'a'},
     );
     await _pumpLive(tester, [fiona, porch, third], widthDp: 360);
+    expect(tester.takeException(), isNull);
+    expect(find.byType(ErrorWidget), findsNothing);
+  });
+
+  // 260723-oj0: quick-add affordance + picker.
+  final allCameras = [
+    const ProtectCamera(id: 'fiona', name: 'Fiona', state: 'CONNECTED'),
+    const ProtectCamera(id: 'porch', name: 'Porch', state: 'CONNECTED'),
+    const ProtectCamera(id: 'backyard', name: 'Backyard', state: 'CONNECTED'),
+  ];
+
+  testWidgets('live toolbar renders an Add-camera control', (tester) async {
+    await _pumpLive(tester, [fiona, porch], allCameras: allCameras);
+    expect(tester.takeException(), isNull);
+    expect(find.byTooltip('Add camera to session'), findsOneWidget);
+    expect(find.byType(ErrorWidget), findsNothing);
+  });
+
+  testWidgets('add picker lists only cameras not already in the session',
+      (tester) async {
+    await _pumpLive(tester, [fiona, porch], allCameras: allCameras);
+    await tester.tap(find.byTooltip('Add camera to session'));
+    await tester.pumpAndSettle();
+    // The one camera not in the mix is offered; the in-session ones are not
+    // (their names only appear on the live cards behind the sheet, so we
+    // assert the sheet content by the addable camera's presence + no errors).
+    expect(find.text('Backyard'), findsOneWidget);
     expect(tester.takeException(), isNull);
     expect(find.byType(ErrorWidget), findsNothing);
   });

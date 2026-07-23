@@ -208,6 +208,13 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen>
     if (mounted) setState(() {});
   }
 
+  Future<void> _onAddCamera(String cameraId) async {
+    await ref
+        .read(audioPlayerProvider.notifier)
+        .addCameraToSession(cameraId, videoPreview: _isVideoOn(cameraId));
+    if (mounted) setState(() {});
+  }
+
   @override
   Widget build(BuildContext context) {
     final monitoringState = ref.watch(audioPlayerProvider);
@@ -237,6 +244,7 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen>
                     isVideoOn: _isVideoOn,
                     onToggleCameraVideo: _toggleCameraVideo,
                     onRemoveCamera: _onRemoveCamera,
+                    onAddCamera: _onAddCamera,
                   )
                 : _IdleCameraPicker(onStart: _startMonitoringFlow),
           ),
@@ -331,6 +339,7 @@ class _LiveMonitoringView extends ConsumerWidget {
     required this.isVideoOn,
     required this.onToggleCameraVideo,
     required this.onRemoveCamera,
+    required this.onAddCamera,
   });
 
   final AsyncValue<MonitoringState> monitoringState;
@@ -341,6 +350,7 @@ class _LiveMonitoringView extends ConsumerWidget {
   final bool Function(String cameraId) isVideoOn;
   final void Function(String cameraId) onToggleCameraVideo;
   final Future<void> Function(String cameraId) onRemoveCamera;
+  final Future<void> Function(String cameraId) onAddCamera;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -358,6 +368,26 @@ class _LiveMonitoringView extends ConsumerWidget {
         // Only distinguish sources when both types are actually being monitored.
         final showSourceBadge = state.cameras.any((c) => c.isManual) &&
             state.cameras.any((c) => !c.isManual);
+
+        // Open a picker of cameras that exist but aren't in the mix yet, and
+        // add the chosen one to the LIVE session (never restarts the others).
+        void openAddPicker() {
+          final cameraState = ref.read(cameraNotifierProvider).value;
+          final all = cameraState?.cameras ?? const <ProtectCamera>[];
+          final addable = addableCameras(all, state.cameras);
+          showModalBottomSheet<void>(
+            context: context,
+            builder: (sheetContext) => _AddCameraSheet(
+              cameras: addable,
+              showSource: cameraState?.hasMixedSources ?? false,
+              onPick: (id) {
+                Navigator.of(sheetContext).pop();
+                onAddCamera(id);
+              },
+            ),
+          );
+        }
+
         return LayoutBuilder(
           builder: (context, constraints) {
             // Fluid card grid: target ~480dp per card, never below ~340dp.
@@ -382,6 +412,7 @@ class _LiveMonitoringView extends ConsumerWidget {
                     cameraCount: state.cameras.length,
                     onToggleGlobalVideo: onToggleGlobalVideo,
                     onToggleShowDetails: onToggleShowDetails,
+                    onAddCamera: openAddPicker,
                   ),
                   const SizedBox(height: Spacing.md),
                   Wrap(
@@ -424,6 +455,7 @@ class _LiveToolbar extends StatelessWidget {
     required this.cameraCount,
     required this.onToggleGlobalVideo,
     required this.onToggleShowDetails,
+    required this.onAddCamera,
   });
 
   final bool globalVideoOn;
@@ -431,6 +463,12 @@ class _LiveToolbar extends StatelessWidget {
   final int cameraCount;
   final VoidCallback onToggleGlobalVideo;
   final VoidCallback onToggleShowDetails;
+  final VoidCallback onAddCamera;
+
+  /// Tooltip used on the add control in both the compact (icon-only) and
+  /// non-compact (labelled) toolbar branches so it is findable regardless of
+  /// layout width.
+  static const _addTooltip = 'Add camera to session';
 
   @override
   Widget build(BuildContext context) {
@@ -477,6 +515,12 @@ class _LiveToolbar extends StatelessWidget {
             ),
             if (compact) ...[
               IconButton(
+                onPressed: onAddCamera,
+                icon: const Icon(Icons.add),
+                tooltip: _addTooltip,
+                visualDensity: VisualDensity.compact,
+              ),
+              IconButton(
                 onPressed: onToggleShowDetails,
                 icon: Icon(detailsIcon),
                 tooltip: detailsLabel,
@@ -489,6 +533,14 @@ class _LiveToolbar extends StatelessWidget {
                 visualDensity: VisualDensity.compact,
               ),
             ] else ...[
+              Tooltip(
+                message: _addTooltip,
+                child: TextButton.icon(
+                  onPressed: onAddCamera,
+                  icon: const Icon(Icons.add),
+                  label: const Text('Add camera'),
+                ),
+              ),
               TextButton.icon(
                 onPressed: onToggleShowDetails,
                 icon: Icon(detailsIcon),
@@ -503,6 +555,102 @@ class _LiveToolbar extends StatelessWidget {
           ],
         );
       },
+    );
+  }
+}
+
+/// Modal bottom sheet listing cameras that exist but aren't in the live mix
+/// yet. Tapping a row adds that camera to the running session. Rows mirror the
+/// idle picker's styling (name + optional source badge + Unifi connection dot).
+/// When [cameras] is empty, shows a disabled "all already added" message.
+class _AddCameraSheet extends StatelessWidget {
+  const _AddCameraSheet({
+    required this.cameras,
+    required this.showSource,
+    required this.onPick,
+  });
+
+  final List<ProtectCamera> cameras;
+  final bool showSource;
+  final void Function(String cameraId) onPick;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return SafeArea(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(
+                Spacing.lg, Spacing.lg, Spacing.lg, Spacing.sm),
+            child: Text(
+              'Add camera to session',
+              style: theme.textTheme.titleMedium,
+            ),
+          ),
+          if (cameras.isEmpty)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(
+                  Spacing.lg, 0, Spacing.lg, Spacing.lg),
+              child: Text(
+                'All cameras are already in this session.',
+                style: theme.textTheme.bodyMedium?.copyWith(
+                  color: theme.colorScheme.onSurfaceVariant,
+                ),
+              ),
+            )
+          else
+            Flexible(
+              child: ListView.builder(
+                shrinkWrap: true,
+                itemCount: cameras.length,
+                itemBuilder: (_, i) {
+                  final cam = cameras[i];
+                  final subtitle = cam.isManual
+                      ? (cam.defaultStreamUrl ?? 'RTSP stream')
+                      : cam.state;
+                  return ListTile(
+                    leading: cam.isManual
+                        ? null
+                        : Container(
+                            width: 8,
+                            height: 8,
+                            decoration: BoxDecoration(
+                              shape: BoxShape.circle,
+                              color: cam.isConnected
+                                  ? AppTheme.statusOnline
+                                  : AppTheme.statusOffline,
+                            ),
+                          ),
+                    title: Row(
+                      children: [
+                        Flexible(
+                          child: Text(
+                            cam.name ?? 'Unnamed Camera',
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                        if (showSource) ...[
+                          const SizedBox(width: Spacing.sm),
+                          CameraSourceBadge(isManual: cam.isManual),
+                        ],
+                      ],
+                    ),
+                    subtitle: Text(
+                      subtitle,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    onTap: () => onPick(cam.id),
+                  );
+                },
+              ),
+            ),
+          const SizedBox(height: Spacing.sm),
+        ],
+      ),
     );
   }
 }
