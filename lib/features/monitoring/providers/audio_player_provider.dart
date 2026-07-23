@@ -10,6 +10,7 @@ import '../../../core/providers/settings_provider.dart';
 import '../../../core/services/foreground_service.dart';
 import '../../../core/services/local_notifications.dart';
 import '../../auth/providers/auth_provider.dart';
+import '../../cameras/models/protect_camera.dart';
 import '../../cameras/providers/camera_provider.dart';
 import '../helpers/rtsp_url.dart';
 import '../helpers/stream_candidates.dart';
@@ -508,6 +509,195 @@ class AudioPlayerNotifier extends AsyncNotifier<MonitoringState> {
     throw lastError ?? StateError('No stream candidates for $cameraName');
   }
 
+  /// Connect a single camera and return its resolved [CameraAudioState].
+  ///
+  /// Single source of the per-camera connect logic shared by
+  /// [startMonitoring] (looped over the whole selection) and
+  /// [addCameraToSession] (one camera into a live mix). Builds the
+  /// local/remote/override candidate maps, registers the [Player],
+  /// [VideoController] and stream listeners, runs the ordered-candidate open
+  /// and — on TOTAL failure — leaves the camera in `error` with supervisor +
+  /// alert handoff. Never throws: a failed open is captured in the returned
+  /// state so it can never tear down an already-running stream (CLAUDE.md
+  /// defensive-error rule).
+  Future<CameraAudioState> _connectCamera(
+    ProtectCamera camera, {
+    required bool videoPreview,
+  }) async {
+    final settings = ref.read(settingsProvider);
+    final cameraName = camera.name ?? 'Camera';
+    appLog('AUDIO', 'Connecting to $cameraName (${camera.id})');
+
+    // Manual cameras use their URL verbatim — the RTSPS→RTSP port/scheme
+    // rewrite in resolveStreamUrl is Unifi-specific and would corrupt an
+    // arbitrary user-entered stream URL.
+    String resolveFor(String raw) => camera.isManual
+        ? raw
+        : resolveStreamUrl(raw, useRtsp: settings.useRtsp);
+
+    // The integration API embeds the console's own LAN IP in the RTSPS
+    // URLs it returns, regardless of which address the API was reached
+    // through. When the console is configured via a different address
+    // (e.g. a Tailscale hostname), that embedded IP is unreachable — so
+    // point the local candidates at the configured console address.
+    // Manual cameras keep their user-entered URL verbatim. Defensive:
+    // rewriteStreamUrlHosts never throws and degrades to the API URLs.
+    var localUrls = camera.rtspsStreamUrls;
+    if (!camera.isManual) {
+      localUrls = rewriteStreamUrlHosts(
+          localUrls, ref.read(authNotifierProvider).value?.host);
+    }
+
+    final quality = camera.defaultQuality;
+    final rtspsUrl = quality != null ? localUrls[quality] : null;
+    final url = rtspsUrl != null ? resolveFor(rtspsUrl) : null;
+
+    // Remote (VPN/Tailscale) candidates, parallel to availableQualities.
+    // Two tiers, tried after the local candidate:
+    //  - remoteQualities: the stream URLs re-pointed at the globally
+    //    configured remote host — Unifi AND manual cameras. Covers
+    //    NVR-style setups where all streams are served from one host
+    //    (still run through resolveFor so Unifi useRtsp handling matches
+    //    the local candidate; resolveFor is a no-op for manual cameras).
+    //  - overrideQualities: the camera's own remote URL, verbatim (manual
+    //    cameras only), for cameras whose remote address doesn't follow
+    //    the global host swap.
+    // Defensive: any failure here degrades to "no remote fallback" — it
+    // must never prevent the local stream from starting.
+    var remoteQualities = const <String, String>{};
+    var overrideQualities = const <String, String>{};
+    try {
+      final remoteHost = ref.read(authNotifierProvider).value?.remoteHost;
+      if (remoteHost != null && remoteHost.isNotEmpty) {
+        remoteQualities = camera.rtspsStreamUrls.map(
+          (k, v) => MapEntry(k, resolveFor(replaceUrlHost(v, remoteHost))),
+        );
+      }
+      if (camera.isManual) {
+        final remoteUrl = camera.remoteUrl;
+        if (remoteUrl != null && remoteUrl.isNotEmpty) {
+          overrideQualities = {
+            for (final k in camera.rtspsStreamUrls.keys) k: remoteUrl,
+          };
+        }
+      }
+    } catch (e) {
+      appLog('AUDIO',
+          '$cameraName: building remote candidates failed (continuing without): $e');
+    }
+
+    var camState = CameraAudioState(
+      cameraId: camera.id,
+      cameraName: cameraName,
+      connectionStatus: CameraConnectionStatus.connecting,
+      availableQualities: localUrls.map(
+        (k, v) => MapEntry(k, resolveFor(v)),
+      ),
+      remoteQualities: remoteQualities,
+      overrideQualities: overrideQualities,
+      activeQuality: quality,
+      activeStreamUrl: url,
+      mac: camera.mac,
+      modelKey: camera.modelKey,
+      micVolume: camera.micVolume,
+      isManual: camera.isManual,
+    );
+
+    if (!camera.isMicEnabled) {
+      camState = camState.copyWith(
+        errorMessage:
+            'Microphone is disabled on this camera -- enable it in Protect camera settings',
+      );
+      appLog('AUDIO', 'Warning: mic disabled on $cameraName');
+    }
+
+    try {
+      if (url == null || url.isEmpty) {
+        throw StateError('No stream URL for $cameraName — enable RTSP in Protect camera settings');
+      }
+
+      final player = _createPlayer();
+      final nativePlayer = player.platform as NativePlayer;
+      // Apply tuning properties. Idempotent helper — reused on every reconnect
+      // to hedge against mpv property resets across open() (RESEARCH §Pitfall 3).
+      await _applyPlaybackTuning(nativePlayer);
+
+      // Create VideoController BEFORE open so the render context exists.
+      // This is required for vid=auto to work later.
+      _videoControllers[camera.id] = VideoController(player);
+
+      _players[camera.id] = player;
+      _listenToPlayer(player, cameraName, camera.id);
+
+      // Ordered candidate list: local first, then global-remote rewrite,
+      // then the camera's own remote URL. First success wins; each
+      // candidate failure is caught + logged inside _openFirstCandidate,
+      // never rethrown mid-loop. The error state below is reached only
+      // when ALL candidates fail.
+      final candidates = _candidatesFor(camState, quality);
+      appLog('AUDIO',
+          'Opening stream ($quality, ${candidates.length} candidate(s)): $url');
+      _openingCameras.add(camera.id);
+      StreamCandidate winner;
+      try {
+        winner = await _openFirstCandidate(
+            player, cameraName, candidates, _candidateOpenTimeout);
+      } finally {
+        _openingCameras.remove(camera.id);
+      }
+      // Errors from losing candidates already kicked the supervisor —
+      // drop any pending retry now that a candidate is confirmed alive.
+      try {
+        _reconnectSupervisor.cancel(camera.id);
+      } catch (_) {}
+
+      // Disable video after open if not previewing (audio-only mode).
+      if (!videoPreview) {
+        await nativePlayer.setProperty('vid', 'no');
+      }
+
+      camState = camState.copyWith(
+        connectionStatus: CameraConnectionStatus.playing,
+        activeStreamUrl: winner.url,
+      );
+      appLog('AUDIO', '$cameraName is now playing');
+
+      // D-15: record per-camera streamStarted event for health summary.
+      try {
+        ref.read(healthEventsProvider.notifier).record(HealthEvent(
+              timestamp: DateTime.now(),
+              type: HealthEventType.streamStarted,
+              cameraId: camera.id,
+              cameraName: cameraName,
+            ));
+      } catch (e) {
+        appLog('HEALTH', 'Failed to record streamStarted: $e');
+      }
+    } catch (e) {
+      appLog('AUDIO', 'Error connecting to $cameraName: $e');
+      camState = camState.copyWith(
+        connectionStatus: CameraConnectionStatus.error,
+        errorMessage: e.toString(),
+      );
+      // WR-01 fix: a failed initial open leaves the camera in `error` with
+      // no supervisor or alert ownership. Hand off to both so D-04's 5-min
+      // alert can fire and the supervisor's retry loop takes over.
+      try {
+        _alertPolicy.armIfAbsent(camera.id);
+        // ignore: unawaited_futures
+        _reconnectSupervisor.requestReconnect(
+          camera.id,
+          cause: 'initial_open_failed',
+        );
+      } catch (handoffErr) {
+        appLog('AUDIO',
+            'Handoff to supervisor/alert after initial-open failure threw: $handoffErr');
+      }
+    }
+
+    return camState;
+  }
+
   Future<void> startMonitoring({bool videoPreview = false}) async {
     // Any new start clears the stop flag so a subsequent settings-driven
     // restart isn't permanently suppressed by an earlier Stop.
@@ -573,178 +763,7 @@ class AudioPlayerNotifier extends AsyncNotifier<MonitoringState> {
     final cameraStates = <CameraAudioState>[];
 
     for (final camera in selectedCameras) {
-      final cameraName = camera.name ?? 'Camera';
-      appLog('AUDIO', 'Connecting to $cameraName (${camera.id})');
-
-      // Manual cameras use their URL verbatim — the RTSPS→RTSP port/scheme
-      // rewrite in resolveStreamUrl is Unifi-specific and would corrupt an
-      // arbitrary user-entered stream URL.
-      String resolveFor(String raw) => camera.isManual
-          ? raw
-          : resolveStreamUrl(raw, useRtsp: settings.useRtsp);
-
-      // The integration API embeds the console's own LAN IP in the RTSPS
-      // URLs it returns, regardless of which address the API was reached
-      // through. When the console is configured via a different address
-      // (e.g. a Tailscale hostname), that embedded IP is unreachable — so
-      // point the local candidates at the configured console address.
-      // Manual cameras keep their user-entered URL verbatim. Defensive:
-      // rewriteStreamUrlHosts never throws and degrades to the API URLs.
-      var localUrls = camera.rtspsStreamUrls;
-      if (!camera.isManual) {
-        localUrls = rewriteStreamUrlHosts(
-            localUrls, ref.read(authNotifierProvider).value?.host);
-      }
-
-      final quality = camera.defaultQuality;
-      final rtspsUrl = quality != null ? localUrls[quality] : null;
-      final url = rtspsUrl != null ? resolveFor(rtspsUrl) : null;
-
-      // Remote (VPN/Tailscale) candidates, parallel to availableQualities.
-      // Two tiers, tried after the local candidate:
-      //  - remoteQualities: the stream URLs re-pointed at the globally
-      //    configured remote host — Unifi AND manual cameras. Covers
-      //    NVR-style setups where all streams are served from one host
-      //    (still run through resolveFor so Unifi useRtsp handling matches
-      //    the local candidate; resolveFor is a no-op for manual cameras).
-      //  - overrideQualities: the camera's own remote URL, verbatim (manual
-      //    cameras only), for cameras whose remote address doesn't follow
-      //    the global host swap.
-      // Defensive: any failure here degrades to "no remote fallback" — it
-      // must never prevent the local stream from starting.
-      var remoteQualities = const <String, String>{};
-      var overrideQualities = const <String, String>{};
-      try {
-        final remoteHost = ref.read(authNotifierProvider).value?.remoteHost;
-        if (remoteHost != null && remoteHost.isNotEmpty) {
-          remoteQualities = camera.rtspsStreamUrls.map(
-            (k, v) => MapEntry(k, resolveFor(replaceUrlHost(v, remoteHost))),
-          );
-        }
-        if (camera.isManual) {
-          final remoteUrl = camera.remoteUrl;
-          if (remoteUrl != null && remoteUrl.isNotEmpty) {
-            overrideQualities = {
-              for (final k in camera.rtspsStreamUrls.keys) k: remoteUrl,
-            };
-          }
-        }
-      } catch (e) {
-        appLog('AUDIO',
-            '$cameraName: building remote candidates failed (continuing without): $e');
-      }
-
-      var camState = CameraAudioState(
-        cameraId: camera.id,
-        cameraName: cameraName,
-        connectionStatus: CameraConnectionStatus.connecting,
-        availableQualities: localUrls.map(
-          (k, v) => MapEntry(k, resolveFor(v)),
-        ),
-        remoteQualities: remoteQualities,
-        overrideQualities: overrideQualities,
-        activeQuality: quality,
-        activeStreamUrl: url,
-        mac: camera.mac,
-        modelKey: camera.modelKey,
-        micVolume: camera.micVolume,
-        isManual: camera.isManual,
-      );
-
-      if (!camera.isMicEnabled) {
-        camState = camState.copyWith(
-          errorMessage:
-              'Microphone is disabled on this camera -- enable it in Protect camera settings',
-        );
-        appLog('AUDIO', 'Warning: mic disabled on $cameraName');
-      }
-
-      try {
-        if (url == null || url.isEmpty) {
-          throw StateError('No stream URL for $cameraName — enable RTSP in Protect camera settings');
-        }
-
-        final player = _createPlayer();
-        final nativePlayer = player.platform as NativePlayer;
-        // Apply tuning properties. Idempotent helper — reused on every reconnect
-        // to hedge against mpv property resets across open() (RESEARCH §Pitfall 3).
-        await _applyPlaybackTuning(nativePlayer);
-
-        // Create VideoController BEFORE open so the render context exists.
-        // This is required for vid=auto to work later.
-        _videoControllers[camera.id] = VideoController(player);
-
-        _players[camera.id] = player;
-        _listenToPlayer(player, cameraName, camera.id);
-
-        // Ordered candidate list: local first, then global-remote rewrite,
-        // then the camera's own remote URL. First success wins; each
-        // candidate failure is caught + logged inside _openFirstCandidate,
-        // never rethrown mid-loop. The error state below is reached only
-        // when ALL candidates fail.
-        final candidates = _candidatesFor(camState, quality);
-        appLog('AUDIO',
-            'Opening stream ($quality, ${candidates.length} candidate(s)): $url');
-        _openingCameras.add(camera.id);
-        StreamCandidate winner;
-        try {
-          winner = await _openFirstCandidate(
-              player, cameraName, candidates, _candidateOpenTimeout);
-        } finally {
-          _openingCameras.remove(camera.id);
-        }
-        // Errors from losing candidates already kicked the supervisor —
-        // drop any pending retry now that a candidate is confirmed alive.
-        try {
-          _reconnectSupervisor.cancel(camera.id);
-        } catch (_) {}
-
-        // Disable video after open if not previewing (audio-only mode).
-        if (!videoPreview) {
-          await nativePlayer.setProperty('vid', 'no');
-        }
-
-
-        camState = camState.copyWith(
-          connectionStatus: CameraConnectionStatus.playing,
-          activeStreamUrl: winner.url,
-        );
-        appLog('AUDIO', '$cameraName is now playing');
-
-        // D-15: record per-camera streamStarted event for health summary.
-        try {
-          ref.read(healthEventsProvider.notifier).record(HealthEvent(
-                timestamp: DateTime.now(),
-                type: HealthEventType.streamStarted,
-                cameraId: camera.id,
-                cameraName: cameraName,
-              ));
-        } catch (e) {
-          appLog('HEALTH', 'Failed to record streamStarted: $e');
-        }
-      } catch (e) {
-        appLog('AUDIO', 'Error connecting to $cameraName: $e');
-        camState = camState.copyWith(
-          connectionStatus: CameraConnectionStatus.error,
-          errorMessage: e.toString(),
-        );
-        // WR-01 fix: a failed initial open leaves the camera in `error` with
-        // no supervisor or alert ownership. Hand off to both so D-04's 5-min
-        // alert can fire and the supervisor's retry loop takes over.
-        try {
-          _alertPolicy.armIfAbsent(camera.id);
-          // ignore: unawaited_futures
-          _reconnectSupervisor.requestReconnect(
-            camera.id,
-            cause: 'initial_open_failed',
-          );
-        } catch (handoffErr) {
-          appLog('AUDIO',
-              'Handoff to supervisor/alert after initial-open failure threw: $handoffErr');
-        }
-      }
-
-      cameraStates.add(camState);
+      cameraStates.add(await _connectCamera(camera, videoPreview: videoPreview));
     }
 
     // Restore saved volume/mute state
@@ -1623,6 +1642,135 @@ class AudioPlayerNotifier extends AsyncNotifier<MonitoringState> {
     }
   }
 
+  /// Add a single camera to a LIVE mix without disturbing the running players.
+  ///
+  /// Inverse of [removeCamera]. Connects just this camera via the shared
+  /// [_connectCamera] helper and APPENDS it to [MonitoringState.cameras]. It
+  /// never sets `AsyncLoading` and never calls stopMonitoring, so every
+  /// already-running player keeps playing untouched (T-oj0-01) — the observable
+  /// contract is that no other camera's connectionStatus/activeStreamUrl
+  /// changes across the add. Restores the camera's saved volume/mute, persists
+  /// it into the selected set so it survives a restart, and records a health
+  /// event. No-ops (with a log) when there is no live session, the camera is
+  /// already in the mix, or the id can't be resolved from the camera list.
+  ///
+  /// Runs through [_runLifecycle] so it can never interleave with a stop or a
+  /// settings-driven restart.
+  Future<void> addCameraToSession(String cameraId,
+      {bool videoPreview = false}) async {
+    return _runLifecycle(() async {
+      final current = state.value;
+      if (current == null) {
+        appLog('AUDIO', 'addCameraToSession: no monitoring state — ignoring');
+        return;
+      }
+      // No live session — a fresh start is the correct path, not an add.
+      if (_players.isEmpty) {
+        appLog('AUDIO',
+            'addCameraToSession: no live session — ignoring $cameraId');
+        return;
+      }
+      // Already in the mix — nothing to do (never reopen a running stream).
+      if (current.cameras.any((c) => c.cameraId == cameraId)) {
+        appLog('AUDIO',
+            'addCameraToSession: $cameraId already in the mix — ignoring');
+        return;
+      }
+      // Resolve the camera from the (already-trusted) loaded camera list.
+      ProtectCamera? camera;
+      final all = ref.read(cameraNotifierProvider).value?.cameras ??
+          const <ProtectCamera>[];
+      for (final c in all) {
+        if (c.id == cameraId) {
+          camera = c;
+          break;
+        }
+      }
+      if (camera == null) {
+        appLog('AUDIO',
+            'addCameraToSession: no camera with id $cameraId — ignoring');
+        return;
+      }
+
+      appLog('AUDIO', 'Adding camera ${camera.name ?? cameraId} to live mix');
+      var camState = await _connectCamera(camera, videoPreview: videoPreview);
+
+      // Restore saved volume/mute for just this camera (same source as
+      // startMonitoring's full-list restore). Defensive: a failure here must
+      // not drop the freshly-connected stream.
+      try {
+        final savedMix = await _loadMixState();
+        final mix = savedMix[camState.cameraId];
+        if (mix != null) {
+          final volume = (mix['volume'] as num?)?.toDouble() ?? 100.0;
+          final muted = mix['muted'] as bool? ?? false;
+          camState = camState.copyWith(
+            volume: volume,
+            preMuteVolume: volume,
+            isMuted: muted,
+          );
+          _players[camState.cameraId]?.setVolume(muted ? 0.0 : volume);
+          appLog('AUDIO',
+              '${camState.cameraName} restored vol=${volume.toStringAsFixed(0)} muted=$muted');
+        }
+      } catch (e) {
+        appLog('AUDIO',
+            'addCameraToSession: mix restore failed (continuing): $e');
+      }
+
+      // Append WITHOUT AsyncLoading / stopMonitoring — that would blank the
+      // grid and drop the other players. Re-read state fresh: the awaits above
+      // yielded, so poll/reconnect callbacks may have replaced it.
+      final latest = state.value ?? current;
+      state = AsyncData(
+        latest.copyWith(cameras: [...latest.cameras, camState]),
+      );
+
+      // Persist selection so the camera survives a restart. toggleCamera
+      // toggles, so only call it when the camera isn't already selected
+      // (otherwise it would deselect it).
+      try {
+        final selectedIds =
+            ref.read(cameraNotifierProvider).value?.selectedIds ?? const {};
+        if (!selectedIds.contains(cameraId)) {
+          ref.read(cameraNotifierProvider.notifier).toggleCamera(cameraId);
+        }
+      } catch (e) {
+        appLog('AUDIO',
+            'addCameraToSession: persist selection failed (continuing): $e');
+      }
+
+      // Health event + notification refresh, mirroring startMonitoring.
+      // Defensive: never let these tear down the running stream.
+      try {
+        ref.read(healthEventsProvider.notifier).record(HealthEvent(
+              timestamp: DateTime.now(),
+              type: HealthEventType.streamStarted,
+              cameraId: cameraId,
+              cameraName: camState.cameraName,
+              detail: 'added to mix',
+            ));
+      } catch (e) {
+        appLog('HEALTH',
+            'addCameraToSession: failed to record streamStarted: $e');
+      }
+      try {
+        final cams = state.value?.cameras ?? const <CameraAudioState>[];
+        final statusParts = cams.map((c) {
+          final status = c.connectionStatus == CameraConnectionStatus.playing
+              ? '' : ' (${c.connectionStatus.name})';
+          return '${c.cameraName}$status';
+        }).toList();
+        final text = 'Monitoring: ${statusParts.join(", ")}';
+        _lastNotificationText = text;
+        await ForegroundServiceManager.updateNotification(text: text);
+      } catch (e) {
+        appLog('FGS',
+            'addCameraToSession: failed to update notification: $e');
+      }
+    });
+  }
+
   /// Save per-camera volume/mute to secure storage.
   void _saveMixState() {
     final current = state.value;
@@ -1651,3 +1799,13 @@ class AudioPlayerNotifier extends AsyncNotifier<MonitoringState> {
     }
   }
 }
+
+/// The cameras in [all] that are not already represented in [inSession] — i.e.
+/// the set a live-session "add camera" picker should offer. Pure and free of
+/// native/platform dependencies so the UI can render it and it can be
+/// unit-tested directly (the notifier methods that open streams cannot).
+List<ProtectCamera> addableCameras(
+  List<ProtectCamera> all,
+  List<CameraAudioState> inSession,
+) =>
+    all.where((c) => !inSession.any((s) => s.cameraId == c.id)).toList();

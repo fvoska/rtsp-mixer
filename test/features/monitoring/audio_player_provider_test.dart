@@ -1,5 +1,7 @@
 import 'package:flutter_test/flutter_test.dart';
+import 'package:rtsp_mixer/features/cameras/models/protect_camera.dart';
 import 'package:rtsp_mixer/features/monitoring/models/player_state.dart';
+import 'package:rtsp_mixer/features/monitoring/providers/audio_player_provider.dart';
 
 /// Tests for audio player state logic.
 /// Since Player requires native libraries, these test the pure state
@@ -177,6 +179,35 @@ void main() {
 
       expect(step2.cameras[0].volume, 25.0);
       expect(step2.cameras[1].volume, 80.0);
+    });
+  });
+
+  group('addableCameras', () {
+    ProtectCamera cam(String id) =>
+        ProtectCamera(id: id, name: id, state: 'CONNECTED');
+    CameraAudioState inMix(String id) =>
+        CameraAudioState(cameraId: id, cameraName: id);
+
+    test('returns only cameras not already in the session', () {
+      final all = [cam('a'), cam('b'), cam('c')];
+      final result = addableCameras(all, [inMix('a')]);
+      expect(result.map((c) => c.id).toList(), ['b', 'c']);
+    });
+
+    test('is empty when every camera is already in the mix', () {
+      final all = [cam('a'), cam('b')];
+      final result = addableCameras(all, [inMix('a'), inMix('b')]);
+      expect(result, isEmpty);
+    });
+
+    test('returns all cameras when the session is empty', () {
+      final all = [cam('a'), cam('b')];
+      expect(addableCameras(all, const []).map((c) => c.id).toList(),
+          ['a', 'b']);
+    });
+
+    test('is empty when the camera list is empty', () {
+      expect(addableCameras(const [], [inMix('a')]), isEmpty);
     });
   });
 }
