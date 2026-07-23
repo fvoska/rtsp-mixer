@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.6.0](https://github.com/fvoska/rtsp-mixer/compare/v1.5.1...v1.6.0) (2026-07-23)
+
+
+### Features
+
+* **monitoring:** polish camera card alignment and animate state transitions ([#23](https://github.com/fvoska/rtsp-mixer/issues/23)) ([cd07ded](https://github.com/fvoska/rtsp-mixer/commit/cd07ded20d95c5cfcc4942b5528529f6dc73b450))
+
 ## [1.5.1](https://github.com/fvoska/rtsp-mixer/compare/v1.5.0...v1.5.1) (2026-07-23)
 
 
