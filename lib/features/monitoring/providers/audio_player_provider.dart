@@ -12,6 +12,7 @@ import '../../../core/services/local_notifications.dart';
 import '../../auth/providers/auth_provider.dart';
 import '../../cameras/models/protect_camera.dart';
 import '../../cameras/providers/camera_provider.dart';
+import '../helpers/audio_level_meter.dart';
 import '../helpers/rtsp_url.dart';
 import '../helpers/stream_candidates.dart';
 import '../models/health_event.dart';
@@ -35,7 +36,6 @@ class AudioPlayerNotifier extends AsyncNotifier<MonitoringState> {
   final List<StreamSubscription<dynamic>> _subscriptions = [];
   Timer? _levelPollTimer;
   final Map<String, double> _lastAudioPts = {};
-  final Map<String, double> _baselineLevel = {};
   String _lastNotificationText = '';
 
   /// Serializes lifecycle operations (start / stop / settings-driven restart)
@@ -154,7 +154,6 @@ class AudioPlayerNotifier extends AsyncNotifier<MonitoringState> {
       }
       _players.clear();
       _lastAudioPts.clear();
-      _baselineLevel.clear();
     });
 
     // Auto-restart streams when RTSP or audio buffer settings change.
@@ -856,18 +855,42 @@ class AudioPlayerNotifier extends AsyncNotifier<MonitoringState> {
         } catch (e) {
           appLog('ZOMBIE', 'pts feed error (non-fatal): $e');
         }
-        // Normalize: typical delta at 500ms poll is ~0.5s.
-        final level = flowing ? (ptsDelta / 0.6).clamp(0.2, 1.0) : 0.0;
 
-        // Activity: deviation from per-camera baseline.
-        final prevBaseline = _baselineLevel[cam.cameraId] ?? level;
-        final baseline = prevBaseline * 0.95 + level * 0.05;
-        _baselineLevel[cam.cameraId] = baseline;
-        final rawActivity = (level - baseline).clamp(0.0, 1.0);
-        final prevActivity = cam.audioActivity;
-        final activity = rawActivity > prevActivity
-            ? rawActivity
-            : prevActivity * 0.7;
+        // Loudness proxy: encoded VBR AAC bitrate (bits/sec). Read here —
+        // not in the metadata block below — because it now drives the level
+        // rather than just debug info. This FFmpeg build has no audio
+        // analysis filters, so encoded bitrate is the only loudness signal
+        // available without touching lavfi (CLAUDE.md hard rule).
+        final audioBitrate =
+            double.tryParse(await _tryGetProperty(np, 'audio-bitrate') ?? '');
+        // RELY-03: feed watchdog with bitrate>0 positive signal.
+        try {
+          if (audioBitrate != null && audioBitrate > 0) {
+            _zombieWatchdog.recordBitrateNonZero(cam.cameraId);
+          }
+        } catch (e) {
+          appLog('ZOMBIE', 'bitrate feed error (non-fatal): $e');
+        }
+
+        // Level: absolute pseudo-SPL on a fixed log scale. PTS flow keeps
+        // its silence/zombie role unchanged — no flow means level 0. When
+        // the stream flows but mpv hasn't published a bitrate yet (~1 s
+        // after open), carry the previous level so a live stream doesn't
+        // flash as silent.
+        final double level;
+        if (!flowing) {
+          level = 0.0;
+        } else if (audioBitrate != null && audioBitrate > 0) {
+          level = bitrateToLevel(audioBitrate);
+        } else {
+          level = cam.audioLevel;
+        }
+
+        // Activity: peak-to-trough variation of the rolling history (~5 s).
+        // No peak-hold decay — the sliding window IS the decay (a spike
+        // ages out of the border after ~5 s).
+        final newHistory = appendLevel(cam.levelHistory, level);
+        final activity = recentVariation(newHistory);
 
         final newSilence = !flowing
             ? cam.silenceDuration + _pollInterval.inMilliseconds / 1000.0
@@ -883,15 +906,7 @@ class AudioPlayerNotifier extends AsyncNotifier<MonitoringState> {
         final width = int.tryParse(await _tryGetProperty(np, 'video-params/w') ?? '');
         final height = int.tryParse(await _tryGetProperty(np, 'video-params/h') ?? '');
         final fps = double.tryParse(await _tryGetProperty(np, 'container-fps') ?? '');
-        final audioBitrate = double.tryParse(await _tryGetProperty(np, 'audio-bitrate') ?? '');
-        // RELY-03: feed watchdog with bitrate>0 positive signal.
-        try {
-          if (audioBitrate != null && audioBitrate > 0) {
-            _zombieWatchdog.recordBitrateNonZero(cam.cameraId);
-          }
-        } catch (e) {
-          appLog('ZOMBIE', 'bitrate feed error (non-fatal): $e');
-        }
+        // audio-bitrate is read above (it drives the level now).
         final videoBitrate = double.tryParse(await _tryGetProperty(np, 'video-bitrate') ?? '');
 
         final newInfo = cam.streamInfo.merge(
@@ -907,28 +922,22 @@ class AudioPlayerNotifier extends AsyncNotifier<MonitoringState> {
           audioFormat: audioFormat,
         );
 
-        final infoChanged = newInfo.audioCodec != cam.streamInfo.audioCodec ||
-            newInfo.videoCodec != cam.streamInfo.videoCodec ||
-            newInfo.sampleRate != cam.streamInfo.sampleRate ||
-            newInfo.width != cam.streamInfo.width ||
-            newInfo.audioBitrate != cam.streamInfo.audioBitrate ||
-            newInfo.videoBitrate != cam.streamInfo.videoBitrate;
-
-        if ((level - cam.audioLevel).abs() > 0.05 ||
-            (activity - cam.audioActivity).abs() > 0.03 ||
-            (newSilence - cam.silenceDuration).abs() > 0.5 ||
-            infoChanged) {
-          updated = updated.copyWithCamera(
-            i,
-            cam.copyWith(
-              audioLevel: level,
-              audioActivity: activity,
-              silenceDuration: newSilence,
-              streamInfo: newInfo,
-            ),
-          );
-          changed = true;
-        }
+        // Always emit for a live camera: appending a history sample makes
+        // the state unequal every tick anyway, so the old change-gating on
+        // audioLevel/activity/silence is dead logic (2 emissions/s for 2
+        // cameras is negligible; the notification update below keeps its
+        // own text-diff guard, so no notification churn).
+        updated = updated.copyWithCamera(
+          i,
+          cam.copyWith(
+            audioLevel: level,
+            audioActivity: activity,
+            silenceDuration: newSilence,
+            streamInfo: newInfo,
+            levelHistory: newHistory,
+          ),
+        );
+        changed = true;
 
         // RELY-03: tick the watchdog once per camera per pass. Must run
         // AFTER the positive-signal feeders above so signal-age accounting
@@ -1134,9 +1143,18 @@ class AudioPlayerNotifier extends AsyncNotifier<MonitoringState> {
     final newStatus = status == ReconnectStatus.reconnecting
         ? CameraConnectionStatus.reconnecting
         : CameraConnectionStatus.playing;
+    final isNowPlaying = status == ReconnectStatus.playing;
     state = AsyncData(current.copyWithCamera(
       idx,
-      cam.copyWith(connectionStatus: newStatus),
+      cam.copyWith(
+        connectionStatus: newStatus,
+        // On a successful reconnect, clear the level history so a stale
+        // pre-outage waveform doesn't misrepresent the fresh stream, and
+        // zero the variation-based activity with it. Passing null keeps
+        // the existing values for the reconnecting case.
+        levelHistory: isNowPlaying ? const <double>[] : null,
+        audioActivity: isNowPlaying ? 0.0 : null,
+      ),
     ));
     // RELY-03: a successful reconnect zeroes the watchdog so the next
     // zombie can fire fresh. Status `reconnecting` keeps counters running.
@@ -1155,7 +1173,6 @@ class AudioPlayerNotifier extends AsyncNotifier<MonitoringState> {
       // poll would otherwise compute a large negative ptsDelta against the
       // previous stream's PTS and miscount one tick of `silenceDuration`.
       _lastAudioPts.remove(cameraId);
-      _baselineLevel.remove(cameraId);
     }
     // RELY-01 D-04: alert-timer lifecycle on supervisor-driven status changes.
     final cameraName = _findCameraName(cameraId) ?? cameraId;
@@ -1488,7 +1505,6 @@ class AudioPlayerNotifier extends AsyncNotifier<MonitoringState> {
       appLog('DRIFT', 'resetAll threw during stopMonitoring: $e');
     }
     _lastAudioPts.clear();
-    _baselineLevel.clear();
     _lastNotificationText = '';
     for (final sub in _subscriptions) {
       sub.cancel();
@@ -1602,7 +1618,6 @@ class AudioPlayerNotifier extends AsyncNotifier<MonitoringState> {
     final player = _players.remove(cameraId);
     _videoControllers.remove(cameraId);
     _lastAudioPts.remove(cameraId);
-    _baselineLevel.remove(cameraId);
     if (player != null) {
       try {
         await player.stop();
