@@ -59,8 +59,21 @@ void main() {
     connectionStatus: CameraConnectionStatus.playing,
     isMuted: true,
   );
+  const playingWithHistory = CameraAudioState(
+    cameraId: 'cam1',
+    cameraName: 'Nursery',
+    connectionStatus: CameraConnectionStatus.playing,
+    levelHistory: [0.1, 0.5, 0.9, 0.3],
+  );
+  const playingQuiet = CameraAudioState(
+    cameraId: 'cam1',
+    cameraName: 'Nursery',
+    connectionStatus: CameraConnectionStatus.playing,
+    audioLevel: 0.02,
+  );
 
   final bannerFinder = find.byKey(const ValueKey('status-banner'));
+  final waveformFinder = find.byKey(const ValueKey('waveform-chart'));
 
   group('CameraAudioCard reconnecting state (RELY-02 / D-10 / D-11)', () {
     testWidgets('renders a CircularProgressIndicator spinner', (tester) async {
@@ -159,6 +172,39 @@ void main() {
         (tester) async {
       await _pumpCard(tester, playingMuted);
       expect(find.text('Muted'), findsOneWidget);
+    });
+  });
+
+  group('CameraAudioCard waveform chart (quick-260723-sph)', () {
+    testWidgets('live camera with level history renders the waveform chart',
+        (tester) async {
+      await _pumpCard(tester, playingWithHistory);
+      expect(waveformFinder, findsOneWidget);
+    });
+
+    testWidgets('non-live (connecting) camera renders NO waveform chart',
+        (tester) async {
+      await _pumpCard(tester, connecting);
+      expect(waveformFinder, findsNothing);
+    });
+  });
+
+  group('CameraAudioCard level bar color (quick-260723-sph)', () {
+    testWidgets(
+        'low absolute level on a healthy live stream stays green, not amber',
+        (tester) async {
+      // A low absolute level is a normally quiet nursery, not a degraded
+      // state — an amber branch here would glow all night. This test pins
+      // the removed-amber-branch decision so a refactor can't silently
+      // reintroduce a nightly amber glow.
+      await _pumpCard(tester, playingQuiet);
+      final indicator = tester.widget<LinearProgressIndicator>(
+        find.byType(LinearProgressIndicator),
+      );
+      final valueColor =
+          (indicator.valueColor as AlwaysStoppedAnimation<Color?>).value;
+      expect(valueColor, AppTheme.statusOnline);
+      expect(valueColor, isNot(Colors.amber));
     });
   });
 

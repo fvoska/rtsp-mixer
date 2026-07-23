@@ -198,10 +198,13 @@ class SettingsScreen extends ConsumerWidget {
     );
   }
 
+  // The threshold gates the card-border highlight on recent VARIATION in
+  // sound level (how much the level swung over the last few seconds), not
+  // on absolute loudness.
   String _activityLabel(double v) {
-    if (v < 0.05) return 'High sensitivity — highlight even quiet sounds';
-    if (v < 0.15) return 'Medium sensitivity';
-    return 'Low sensitivity — highlight only loud sounds';
+    if (v < 0.05) return 'High sensitivity — highlight even small changes in sound level';
+    if (v < 0.15) return 'Medium sensitivity — highlight moderate changes in sound level';
+    return 'Low sensitivity — highlight only large swings, like crying';
   }
 
   Future<void> _editLocalHost(
