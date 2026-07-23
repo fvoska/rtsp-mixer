@@ -28,7 +28,7 @@ See: .planning/PROJECT.md (updated 2026-04-01)
 Phase: 04 (reliability-overnight-monitoring) — EXECUTING
 Plan: 1 of 5
 Status: Executing Phase 04
-Last activity: 2026-07-23 -- Completed quick task 260723-mkn: Camera card polish (spinner alignment + animated state transitions)
+Last activity: 2026-07-23 -- Completed quick task 260723-oj0: Quick-add cameras to a live session (inverse of quick-remove)
 
 Progress: [█████░░░░░] 50%
 
@@ -99,6 +99,7 @@ None yet.
 | 260722-pdb | 2026-07-22 | add-remote-url-fallback-connectivity-loc | Local-preferred/remote-fallback (VPN/Tailscale) connectivity: console + manual cameras carry an optional remote address; auth verify, camera refresh, stream open, reconnect, and quality switch iterate ordered [local, remote] candidates with per-candidate timeouts, failing only when both fail; Settings Connection section (edit/clear all addresses), add-camera Remote URL field, Help "Remote access" section; `replaceUrlHost` helper + `remote_host` storage + `ProtectCamera.remoteUrl` | [PLAN](quick/260722-pdb-add-remote-url-fallback-connectivity-loc/260722-pdb-PLAN.md) · [SUMMARY](quick/260722-pdb-add-remote-url-fallback-connectivity-loc/260722-pdb-SUMMARY.md) |
 | 260723-hk2 | 2026-07-23 | card-redesign | Hybrid A+B camera card redesign: edge-to-edge tinted status banner for problem states (amber reconnecting / red error), identity-only header, full-width status line for Live/Connecting…, "Muted" in volume row; fixes "Re…" truncation and inconsistent header tint | [PLAN](quick/260723-hk2-redesign-camera-card-on-monitoring-scree/260723-hk2-PLAN.md) · [SUMMARY](quick/260723-hk2-redesign-camera-card-on-monitoring-scree/260723-hk2-SUMMARY.md) |
 | 260723-mkn | 2026-07-23 | card-polish-animations | Camera card polish: spinner/icon optically centered with status label (`_StatusLine` center-aligned; `_StatusBanner` icon centered on first text line); banner, status line, volume Muted↔% text, and connecting↔slider swaps animate via `AnimatedSize` + fade-only `AnimatedSwitcher` (~200–250ms) so state changes no longer pop | [PLAN](quick/260723-mkn-polish-camera-card-fix-spinner-text-alig/260723-mkn-PLAN.md) · [SUMMARY](quick/260723-mkn-polish-camera-card-fix-spinner-text-alig/260723-mkn-SUMMARY.md) |
+| 260723-oj0 | 2026-07-23 | add-quick-camera-add-to-session | Quick-add cameras to a live session (inverse of quick-remove): `AudioPlayerNotifier.addCameraToSession` appends one camera to the running mix without touching other streams (no AsyncLoading/stopMonitoring); per-camera connect logic single-sourced into `_connectCamera`; toolbar "Add camera" control opens picker (`_AddCameraSheet`) listing only out-of-session cameras via pure `addableCameras` helper; restores saved volume/mute and persists selection | [PLAN](quick/260723-oj0-add-quick-camera-add-to-session/260723-oj0-PLAN.md) · [SUMMARY](quick/260723-oj0-add-quick-camera-add-to-session/260723-oj0-SUMMARY.md) |
 
 ### Blockers/Concerns
 
