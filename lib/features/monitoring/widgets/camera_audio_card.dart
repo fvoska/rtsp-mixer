@@ -153,12 +153,26 @@ class _CameraAudioCardState extends ConsumerState<CameraAudioCard> {
             // with the header. Both problem states share the SAME slot/widget
             // so cards stay structurally consistent — differing only in colour
             // and copy. This replaces the old per-state header tint box.
-            if (cs.connectionStatus == CameraConnectionStatus.reconnecting ||
-                cs.isError)
-              _StatusBanner(
-                status: cs.connectionStatus,
-                errorMessage: cs.errorMessage,
+            // The banner is always present in the tree so it can grow/fade in
+            // and collapse/fade out instead of popping. AnimatedSize animates
+            // the height; AnimatedSwitcher fades the content. Clip + topCenter
+            // keep a mid-collapse height from painting outside the card.
+            AnimatedSize(
+              duration: const Duration(milliseconds: 250),
+              alignment: Alignment.topCenter,
+              clipBehavior: Clip.hardEdge,
+              child: AnimatedSwitcher(
+                duration: const Duration(milliseconds: 250),
+                child: (cs.connectionStatus ==
+                            CameraConnectionStatus.reconnecting ||
+                        cs.isError)
+                    ? _StatusBanner(
+                        status: cs.connectionStatus,
+                        errorMessage: cs.errorMessage,
+                      )
+                    : const SizedBox.shrink(key: ValueKey('no-banner')),
               ),
+            ),
             Padding(
         padding: const EdgeInsets.all(Spacing.md),
         child: Column(
@@ -261,8 +275,15 @@ class _CameraAudioCardState extends ConsumerState<CameraAudioCard> {
 
             // Zone 2: STATUS LINE — healthy states only (Live / Connecting…)
             // get a dedicated full-width line below the header. Reconnecting /
-            // error are carried by the banner; idle renders nothing.
-            _StatusLine(status: cs.connectionStatus),
+            // error are carried by the banner; idle renders nothing. The
+            // AnimatedSize animates the height as the line appears/disappears;
+            // the crossfade between Live ↔ Connecting… lives inside _StatusLine.
+            AnimatedSize(
+              duration: const Duration(milliseconds: 250),
+              alignment: Alignment.topCenter,
+              clipBehavior: Clip.hardEdge,
+              child: _StatusLine(status: cs.connectionStatus),
+            ),
 
             // Audio level indicator
             if (cs.isLive) ...[
@@ -407,54 +428,78 @@ class _CameraAudioCardState extends ConsumerState<CameraAudioCard> {
               ),
             ],
 
-            // Show progress indicator when connecting instead of sliders
-            if (isConnecting)
-              const Padding(
-                padding: EdgeInsets.symmetric(vertical: Spacing.sm),
-                child: LinearProgressIndicator(),
+            // Connecting shows a LinearProgressIndicator; every other state
+            // shows the volume slider row. Wrapping the either/or region in an
+            // AnimatedSize (height) + fade-only AnimatedSwitcher (content)
+            // crossfades the indicator into the slider row with no height jump.
+            AnimatedSize(
+              duration: const Duration(milliseconds: 250),
+              alignment: Alignment.topCenter,
+              clipBehavior: Clip.hardEdge,
+              child: AnimatedSwitcher(
+                duration: const Duration(milliseconds: 250),
+                child: isConnecting
+                    ? const Padding(
+                        key: ValueKey('connecting-indicator'),
+                        padding: EdgeInsets.symmetric(vertical: Spacing.sm),
+                        child: LinearProgressIndicator(),
+                      )
+                    : Column(
+                        key: const ValueKey('volume-row'),
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          const SizedBox(height: Spacing.sm),
+                          Row(
+                            children: [
+                              const Icon(Icons.volume_down, size: 20),
+                              Expanded(
+                                child: Slider(
+                                  value: cs.volume,
+                                  min: 0.0,
+                                  max: 100.0,
+                                  divisions: 100,
+                                  onChanged: cs.isLive
+                                      ? (v) => ref
+                                          .read(audioPlayerProvider.notifier)
+                                          .setVolume(idx, v)
+                                      : null,
+                                  semanticFormatterCallback: (v) =>
+                                      'Volume ${v.round()} percent',
+                                ),
+                              ),
+                              SizedBox(
+                                width: 48,
+                                // Muted clarity: show the word "Muted" in the
+                                // volume row so the state reads without relying
+                                // on the header icon. The AnimatedSwitcher
+                                // crossfades Muted ↔ percentage.
+                                child: AnimatedSwitcher(
+                                  duration: const Duration(milliseconds: 200),
+                                  child: Text(
+                                    cs.isMuted
+                                        ? 'Muted'
+                                        : '${cs.volume.round()}%',
+                                    key: ValueKey(cs.isMuted
+                                        ? 'Muted'
+                                        : '${cs.volume.round()}%'),
+                                    style: cs.isMuted
+                                        ? theme.textTheme.bodySmall?.copyWith(
+                                            color: AppTheme.statusOffline)
+                                        : theme.textTheme.bodySmall,
+                                    textAlign: TextAlign.right,
+                                    maxLines: 1,
+                                    softWrap: false,
+                                    overflow: TextOverflow.clip,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ],
+                      ),
               ),
-
-            // Row 2: Volume slider (only when not connecting)
-            if (!isConnecting) ...[
-              const SizedBox(height: Spacing.sm),
-              Row(
-                children: [
-                  const Icon(Icons.volume_down, size: 20),
-                  Expanded(
-                    child: Slider(
-                      value: cs.volume,
-                      min: 0.0,
-                      max: 100.0,
-                      divisions: 100,
-                      onChanged: cs.isLive
-                          ? (v) => ref
-                              .read(audioPlayerProvider.notifier)
-                              .setVolume(idx, v)
-                          : null,
-                      semanticFormatterCallback: (v) =>
-                          'Volume ${v.round()} percent',
-                    ),
-                  ),
-                  SizedBox(
-                    width: 48,
-                    child: Text(
-                      // Muted clarity: show the word "Muted" in the volume row
-                      // so the state reads without relying on the header icon.
-                      cs.isMuted ? 'Muted' : '${cs.volume.round()}%',
-                      style: cs.isMuted
-                          ? theme.textTheme.bodySmall
-                              ?.copyWith(color: AppTheme.statusOffline)
-                          : theme.textTheme.bodySmall,
-                      textAlign: TextAlign.right,
-                      maxLines: 1,
-                      softWrap: false,
-                      overflow: TextOverflow.clip,
-                    ),
-                  ),
-                ],
-              ),
-
-            ],
+            ),
           ],  // close inner Column children
         ),  // close inner Column
             ),  // close Padding
@@ -510,6 +555,16 @@ class _StatusBanner extends StatelessWidget {
         isReconnecting ? 'Reconnecting…' : (errorMessage ?? 'Stream failed');
     final int maxLines = isReconnecting ? 1 : 3;
 
+    // Optically center the 14x14 leading box on the FIRST text line. Deriving
+    // the single-line height from the label's TextStyle keeps the icon aligned
+    // to line one for the multi-line error case (rather than the block center),
+    // while still centering the single-line reconnecting label.
+    final TextStyle? labelStyle = theme.textTheme.bodyMedium;
+    final double? labelFontSize = labelStyle?.fontSize;
+    final double firstLineHeight = labelFontSize != null
+        ? labelFontSize * (labelStyle?.height ?? 1.0)
+        : 20.0;
+
     return Container(
       key: const ValueKey('status-banner'),
       width: double.infinity,
@@ -521,7 +576,13 @@ class _StatusBanner extends StatelessWidget {
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          SizedBox(width: 14, height: 14, child: Center(child: leading)),
+          SizedBox(
+            height: firstLineHeight,
+            child: Center(
+              child:
+                  SizedBox(width: 14, height: 14, child: Center(child: leading)),
+            ),
+          ),
           const SizedBox(width: Spacing.xs),
           Expanded(
             child: Text(
@@ -552,57 +613,71 @@ class _StatusLine extends StatelessWidget {
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;
 
-    late final Widget leading;
-    late final String label;
-    late final Color color;
+    Widget content;
 
     switch (status) {
       case CameraConnectionStatus.playing:
-        leading = const Icon(
-          Icons.graphic_eq,
-          size: 14,
-          color: AppTheme.statusOnline,
-        );
-        label = 'Live';
-        color = AppTheme.statusOnline;
-        break;
       case CameraConnectionStatus.connecting:
-        leading = SizedBox(
-          width: 14,
-          height: 14,
-          child: CircularProgressIndicator(
-            strokeWidth: 2.0,
-            valueColor: AlwaysStoppedAnimation(scheme.primary),
-          ),
+        final bool isConnecting =
+            status == CameraConnectionStatus.connecting;
+        final Widget leading = isConnecting
+            ? SizedBox(
+                width: 14,
+                height: 14,
+                child: CircularProgressIndicator(
+                  strokeWidth: 2.0,
+                  valueColor: AlwaysStoppedAnimation(scheme.primary),
+                ),
+              )
+            : const Icon(
+                Icons.graphic_eq,
+                size: 14,
+                color: AppTheme.statusOnline,
+              );
+        final String label = isConnecting ? 'Connecting…' : 'Live';
+        final Color color =
+            isConnecting ? scheme.primary : AppTheme.statusOnline;
+        content = Column(
+          // Keyed by status so Live ↔ Connecting… crossfades in the switcher.
+          key: ValueKey(status),
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const SizedBox(height: Spacing.xs),
+            Row(
+              // The label is always single-line here, so centering the 14x14
+              // leading box against the taller text line-box optically centers
+              // the spinner/icon with its label.
+              crossAxisAlignment: CrossAxisAlignment.center,
+              children: [
+                SizedBox(width: 14, height: 14, child: Center(child: leading)),
+                const SizedBox(width: Spacing.xs),
+                Expanded(
+                  child: Text(
+                    label,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: theme.textTheme.bodyMedium?.copyWith(color: color),
+                  ),
+                ),
+              ],
+            ),
+          ],
         );
-        label = 'Connecting…';
-        color = scheme.primary;
         break;
       case CameraConnectionStatus.idle:
       case CameraConnectionStatus.reconnecting:
       case CameraConnectionStatus.error:
-        return const SizedBox.shrink();
+        content = SizedBox.shrink(key: ValueKey(status));
+        break;
     }
 
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        const SizedBox(height: Spacing.xs),
-        Row(
-          children: [
-            SizedBox(width: 14, height: 14, child: Center(child: leading)),
-            const SizedBox(width: Spacing.xs),
-            Expanded(
-              child: Text(
-                label,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: theme.textTheme.bodyMedium?.copyWith(color: color),
-              ),
-            ),
-          ],
-        ),
-      ],
+    // Fade-only switcher: opacity animates but the child's layout size is
+    // unchanged mid-animation, so the layout sweep's paragraph-size checks and
+    // the bounded pump() finders stay valid.
+    return AnimatedSwitcher(
+      duration: const Duration(milliseconds: 250),
+      child: content,
     );
   }
 }

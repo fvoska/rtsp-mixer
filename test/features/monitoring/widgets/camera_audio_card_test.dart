@@ -132,6 +132,36 @@ void main() {
     });
   });
 
+  group('CameraAudioCard state-transition animations (regression guard)', () {
+    testWidgets('playing state wires AnimatedSwitchers (status line + volume)',
+        (tester) async {
+      await _pumpCard(tester, playing);
+      // At minimum the status-line crossfade and the volume-text crossfade are
+      // present; the connecting/slider swap adds a third. Fade-only switchers
+      // keep child layout size stable so the bounded pump finders stay valid.
+      expect(find.byType(AnimatedSwitcher), findsWidgets);
+    });
+
+    testWidgets('reconnecting keeps the banner findsOneWidget after pump',
+        (tester) async {
+      await _pumpCard(tester, reconnecting);
+      expect(bannerFinder, findsOneWidget);
+      expect(find.byType(AnimatedSwitcher), findsWidgets);
+    });
+
+    testWidgets('error keeps the banner findsOneWidget after pump',
+        (tester) async {
+      await _pumpCard(tester, error);
+      expect(bannerFinder, findsOneWidget);
+    });
+
+    testWidgets('muted state resolves "Muted" to exactly one Text after pump',
+        (tester) async {
+      await _pumpCard(tester, playingMuted);
+      expect(find.text('Muted'), findsOneWidget);
+    });
+  });
+
   group('CameraAudioCard connecting state (regression guard)', () {
     testWidgets('renders LinearProgressIndicator', (tester) async {
       await _pumpCard(tester, connecting);
