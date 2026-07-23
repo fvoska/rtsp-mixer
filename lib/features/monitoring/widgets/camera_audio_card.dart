@@ -1,3 +1,5 @@
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:media_kit_video/media_kit_video.dart';
@@ -5,6 +7,7 @@ import 'package:media_kit_video/media_kit_video.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../core/theme/spacing.dart';
 import '../../cameras/widgets/camera_source_badge.dart';
+import '../helpers/audio_level_meter.dart';
 import '../models/player_state.dart';
 import '../providers/audio_player_provider.dart';
 
@@ -122,7 +125,10 @@ class _CameraAudioCardState extends ConsumerState<CameraAudioCard> {
 
     final videoCtrl = widget.showVideoPreview ? _videoController : null;
 
-    // Google Meet-style border highlight on relative audio activity change.
+    // Google Meet-style border highlight on recent VARIATION in pseudo-SPL
+    // (peak-to-trough of the level history over ~5 s). A baby crying means
+    // big swings, so the border lights up on change bursts — not on steady
+    // loudness and not on deviation-from-baseline.
     final hasActivity = cs.isLive && cs.audioActivity > widget.activityThreshold;
     final borderColor = hasActivity
         ? AppTheme.statusOnline.withValues(
@@ -285,7 +291,7 @@ class _CameraAudioCardState extends ConsumerState<CameraAudioCard> {
               child: _StatusLine(status: cs.connectionStatus),
             ),
 
-            // Audio level indicator
+            // Audio level indicator + rolling waveform
             if (cs.isLive) ...[
               const SizedBox(height: Spacing.xs),
               _AudioLevelIndicator(
@@ -293,6 +299,8 @@ class _CameraAudioCardState extends ConsumerState<CameraAudioCard> {
                 isSuspiciouslySilent: cs.isSuspiciouslySilent,
                 silenceDuration: cs.silenceDuration,
               ),
+              const SizedBox(height: Spacing.xs),
+              _WaveformChart(history: cs.levelHistory),
             ],
 
             // Quality selector + stream URL debug info
@@ -697,15 +705,12 @@ class _AudioLevelIndicator extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
 
-    // Color: green when active, amber when low, red when suspiciously silent.
-    final Color barColor;
-    if (isSuspiciouslySilent) {
-      barColor = AppTheme.statusOffline;
-    } else if (level > 0.1) {
-      barColor = AppTheme.statusOnline;
-    } else {
-      barColor = Colors.amber;
-    }
+    // Color: red only when suspiciously silent, otherwise green. The bar
+    // shows an ABSOLUTE pseudo-SPL now, so a low level is a normally quiet
+    // nursery — not a degraded state. An amber "low" branch would glow all
+    // night; deliberately removed (pinned by a widget test).
+    final Color barColor =
+        isSuspiciouslySilent ? AppTheme.statusOffline : AppTheme.statusOnline;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -736,6 +741,91 @@ class _AudioLevelIndicator extends StatelessWidget {
       ],
     );
   }
+}
+
+/// Audacity-style mirrored waveform of the rolling pseudo-SPL history
+/// (10 s / [kLevelHistoryCapacity] samples). Newest sample is always the
+/// rightmost bar, oldest left, matching a scrolling recorder. Wrapped in a
+/// [RepaintBoundary] so its twice-a-second repaints don't invalidate the
+/// rest of the card.
+class _WaveformChart extends StatelessWidget {
+  final List<double> history;
+
+  const _WaveformChart({required this.history});
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return RepaintBoundary(
+      child: CustomPaint(
+        key: const ValueKey('waveform-chart'),
+        size: const Size(double.infinity, 40),
+        painter: _WaveformPainter(
+          history: history,
+          centerLineColor: scheme.onSurface.withValues(alpha: 0.15),
+          barColor: scheme.primary.withValues(alpha: 0.8),
+        ),
+      ),
+    );
+  }
+}
+
+class _WaveformPainter extends CustomPainter {
+  final List<double> history;
+  final Color centerLineColor;
+  final Color barColor;
+
+  const _WaveformPainter({
+    required this.history,
+    required this.centerLineColor,
+    required this.barColor,
+  });
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final centerY = size.height / 2;
+
+    // 1 px horizontal center line across the full width.
+    canvas.drawRect(
+      Rect.fromLTWH(0, centerY - 0.5, size.width, 1),
+      Paint()..color = centerLineColor,
+    );
+
+    if (history.isEmpty || size.width <= 0) return;
+
+    // Defensive: never draw more samples than the fixed slot grid holds.
+    final samples = history.length > kLevelHistoryCapacity
+        ? history.sublist(history.length - kLevelHistoryCapacity)
+        : history;
+
+    // Fixed slot grid so a partially-filled history grows from the RIGHT
+    // edge: the newest sample is always rightmost (scrolling recorder).
+    final slotWidth = size.width / kLevelHistoryCapacity;
+    final firstSlot = kLevelHistoryCapacity - samples.length;
+    final maxHalfHeight = centerY - 1;
+    final barPaint = Paint()..color = barColor;
+    final barWidth = math.max(slotWidth - 2.0, 1.0); // ~2 px gap between bars
+
+    for (var i = 0; i < samples.length; i++) {
+      final sample = samples[i].clamp(0.0, 1.0);
+      // Mirrored bar around the center line; minimum 1 px half-height so
+      // silence still shows a tick.
+      final halfHeight = math.max(1.0, sample * maxHalfHeight);
+      final left = (firstSlot + i) * slotWidth + 1.0;
+      canvas.drawRect(
+        Rect.fromLTWH(left, centerY - halfHeight, barWidth, halfHeight * 2),
+        barPaint,
+      );
+    }
+  }
+
+  @override
+  bool shouldRepaint(_WaveformPainter oldDelegate) =>
+      // Each poll tick produces a NEW history list instance, so identity
+      // comparison is correct and cheap (no per-sample equality walk).
+      !identical(history, oldDelegate.history) ||
+      centerLineColor != oldDelegate.centerLineColor ||
+      barColor != oldDelegate.barColor;
 }
 
 class _StreamInfoPanel extends StatelessWidget {

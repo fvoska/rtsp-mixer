@@ -84,9 +84,14 @@ class CameraAudioState {
   /// Unifi cameras and manual cameras without a remote URL.
   final Map<String, String> overrideQualities;
   final StreamInfo streamInfo;
-  final double audioLevel; // 0.0 (silence) to 1.0 (loud)
-  final double audioActivity; // 0.0-1.0, relative change from baseline
+  final double audioLevel; // 0.0..1.0 absolute pseudo-SPL, log-mapped from AAC encoded bitrate
+  final double audioActivity; // 0.0..1.0 recent variation — peak-to-trough of levelHistory over ~5 s
   final double silenceDuration; // seconds of continuous silence
+
+  /// Rolling pseudo-SPL samples, oldest first, capacity
+  /// `kLevelHistoryCapacity` — feeds the waveform chart and the variation
+  /// statistic.
+  final List<double> levelHistory;
 
   // Camera device info from Unifi API.
   final String? mac;
@@ -115,6 +120,7 @@ class CameraAudioState {
     this.audioLevel = 0.0,
     this.audioActivity = 0.0,
     this.silenceDuration = 0.0,
+    this.levelHistory = const [],
     this.mac,
     this.modelKey,
     this.micVolume,
@@ -137,6 +143,7 @@ class CameraAudioState {
     double? audioLevel,
     double? audioActivity,
     double? silenceDuration,
+    List<double>? levelHistory,
   }) =>
       CameraAudioState(
         cameraId: cameraId,
@@ -156,6 +163,9 @@ class CameraAudioState {
         audioLevel: audioLevel ?? this.audioLevel,
         audioActivity: audioActivity ?? this.audioActivity,
         silenceDuration: silenceDuration ?? this.silenceDuration,
+        // Passing `const []` explicitly clears the history (the reconnect
+        // path relies on this); passing null keeps the existing samples.
+        levelHistory: levelHistory ?? this.levelHistory,
         mac: mac,
         modelKey: modelKey,
         micVolume: micVolume,
