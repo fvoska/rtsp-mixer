@@ -72,10 +72,17 @@ class CameraAudioState {
   final Map<String, String> availableQualities;
 
   /// Remote (VPN/Tailscale) stream URL per quality, parallel to
-  /// [availableQualities]. Empty when no remote address is configured.
+  /// [availableQualities] — the local URL re-pointed at the globally
+  /// configured remote host. Empty when no remote address is configured.
   /// Playback always tries the local candidate first and falls back to the
   /// remote one; [activeStreamUrl] reflects whichever URL is actually in use.
   final Map<String, String> remoteQualities;
+
+  /// Per-camera remote URL override (manual cameras), parallel to
+  /// [availableQualities] and tried after [remoteQualities]. Covers cameras
+  /// whose remote address doesn't follow the global host swap. Empty for
+  /// Unifi cameras and manual cameras without a remote URL.
+  final Map<String, String> overrideQualities;
   final StreamInfo streamInfo;
   final double audioLevel; // 0.0 (silence) to 1.0 (loud)
   final double audioActivity; // 0.0-1.0, relative change from baseline
@@ -103,6 +110,7 @@ class CameraAudioState {
     this.activeStreamUrl,
     this.availableQualities = const {},
     this.remoteQualities = const {},
+    this.overrideQualities = const {},
     this.streamInfo = const StreamInfo(),
     this.audioLevel = 0.0,
     this.audioActivity = 0.0,
@@ -124,6 +132,7 @@ class CameraAudioState {
     String? activeStreamUrl,
     Map<String, String>? availableQualities,
     Map<String, String>? remoteQualities,
+    Map<String, String>? overrideQualities,
     StreamInfo? streamInfo,
     double? audioLevel,
     double? audioActivity,
@@ -142,6 +151,7 @@ class CameraAudioState {
         activeStreamUrl: activeStreamUrl ?? this.activeStreamUrl,
         availableQualities: availableQualities ?? this.availableQualities,
         remoteQualities: remoteQualities ?? this.remoteQualities,
+        overrideQualities: overrideQualities ?? this.overrideQualities,
         streamInfo: streamInfo ?? this.streamInfo,
         audioLevel: audioLevel ?? this.audioLevel,
         audioActivity: audioActivity ?? this.audioActivity,

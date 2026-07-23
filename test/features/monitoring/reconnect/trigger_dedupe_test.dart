@@ -85,6 +85,69 @@ void main() {
       });
     });
 
+    test(
+        'triggers during a running timer-fired attempt are suppressed as '
+        'duplicates (no parallel retry scheduled)', () {
+      fakeAsync((async) {
+        var attempts = 0;
+        final completer = Completer<void>();
+        final sup = ReconnectSupervisor(
+          random: Random(42),
+          onAttempt: (_) async {
+            attempts++;
+            // Block the attempt so stream errors emitted by losing
+            // candidates arrive while it is still running.
+            if (attempts == 1) {
+              await completer.future;
+            }
+          },
+          onStatusChange: (_, _) {},
+          onEvent: (_, _, _) {},
+        );
+        sup.requestReconnect('cam1', cause: 'player_error');
+        // Let the backoff timer fire — the attempt starts and blocks.
+        async.elapse(const Duration(milliseconds: 1500));
+        expect(attempts, 1);
+        // A stream error during the attempt (a losing candidate dying) must
+        // NOT schedule a parallel retry.
+        sup.requestReconnect('cam1', cause: 'player_error');
+        expect(sup.hasPendingRetry('cam1'), false,
+            reason: 'trigger during in-flight attempt must be suppressed');
+        completer.complete();
+        async.flushMicrotasks();
+        expect(attempts, 1);
+      });
+    });
+
+    test('success cancels a stale duplicate retry scheduled mid-attempt', () {
+      fakeAsync((async) {
+        var attempts = 0;
+        final completer = Completer<void>();
+        final sup = ReconnectSupervisor(
+          random: Random(42),
+          onAttempt: (_) async {
+            attempts++;
+            if (attempts == 1) {
+              await completer.future; // succeeds once completed
+            }
+          },
+          onStatusChange: (_, _) {},
+          onEvent: (_, _, _) {},
+        );
+        sup.requestReconnect('cam1', cause: 'player_error');
+        async.elapse(const Duration(milliseconds: 1500));
+        expect(attempts, 1);
+        // Attempt succeeds — any leftover timer must be cancelled so a
+        // healthy stream is not stop+reopened by a stale retry.
+        completer.complete();
+        async.flushMicrotasks();
+        expect(sup.hasPendingRetry('cam1'), false);
+        async.elapse(const Duration(minutes: 1));
+        expect(attempts, 1,
+            reason: 'no further attempts after a confirmed success');
+      });
+    });
+
     test('immediate=true is suppressed when an attempt is currently in-flight',
         () {
       fakeAsync((async) {

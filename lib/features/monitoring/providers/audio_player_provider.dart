@@ -12,6 +12,7 @@ import '../../../core/services/local_notifications.dart';
 import '../../auth/providers/auth_provider.dart';
 import '../../cameras/providers/camera_provider.dart';
 import '../helpers/rtsp_url.dart';
+import '../helpers/stream_candidates.dart';
 import '../models/health_event.dart';
 import '../models/player_state.dart';
 import '../services/alert_policy.dart';
@@ -392,37 +393,75 @@ class AudioPlayerNotifier extends AsyncNotifier<MonitoringState> {
   /// the pre-existing 15s reconnect timeout).
   static const _reconnectOpenTimeout = Duration(seconds: 15);
 
-  /// Build the ordered [local, remote] candidate list for [quality] from a
-  /// camera's availableQualities/remoteQualities. Local always comes first so
+  /// Grace window after a successful open() during which we wait for
+  /// evidence the stream is actually alive. media_kit's open() resolves once
+  /// the media is queued — BEFORE the RTSP connection is established — so a
+  /// fast failure (e.g. "connection refused") surfaces on the error stream a
+  /// moment AFTER open() reports success. Without this window a dead
+  /// candidate would be declared the winner on every cycle and later
+  /// candidates would never get a turn.
+  static const _openConfirmGrace = Duration(seconds: 4);
+
+  /// Cameras with an open/candidate loop currently running. Guards against
+  /// a supervisor retry timer firing mid-attempt and running a second
+  /// stop+reopen concurrently against the same player.
+  final Set<String> _openingCameras = {};
+
+  /// Wait for evidence that the stream just opened on [player] is actually
+  /// alive: audioParams arriving (the audio decoder configured itself from
+  /// real stream data) confirms it; an error event within the grace window
+  /// disqualifies it (throws). No signal within [_openConfirmGrace] is
+  /// treated as alive — streams without an audio track (mic-disabled
+  /// cameras) never emit audioParams, and later failures are still caught
+  /// by the error listener + reconnect supervisor.
+  ///
+  /// Defensive: failures of the confirmation plumbing itself must never
+  /// fail a good open — they degrade to "assume alive".
+  Future<void> _confirmStreamAlive(
+      Player player, String cameraName, String label) async {
+    final subs = <StreamSubscription<dynamic>>[];
+    String? failure;
+    try {
+      final completer = Completer<String?>();
+      subs.add(player.stream.error.listen((e) {
+        if (!completer.isCompleted) completer.complete(e.toString());
+      }));
+      subs.add(player.stream.audioParams.listen((p) {
+        if ((p.sampleRate ?? 0) > 0 && !completer.isCompleted) {
+          completer.complete(null);
+        }
+      }));
+      failure = await completer.future
+          .timeout(_openConfirmGrace, onTimeout: () => null);
+    } catch (e) {
+      appLog('AUDIO',
+          '$cameraName: liveness check error (assuming alive): $e');
+      failure = null;
+    } finally {
+      for (final s in subs) {
+        try {
+          unawaited(s.cancel());
+        } catch (_) {}
+      }
+    }
+    if (failure != null) {
+      throw StateError('$label candidate errored right after open: $failure');
+    }
+  }
+
+  /// Build the ordered [local, remote, override] candidate list for
+  /// [quality] from a camera's quality maps. Local always comes first so
   /// every (re)connect cycle re-prefers the LAN stream when it's reachable.
   /// Falls back to the camera's activeStreamUrl when the quality maps are
   /// empty (defensive — should not happen in practice). Never throws.
-  List<({String label, String url})> _candidatesFor(
-      CameraAudioState cam, String? quality) {
-    final candidates = <({String label, String url})>[];
-    try {
-      if (quality != null) {
-        final local = cam.availableQualities[quality];
-        final remote = cam.remoteQualities[quality];
-        if (local != null && local.isNotEmpty) {
-          candidates.add((label: 'local', url: local));
-        }
-        if (remote != null && remote.isNotEmpty && remote != local) {
-          candidates.add((label: 'remote', url: remote));
-        }
-      }
-      if (candidates.isEmpty) {
-        final active = cam.activeStreamUrl;
-        if (active != null && active.isNotEmpty) {
-          candidates.add((label: 'active', url: active));
-        }
-      }
-    } catch (e) {
-      appLog('AUDIO',
-          '${cam.cameraId}: building candidate list failed (non-fatal): $e');
-    }
-    return candidates;
-  }
+  List<StreamCandidate> _candidatesFor(CameraAudioState cam, String? quality) =>
+      orderedStreamCandidates(
+        local: cam.availableQualities,
+        remote: cam.remoteQualities,
+        cameraRemote: cam.overrideQualities,
+        quality: quality,
+        activeUrl: cam.activeStreamUrl,
+      );
 
   /// Open [url] on [player] with a hard [timeout] so a dead address can't
   /// hang the caller.
@@ -437,16 +476,19 @@ class AudioPlayerNotifier extends AsyncNotifier<MonitoringState> {
     );
   }
 
-  /// Try [candidates] in order and return the first one that opens.
+  /// Try [candidates] in order and return the first one that opens AND shows
+  /// signs of life within the confirmation grace window (see
+  /// [_confirmStreamAlive] — open() alone resolving is not proof the RTSP
+  /// connection succeeded).
   ///
   /// Every candidate failure is caught and logged individually — nothing is
   /// rethrown mid-loop, so a dead local address can never kill the attempt at
   /// the remote address (CLAUDE.md defensive-error-handling rule). Throws the
   /// last failure only when ALL candidates fail.
-  Future<({String label, String url})> _openFirstCandidate(
+  Future<StreamCandidate> _openFirstCandidate(
     Player player,
     String cameraName,
-    List<({String label, String url})> candidates,
+    List<StreamCandidate> candidates,
     Duration timeout,
   ) async {
     Object? lastError;
@@ -455,6 +497,7 @@ class AudioPlayerNotifier extends AsyncNotifier<MonitoringState> {
         appLog('AUDIO',
             '$cameraName: opening ${cand.label} candidate: ${cand.url}');
         await _openWithTimeout(player, cand.url, timeout);
+        await _confirmStreamAlive(player, cameraName, cand.label);
         appLog('AUDIO', '$cameraName: connected via ${cand.label} candidate');
         return cand;
       } catch (e) {
@@ -540,31 +583,50 @@ class AudioPlayerNotifier extends AsyncNotifier<MonitoringState> {
           ? raw
           : resolveStreamUrl(raw, useRtsp: settings.useRtsp);
 
+      // The integration API embeds the console's own LAN IP in the RTSPS
+      // URLs it returns, regardless of which address the API was reached
+      // through. When the console is configured via a different address
+      // (e.g. a Tailscale hostname), that embedded IP is unreachable — so
+      // point the local candidates at the configured console address.
+      // Manual cameras keep their user-entered URL verbatim. Defensive:
+      // rewriteStreamUrlHosts never throws and degrades to the API URLs.
+      var localUrls = camera.rtspsStreamUrls;
+      if (!camera.isManual) {
+        localUrls = rewriteStreamUrlHosts(
+            localUrls, ref.read(authNotifierProvider).value?.host);
+      }
+
       final quality = camera.defaultQuality;
-      final rtspsUrl = camera.defaultStreamUrl;
+      final rtspsUrl = quality != null ? localUrls[quality] : null;
       final url = rtspsUrl != null ? resolveFor(rtspsUrl) : null;
 
       // Remote (VPN/Tailscale) candidates, parallel to availableQualities.
-      // Unifi cameras: derive by swapping the API URL's host to the console's
-      // remote host (still run through resolveFor so useRtsp handling matches
-      // the local candidate). Manual cameras: use camera.remoteUrl verbatim,
-      // matching the existing manual-camera convention of no URL rewriting.
+      // Two tiers, tried after the local candidate:
+      //  - remoteQualities: the stream URLs re-pointed at the globally
+      //    configured remote host — Unifi AND manual cameras. Covers
+      //    NVR-style setups where all streams are served from one host
+      //    (still run through resolveFor so Unifi useRtsp handling matches
+      //    the local candidate; resolveFor is a no-op for manual cameras).
+      //  - overrideQualities: the camera's own remote URL, verbatim (manual
+      //    cameras only), for cameras whose remote address doesn't follow
+      //    the global host swap.
       // Defensive: any failure here degrades to "no remote fallback" — it
       // must never prevent the local stream from starting.
       var remoteQualities = const <String, String>{};
+      var overrideQualities = const <String, String>{};
       try {
+        final remoteHost = ref.read(authNotifierProvider).value?.remoteHost;
+        if (remoteHost != null && remoteHost.isNotEmpty) {
+          remoteQualities = camera.rtspsStreamUrls.map(
+            (k, v) => MapEntry(k, resolveFor(replaceUrlHost(v, remoteHost))),
+          );
+        }
         if (camera.isManual) {
           final remoteUrl = camera.remoteUrl;
           if (remoteUrl != null && remoteUrl.isNotEmpty) {
-            remoteQualities = {'stream': remoteUrl};
-          }
-        } else {
-          final remoteHost =
-              ref.read(authNotifierProvider).value?.remoteHost;
-          if (remoteHost != null && remoteHost.isNotEmpty) {
-            remoteQualities = camera.rtspsStreamUrls.map(
-              (k, v) => MapEntry(k, resolveFor(replaceUrlHost(v, remoteHost))),
-            );
+            overrideQualities = {
+              for (final k in camera.rtspsStreamUrls.keys) k: remoteUrl,
+            };
           }
         }
       } catch (e) {
@@ -576,10 +638,11 @@ class AudioPlayerNotifier extends AsyncNotifier<MonitoringState> {
         cameraId: camera.id,
         cameraName: cameraName,
         connectionStatus: CameraConnectionStatus.connecting,
-        availableQualities: camera.rtspsStreamUrls.map(
+        availableQualities: localUrls.map(
           (k, v) => MapEntry(k, resolveFor(v)),
         ),
         remoteQualities: remoteQualities,
+        overrideQualities: overrideQualities,
         activeQuality: quality,
         activeStreamUrl: url,
         mac: camera.mac,
@@ -614,23 +677,27 @@ class AudioPlayerNotifier extends AsyncNotifier<MonitoringState> {
         _players[camera.id] = player;
         _listenToPlayer(player, cameraName, camera.id);
 
-        // Ordered candidate list: local first, remote as fallback. First
-        // success wins; each candidate failure is caught + logged inside
-        // _openFirstCandidate, never rethrown mid-loop. The error state below
-        // is reached only when ALL candidates fail.
-        final remoteCandidate =
-            quality != null ? remoteQualities[quality] : null;
-        final candidates = <({String label, String url})>[
-          (label: 'local', url: url),
-          if (remoteCandidate != null &&
-              remoteCandidate.isNotEmpty &&
-              remoteCandidate != url)
-            (label: 'remote', url: remoteCandidate),
-        ];
+        // Ordered candidate list: local first, then global-remote rewrite,
+        // then the camera's own remote URL. First success wins; each
+        // candidate failure is caught + logged inside _openFirstCandidate,
+        // never rethrown mid-loop. The error state below is reached only
+        // when ALL candidates fail.
+        final candidates = _candidatesFor(camState, quality);
         appLog('AUDIO',
             'Opening stream ($quality, ${candidates.length} candidate(s)): $url');
-        final winner = await _openFirstCandidate(
-            player, cameraName, candidates, _candidateOpenTimeout);
+        _openingCameras.add(camera.id);
+        StreamCandidate winner;
+        try {
+          winner = await _openFirstCandidate(
+              player, cameraName, candidates, _candidateOpenTimeout);
+        } finally {
+          _openingCameras.remove(camera.id);
+        }
+        // Errors from losing candidates already kicked the supervisor —
+        // drop any pending retry now that a candidate is confirmed alive.
+        try {
+          _reconnectSupervisor.cancel(camera.id);
+        } catch (_) {}
 
         // Disable video after open if not previewing (audio-only mode).
         if (!videoPreview) {
@@ -955,6 +1022,24 @@ class AudioPlayerNotifier extends AsyncNotifier<MonitoringState> {
       throw StateError('No active stream URL for $cameraId');
     }
 
+    // A retry timer can fire while a previous (long) candidate loop is still
+    // running — bail out and let the supervisor reschedule with backoff
+    // instead of running two stop+reopen cycles against the same player.
+    if (!_openingCameras.add(cameraId)) {
+      throw StateError('open already in progress for $cameraId');
+    }
+    try {
+      await _performReconnectOpenLocked(cameraId, player, candidates);
+    } finally {
+      _openingCameras.remove(cameraId);
+    }
+  }
+
+  Future<void> _performReconnectOpenLocked(
+    String cameraId,
+    Player player,
+    List<StreamCandidate> candidates,
+  ) async {
     final nativePlayer = player.platform as NativePlayer;
     // Capture the user's current video preference BEFORE stop() so reconnect
     // doesn't silently disable a preview the user had toggled on.
@@ -1294,16 +1379,9 @@ class AudioPlayerNotifier extends AsyncNotifier<MonitoringState> {
     if (player == null) return;
 
     // Same ordered-candidate approach as startMonitoring/reconnect: local
-    // candidate from availableQualities, remote from remoteQualities, local
-    // first. Error state only when ALL candidates fail.
-    final remoteCandidate = camState.remoteQualities[quality];
-    final candidates = <({String label, String url})>[
-      (label: 'local', url: url),
-      if (remoteCandidate != null &&
-          remoteCandidate.isNotEmpty &&
-          remoteCandidate != url)
-        (label: 'remote', url: remoteCandidate),
-    ];
+    // first, then global-remote rewrite, then the camera's own remote URL.
+    // Error state only when ALL candidates fail.
+    final candidates = _candidatesFor(camState, quality);
 
     appLog('AUDIO',
         'Switching ${camState.cameraName} to $quality (${candidates.length} candidate(s)): $url');
@@ -1318,8 +1396,19 @@ class AudioPlayerNotifier extends AsyncNotifier<MonitoringState> {
     ));
 
     try {
-      final winner = await _openFirstCandidate(
-          player, camState.cameraName, candidates, _candidateOpenTimeout);
+      _openingCameras.add(camState.cameraId);
+      StreamCandidate winner;
+      try {
+        winner = await _openFirstCandidate(
+            player, camState.cameraName, candidates, _candidateOpenTimeout);
+      } finally {
+        _openingCameras.remove(camState.cameraId);
+      }
+      // Errors from losing candidates already kicked the supervisor —
+      // drop any pending retry now that a candidate is confirmed alive.
+      try {
+        _reconnectSupervisor.cancel(camState.cameraId);
+      } catch (_) {}
       final updated = state.value!;
       state = AsyncData(updated.copyWithCamera(
         cameraIndex,

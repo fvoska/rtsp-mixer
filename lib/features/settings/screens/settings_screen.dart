@@ -112,7 +112,7 @@ class SettingsScreen extends ConsumerWidget {
                 ),
               ),
             ),
-            if (isUnifiMode) ...[
+            if (isUnifiMode)
               ListTile(
                 leading: const Icon(Icons.lan_outlined),
                 title: const Text('Console local address'),
@@ -122,17 +122,25 @@ class SettingsScreen extends ConsumerWidget {
                 ),
                 onTap: () => _editLocalHost(context, ref, authState.host),
               ),
-              ListTile(
-                leading: const Icon(Icons.vpn_lock_outlined),
-                title: const Text('Console remote URL'),
-                subtitle: Text(
-                  authState.remoteHost ?? 'Not set',
-                  style: theme.textTheme.bodySmall,
-                ),
-                onTap: () =>
-                    _editRemoteHost(context, ref, authState.remoteHost),
+            // Global remote address — in Unifi mode it's the console's
+            // remote URL; in manual mode it rehosts every camera's stream
+            // URL as a fallback candidate (NVR-style setups).
+            ListTile(
+              leading: const Icon(Icons.vpn_lock_outlined),
+              title: Text(
+                isUnifiMode ? 'Console remote URL' : 'Remote address',
               ),
-            ],
+              subtitle: Text(
+                authState?.remoteHost ?? 'Not set',
+                style: theme.textTheme.bodySmall,
+              ),
+              onTap: () => _editRemoteHost(
+                context,
+                ref,
+                authState?.remoteHost,
+                isUnifiMode: isUnifiMode,
+              ),
+            ),
             if (manualCameras.isNotEmpty) ...[
               Padding(
                 padding: const EdgeInsets.fromLTRB(
@@ -211,14 +219,22 @@ class SettingsScreen extends ConsumerWidget {
   }
 
   Future<void> _editRemoteHost(
-      BuildContext context, WidgetRef ref, String? current) async {
+    BuildContext context,
+    WidgetRef ref,
+    String? current, {
+    required bool isUnifiMode,
+  }) async {
     final result = await _showEditAddressDialog(
       context,
-      title: 'Console remote URL',
+      title: isUnifiMode ? 'Console remote URL' : 'Remote address',
       initialValue: current,
       hint: '100.64.0.9 or nvr.tailnet.ts.net',
-      helperText: 'VPN/Tailscale address tried when the local address is '
-          'unreachable. Leave empty or Clear to remove.',
+      helperText: isUnifiMode
+          ? 'VPN/Tailscale address tried when the local address is '
+              'unreachable. Leave empty or Clear to remove.'
+          : 'VPN/Tailscale address of the NVR/host serving your streams. '
+              'Camera URLs are re-pointed at it when the local address is '
+              'unreachable. Leave empty or Clear to remove.',
       allowClear: true,
     );
     if (result == null) return;

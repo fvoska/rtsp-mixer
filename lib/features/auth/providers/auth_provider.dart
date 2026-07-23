@@ -45,9 +45,13 @@ class AuthNotifier extends AsyncNotifier<AuthState> {
       final mode = await storage.loadAuthMode();
       if (mode == 'manual') {
         appLog('AUTH', 'Manual mode (no Unifi credentials)');
+        final remoteHost = await _loadRemoteHostSafe(storage);
         await ref.read(cameraNotifierProvider.notifier).loadCameras();
         final wasMonitoring = await storage.read('was_monitoring') == 'true';
-        return AuthState.manual(resumeMonitoring: wasMonitoring);
+        return AuthState.manual(
+          remoteHost: remoteHost,
+          resumeMonitoring: wasMonitoring,
+        );
       }
       appLog('AUTH', 'No saved credentials');
       return const AuthState.unauthenticated();
@@ -244,13 +248,19 @@ class AuthNotifier extends AsyncNotifier<AuthState> {
       appLog('AUTH', 'Failed to persist remote host (continuing): $e');
     }
     final current = state.value;
-    if (current != null && current.isAuthenticated && !current.isManualMode) {
-      state = AsyncData(AuthState.authenticated(
-        host: current.host,
-        remoteHost: normalized,
-        resumeMonitoring: current.resumeMonitoring,
-      ));
+    if (current != null && current.isAuthenticated) {
+      state = AsyncData(current.isManualMode
+          ? AuthState.manual(
+              remoteHost: normalized,
+              resumeMonitoring: current.resumeMonitoring,
+            )
+          : AuthState.authenticated(
+              host: current.host,
+              remoteHost: normalized,
+              resumeMonitoring: current.resumeMonitoring,
+            ));
     }
+    // No-op in manual mode (host is null) — manual cameras need no API reload.
     await _reloadCamerasSafe(current?.host);
   }
 
@@ -300,7 +310,10 @@ class AuthNotifier extends AsyncNotifier<AuthState> {
     if (current == null || !current.isAuthenticated) return;
     if (!current.resumeMonitoring) return;
     state = AsyncData(current.isManualMode
-        ? const AuthState.manual(resumeMonitoring: false)
+        ? AuthState.manual(
+            remoteHost: current.remoteHost,
+            resumeMonitoring: false,
+          )
         : AuthState.authenticated(
             host: current.host,
             remoteHost: current.remoteHost,
