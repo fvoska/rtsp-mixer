@@ -125,16 +125,10 @@ class HelpScreen extends StatelessWidget {
                   icon: Icons.vpn_lock_outlined,
                   title: 'Remote access (VPN / Tailscale)',
                   children: [
-                    _Note('A Remote URL is a second address for the same '
-                        'console or camera, reachable over a VPN — so the '
-                        'monitor keeps working when your phone is away from '
-                        'the home network.'),
-                    _Note('Connections always prefer the local address and '
-                        'fall back to the remote one only when local is '
-                        'unreachable. A connection fails only when BOTH '
-                        'addresses fail, and monitoring automatically '
-                        'recovers to the local stream when you are back '
-                        'home.'),
+                    _Note('A remote address is a second way to reach the '
+                        'same console or camera over a VPN — so the monitor '
+                        'keeps working when your phone is away from the '
+                        'home network.'),
                     _Note('Works with Tailscale, WireGuard, or any VPN that '
                         'makes your camera network routable from your '
                         'phone.'),
@@ -147,13 +141,20 @@ class HelpScreen extends StatelessWidget {
                         'Connection and set "Console remote URL" to the '
                         'console\'s VPN address (e.g. 100.64.0.9 or '
                         'nvr.tailnet.ts.net).'),
-                    _Step(3, 'For a manually-added camera: enter the '
-                        '"Remote URL" in the Add camera dialog, or edit it '
-                        'later under Settings → Connection → Camera remote '
-                        'URLs.'),
+                    _Step(3, 'For manually-added cameras served from one '
+                        'host (an NVR, or cameras on one machine): set '
+                        '"Remote address" under Settings → Connection. '
+                        'Every camera\'s stream URL is re-pointed at it '
+                        'when the local address is unreachable — no '
+                        'per-camera setup needed.'),
+                    _Step(4, 'For a manual camera with its own unique '
+                        'remote address: enter the "Remote URL" in the Add '
+                        'camera dialog, or edit it later under Settings → '
+                        'Connection → Camera remote URLs. It is used '
+                        'exactly as entered.'),
                     SizedBox(height: Spacing.sm),
                     _UrlExample(
-                      label: 'Example manual-camera remote URL (Tailscale):',
+                      label: 'Example per-camera remote URL (Tailscale):',
                       url: 'rtsp://100.64.0.9:554/stream1',
                     ),
                     _Note('Set the app up while away from home? Enter the '
@@ -164,6 +165,47 @@ class HelpScreen extends StatelessWidget {
                         'cost compared to the local network — expect a '
                         'slightly delayed and less efficient stream while '
                         'remote.'),
+                  ],
+                ),
+                const SizedBox(height: Spacing.md),
+                const _HelpSection(
+                  icon: Icons.alt_route_outlined,
+                  title: 'How the app picks an address',
+                  children: [
+                    _Note('Every time a stream connects — at start, after a '
+                        'drop, and on quality changes — the app tries up to '
+                        'three addresses in order and plays the first one '
+                        'that actually delivers data:'),
+                    SizedBox(height: Spacing.sm),
+                    _Step(1, 'Local address. For manual cameras this is the '
+                        'URL you entered. For UniFi cameras the console '
+                        'reports stream addresses that point at its own LAN '
+                        'IP — the app re-points them at the console address '
+                        'you connected with, so streaming works even when '
+                        'you signed in via a VPN hostname.'),
+                    _Step(2, 'Global remote address. The same stream URL '
+                        're-pointed at the remote address from Settings → '
+                        'Connection ("Console remote URL" for UniFi, '
+                        '"Remote address" in manual mode). Ideal when one '
+                        'host serves every stream — a UniFi console or any '
+                        'NVR.'),
+                    _Step(3, 'Per-camera Remote URL (manual cameras only). '
+                        'Used exactly as entered — for cameras whose remote '
+                        'address doesn\'t follow the global one, e.g. each '
+                        'camera has its own VPN address.'),
+                    SizedBox(height: Spacing.sm),
+                    _Note('An address counts as connected only once the '
+                        'stream shows signs of life — a connection that is '
+                        'refused or dies right after opening moves on to '
+                        'the next address within seconds.'),
+                    _Note('Addresses that are not set (or duplicates of an '
+                        'earlier one) are skipped. A camera is marked as '
+                        'failed only when every address fails — and the '
+                        'app keeps retrying forever with increasing '
+                        'backoff.'),
+                    _Note('Reconnects always start from the local address '
+                        'again, so when you come back home the stream '
+                        'automatically returns to the fast LAN path.'),
                   ],
                 ),
                 const SizedBox(height: Spacing.md),
@@ -196,7 +238,9 @@ class HelpScreen extends StatelessWidget {
   }
 }
 
-/// A card with an icon header and a list of steps/notes below it.
+/// A collapsible card (accordion) with an icon header and a list of
+/// steps/notes inside. Sections start collapsed so the page stays scannable
+/// as guides accumulate; tap a header to expand one topic at a time.
 class _HelpSection extends StatelessWidget {
   const _HelpSection({
     required this.icon,
@@ -213,24 +257,22 @@ class _HelpSection extends StatelessWidget {
     final theme = Theme.of(context);
     return Card(
       margin: EdgeInsets.zero,
-      child: Padding(
-        padding: const EdgeInsets.all(Spacing.md),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Row(
-              children: [
-                Icon(icon, color: theme.colorScheme.primary),
-                const SizedBox(width: Spacing.sm),
-                Expanded(
-                  child: Text(title, style: theme.textTheme.titleMedium),
-                ),
-              ],
-            ),
-            const SizedBox(height: Spacing.md),
-            ...children,
-          ],
+      clipBehavior: Clip.antiAlias,
+      child: ExpansionTile(
+        leading: Icon(icon, color: theme.colorScheme.primary),
+        title: Text(title, style: theme.textTheme.titleMedium),
+        // Kill the divider lines ExpansionTile draws when expanded — the
+        // Card already provides the visual boundary.
+        shape: const Border(),
+        collapsedShape: const Border(),
+        childrenPadding: const EdgeInsets.fromLTRB(
+          Spacing.md,
+          0,
+          Spacing.md,
+          Spacing.md,
         ),
+        expandedCrossAxisAlignment: CrossAxisAlignment.stretch,
+        children: children,
       ),
     );
   }
