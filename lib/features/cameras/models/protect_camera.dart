@@ -24,10 +24,12 @@ class ProtectCamera {
   /// Manual cameras store their single URL under the `stream` key.
   final Map<String, String> rtspsStreamUrls;
 
-  /// Optional remote (VPN/Tailscale) stream URL for manual cameras. Playback
-  /// prefers the local URL and falls back to this when the local address is
-  /// unreachable. Always null for Unifi cameras — their remote candidates are
-  /// derived from the console's remote host at playback time.
+  /// Optional remote (VPN/Tailscale) stream URL for manual cameras, used
+  /// verbatim as the last playback candidate — after the local URL and after
+  /// the global remote-host rewrite. Covers cameras whose remote address
+  /// doesn't follow the global host swap. Always null for Unifi cameras —
+  /// their remote candidates are derived from the console's remote host at
+  /// playback time.
   final String? remoteUrl;
 
   const ProtectCamera({

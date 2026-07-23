@@ -11,9 +11,11 @@ class AuthState {
   final AuthMode mode;
   final String? host;
 
-  /// Optional remote (VPN/Tailscale) address for the Unifi console. Tried as
-  /// a fallback whenever [host] (the local address) is unreachable. Always
-  /// null in manual and unauthenticated states.
+  /// Optional remote (VPN/Tailscale) address. In Unifi mode it's the
+  /// console's remote address, tried whenever [host] (the local address) is
+  /// unreachable. In manual mode it's a global fallback host: manual stream
+  /// URLs are re-pointed at it as an extra playback candidate. Always null
+  /// when unauthenticated.
   final String? remoteHost;
   final String? errorMessage;
   final AppErrorType? errorType;
@@ -36,12 +38,12 @@ class AuthState {
         errorType = null;
 
   /// Authenticated in manual-only mode: no Unifi console, no host. Cameras
-  /// come entirely from manually-entered RTSP URLs.
-  const AuthState.manual({this.resumeMonitoring = false})
+  /// come entirely from manually-entered RTSP URLs. [remoteHost] optionally
+  /// holds the global remote (VPN/Tailscale) fallback address.
+  const AuthState.manual({this.remoteHost, this.resumeMonitoring = false})
       : status = AuthStatus.authenticated,
         mode = AuthMode.manual,
         host = null,
-        remoteHost = null,
         errorMessage = null,
         errorType = null;
 
