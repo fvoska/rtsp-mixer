@@ -510,6 +510,16 @@ class _StatusBanner extends StatelessWidget {
         isReconnecting ? 'Reconnecting…' : (errorMessage ?? 'Stream failed');
     final int maxLines = isReconnecting ? 1 : 3;
 
+    // Optically center the 14x14 leading box on the FIRST text line. Deriving
+    // the single-line height from the label's TextStyle keeps the icon aligned
+    // to line one for the multi-line error case (rather than the block center),
+    // while still centering the single-line reconnecting label.
+    final TextStyle? labelStyle = theme.textTheme.bodyMedium;
+    final double? labelFontSize = labelStyle?.fontSize;
+    final double firstLineHeight = labelFontSize != null
+        ? labelFontSize * (labelStyle?.height ?? 1.0)
+        : 20.0;
+
     return Container(
       key: const ValueKey('status-banner'),
       width: double.infinity,
@@ -521,7 +531,13 @@ class _StatusBanner extends StatelessWidget {
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          SizedBox(width: 14, height: 14, child: Center(child: leading)),
+          SizedBox(
+            height: firstLineHeight,
+            child: Center(
+              child:
+                  SizedBox(width: 14, height: 14, child: Center(child: leading)),
+            ),
+          ),
           const SizedBox(width: Spacing.xs),
           Expanded(
             child: Text(
@@ -589,6 +605,10 @@ class _StatusLine extends StatelessWidget {
       children: [
         const SizedBox(height: Spacing.xs),
         Row(
+          // The label is always single-line here, so centering the 14x14
+          // leading box against the taller text line-box optically centers
+          // the spinner/icon with its label.
+          crossAxisAlignment: CrossAxisAlignment.center,
           children: [
             SizedBox(width: 14, height: 14, child: Center(child: leading)),
             const SizedBox(width: Spacing.xs),
