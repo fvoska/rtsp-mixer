@@ -140,6 +140,10 @@ class ReconnectSupervisor {
       '$cameraId: scheduling retry in ${delay.inMilliseconds}ms (attempt=${st.attempt})',
     );
     st.retryTimer = Timer(delay, () async {
+      // The attempt owns the camera while it runs: stream errors emitted by
+      // losing candidates during the attempt must be suppressed as
+      // duplicates, not schedule parallel retries.
+      st.inFlight = true;
       try {
         await _attemptReconnect(cameraId);
       } catch (e, stack) {
@@ -156,6 +160,8 @@ class ReconnectSupervisor {
             '$cameraId: scheduling itself failed — relying on stream.error fallback',
           );
         }
+      } finally {
+        st.inFlight = false;
       }
     });
   }
@@ -164,8 +170,11 @@ class ReconnectSupervisor {
     final st = _perCamera.putIfAbsent(cameraId, () => _ReconnectState());
     try {
       await onAttempt(cameraId);
-      // Success: reset backoff, record recovery.
+      // Success: reset backoff, record recovery. Cancel any stale duplicate
+      // retry scheduled by triggers that raced this attempt — a healthy
+      // stream must not be stop+reopened by a leftover timer.
       st.attempt = 0;
+      st.retryTimer?.cancel();
       st.firstDropAt = null;
       onStatusChange(cameraId, ReconnectStatus.playing);
       onEvent(ReconnectEventType.reconnectSuccess, cameraId, null);

@@ -393,6 +393,62 @@ class AudioPlayerNotifier extends AsyncNotifier<MonitoringState> {
   /// the pre-existing 15s reconnect timeout).
   static const _reconnectOpenTimeout = Duration(seconds: 15);
 
+  /// Grace window after a successful open() during which we wait for
+  /// evidence the stream is actually alive. media_kit's open() resolves once
+  /// the media is queued — BEFORE the RTSP connection is established — so a
+  /// fast failure (e.g. "connection refused") surfaces on the error stream a
+  /// moment AFTER open() reports success. Without this window a dead
+  /// candidate would be declared the winner on every cycle and later
+  /// candidates would never get a turn.
+  static const _openConfirmGrace = Duration(seconds: 4);
+
+  /// Cameras with an open/candidate loop currently running. Guards against
+  /// a supervisor retry timer firing mid-attempt and running a second
+  /// stop+reopen concurrently against the same player.
+  final Set<String> _openingCameras = {};
+
+  /// Wait for evidence that the stream just opened on [player] is actually
+  /// alive: audioParams arriving (the audio decoder configured itself from
+  /// real stream data) confirms it; an error event within the grace window
+  /// disqualifies it (throws). No signal within [_openConfirmGrace] is
+  /// treated as alive — streams without an audio track (mic-disabled
+  /// cameras) never emit audioParams, and later failures are still caught
+  /// by the error listener + reconnect supervisor.
+  ///
+  /// Defensive: failures of the confirmation plumbing itself must never
+  /// fail a good open — they degrade to "assume alive".
+  Future<void> _confirmStreamAlive(
+      Player player, String cameraName, String label) async {
+    final subs = <StreamSubscription<dynamic>>[];
+    String? failure;
+    try {
+      final completer = Completer<String?>();
+      subs.add(player.stream.error.listen((e) {
+        if (!completer.isCompleted) completer.complete(e.toString());
+      }));
+      subs.add(player.stream.audioParams.listen((p) {
+        if ((p.sampleRate ?? 0) > 0 && !completer.isCompleted) {
+          completer.complete(null);
+        }
+      }));
+      failure = await completer.future
+          .timeout(_openConfirmGrace, onTimeout: () => null);
+    } catch (e) {
+      appLog('AUDIO',
+          '$cameraName: liveness check error (assuming alive): $e');
+      failure = null;
+    } finally {
+      for (final s in subs) {
+        try {
+          unawaited(s.cancel());
+        } catch (_) {}
+      }
+    }
+    if (failure != null) {
+      throw StateError('$label candidate errored right after open: $failure');
+    }
+  }
+
   /// Build the ordered [local, remote, override] candidate list for
   /// [quality] from a camera's quality maps. Local always comes first so
   /// every (re)connect cycle re-prefers the LAN stream when it's reachable.
@@ -420,16 +476,19 @@ class AudioPlayerNotifier extends AsyncNotifier<MonitoringState> {
     );
   }
 
-  /// Try [candidates] in order and return the first one that opens.
+  /// Try [candidates] in order and return the first one that opens AND shows
+  /// signs of life within the confirmation grace window (see
+  /// [_confirmStreamAlive] — open() alone resolving is not proof the RTSP
+  /// connection succeeded).
   ///
   /// Every candidate failure is caught and logged individually — nothing is
   /// rethrown mid-loop, so a dead local address can never kill the attempt at
   /// the remote address (CLAUDE.md defensive-error-handling rule). Throws the
   /// last failure only when ALL candidates fail.
-  Future<({String label, String url})> _openFirstCandidate(
+  Future<StreamCandidate> _openFirstCandidate(
     Player player,
     String cameraName,
-    List<({String label, String url})> candidates,
+    List<StreamCandidate> candidates,
     Duration timeout,
   ) async {
     Object? lastError;
@@ -438,6 +497,7 @@ class AudioPlayerNotifier extends AsyncNotifier<MonitoringState> {
         appLog('AUDIO',
             '$cameraName: opening ${cand.label} candidate: ${cand.url}');
         await _openWithTimeout(player, cand.url, timeout);
+        await _confirmStreamAlive(player, cameraName, cand.label);
         appLog('AUDIO', '$cameraName: connected via ${cand.label} candidate');
         return cand;
       } catch (e) {
@@ -625,8 +685,19 @@ class AudioPlayerNotifier extends AsyncNotifier<MonitoringState> {
         final candidates = _candidatesFor(camState, quality);
         appLog('AUDIO',
             'Opening stream ($quality, ${candidates.length} candidate(s)): $url');
-        final winner = await _openFirstCandidate(
-            player, cameraName, candidates, _candidateOpenTimeout);
+        _openingCameras.add(camera.id);
+        StreamCandidate winner;
+        try {
+          winner = await _openFirstCandidate(
+              player, cameraName, candidates, _candidateOpenTimeout);
+        } finally {
+          _openingCameras.remove(camera.id);
+        }
+        // Errors from losing candidates already kicked the supervisor —
+        // drop any pending retry now that a candidate is confirmed alive.
+        try {
+          _reconnectSupervisor.cancel(camera.id);
+        } catch (_) {}
 
         // Disable video after open if not previewing (audio-only mode).
         if (!videoPreview) {
@@ -951,6 +1022,24 @@ class AudioPlayerNotifier extends AsyncNotifier<MonitoringState> {
       throw StateError('No active stream URL for $cameraId');
     }
 
+    // A retry timer can fire while a previous (long) candidate loop is still
+    // running — bail out and let the supervisor reschedule with backoff
+    // instead of running two stop+reopen cycles against the same player.
+    if (!_openingCameras.add(cameraId)) {
+      throw StateError('open already in progress for $cameraId');
+    }
+    try {
+      await _performReconnectOpenLocked(cameraId, player, candidates);
+    } finally {
+      _openingCameras.remove(cameraId);
+    }
+  }
+
+  Future<void> _performReconnectOpenLocked(
+    String cameraId,
+    Player player,
+    List<StreamCandidate> candidates,
+  ) async {
     final nativePlayer = player.platform as NativePlayer;
     // Capture the user's current video preference BEFORE stop() so reconnect
     // doesn't silently disable a preview the user had toggled on.
@@ -1307,8 +1396,19 @@ class AudioPlayerNotifier extends AsyncNotifier<MonitoringState> {
     ));
 
     try {
-      final winner = await _openFirstCandidate(
-          player, camState.cameraName, candidates, _candidateOpenTimeout);
+      _openingCameras.add(camState.cameraId);
+      StreamCandidate winner;
+      try {
+        winner = await _openFirstCandidate(
+            player, camState.cameraName, candidates, _candidateOpenTimeout);
+      } finally {
+        _openingCameras.remove(camState.cameraId);
+      }
+      // Errors from losing candidates already kicked the supervisor —
+      // drop any pending retry now that a candidate is confirmed alive.
+      try {
+        _reconnectSupervisor.cancel(camState.cameraId);
+      } catch (_) {}
       final updated = state.value!;
       state = AsyncData(updated.copyWithCamera(
         cameraIndex,
