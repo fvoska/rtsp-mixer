@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.5.1](https://github.com/fvoska/rtsp-mixer/compare/v1.5.0...v1.5.1) (2026-07-23)
+
+
+### Bug Fixes
+
+* **monitoring:** point stream candidates at the configured console host ([#21](https://github.com/fvoska/rtsp-mixer/issues/21)) ([7990cee](https://github.com/fvoska/rtsp-mixer/commit/7990cee2ff4f67c65bfce28c5eef585b8d62269b))
+
 ## [1.5.0](https://github.com/fvoska/rtsp-mixer/compare/v1.4.0...v1.5.0) (2026-07-23)
 
 
