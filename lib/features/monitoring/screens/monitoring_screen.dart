@@ -521,11 +521,21 @@ String? _validateRtspUrl(String? v) {
   return null;
 }
 
-/// Prompt for a manual RTSP camera (name + URL) and add it on confirm.
+/// Validate an OPTIONAL RTSP/RTSPS URL field: empty is fine, but a non-empty
+/// value must be a valid rtsp:// or rtsps:// URL.
+String? _validateOptionalRtspUrl(String? v) {
+  final value = v?.trim() ?? '';
+  if (value.isEmpty) return null;
+  return _validateRtspUrl(value);
+}
+
+/// Prompt for a manual RTSP camera (name + URL + optional remote URL) and add
+/// it on confirm.
 Future<void> _showAddManualCameraDialog(
     BuildContext context, WidgetRef ref) async {
   final nameController = TextEditingController();
   final urlController = TextEditingController();
+  final remoteUrlController = TextEditingController();
   final formKey = GlobalKey<FormState>();
   try {
     final confirmed = await showDialog<bool>(
@@ -534,36 +544,53 @@ Future<void> _showAddManualCameraDialog(
         title: const Text('Add RTSP camera'),
         content: Form(
           key: formKey,
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              TextFormField(
-                controller: nameController,
-                decoration: const InputDecoration(
-                  labelText: 'Name (optional)',
-                  hintText: 'Nursery',
-                  border: OutlineInputBorder(),
+          child: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                TextFormField(
+                  controller: nameController,
+                  decoration: const InputDecoration(
+                    labelText: 'Name (optional)',
+                    hintText: 'Nursery',
+                    border: OutlineInputBorder(),
+                  ),
+                  textInputAction: TextInputAction.next,
                 ),
-                textInputAction: TextInputAction.next,
-              ),
-              const SizedBox(height: Spacing.md),
-              TextFormField(
-                controller: urlController,
-                autofocus: true,
-                decoration: const InputDecoration(
-                  labelText: 'RTSP URL',
-                  hintText: 'rtsp://192.168.1.50:554/stream',
-                  border: OutlineInputBorder(),
+                const SizedBox(height: Spacing.md),
+                TextFormField(
+                  controller: urlController,
+                  autofocus: true,
+                  decoration: const InputDecoration(
+                    labelText: 'RTSP URL',
+                    hintText: 'rtsp://192.168.1.50:554/stream',
+                    border: OutlineInputBorder(),
+                  ),
+                  autocorrect: false,
+                  validator: _validateRtspUrl,
+                  textInputAction: TextInputAction.next,
                 ),
-                autocorrect: false,
-                validator: _validateRtspUrl,
-                onFieldSubmitted: (_) {
-                  if (formKey.currentState!.validate()) {
-                    Navigator.of(ctx).pop(true);
-                  }
-                },
-              ),
-            ],
+                const SizedBox(height: Spacing.md),
+                TextFormField(
+                  controller: remoteUrlController,
+                  decoration: const InputDecoration(
+                    labelText: 'Remote URL (optional)',
+                    hintText: 'rtsp://100.64.0.9:554/stream',
+                    helperText: 'VPN/Tailscale fallback tried when the '
+                        'primary URL is unreachable.',
+                    helperMaxLines: 2,
+                    border: OutlineInputBorder(),
+                  ),
+                  autocorrect: false,
+                  validator: _validateOptionalRtspUrl,
+                  onFieldSubmitted: (_) {
+                    if (formKey.currentState!.validate()) {
+                      Navigator.of(ctx).pop(true);
+                    }
+                  },
+                ),
+              ],
+            ),
           ),
         ),
         actions: [
@@ -586,11 +613,13 @@ Future<void> _showAddManualCameraDialog(
       await ref.read(cameraNotifierProvider.notifier).addManualCamera(
             url: urlController.text,
             name: nameController.text,
+            remoteUrl: remoteUrlController.text,
           );
     }
   } finally {
     nameController.dispose();
     urlController.dispose();
+    remoteUrlController.dispose();
   }
 }
 

@@ -70,6 +70,12 @@ class CameraAudioState {
   final String? activeQuality;
   final String? activeStreamUrl;
   final Map<String, String> availableQualities;
+
+  /// Remote (VPN/Tailscale) stream URL per quality, parallel to
+  /// [availableQualities]. Empty when no remote address is configured.
+  /// Playback always tries the local candidate first and falls back to the
+  /// remote one; [activeStreamUrl] reflects whichever URL is actually in use.
+  final Map<String, String> remoteQualities;
   final StreamInfo streamInfo;
   final double audioLevel; // 0.0 (silence) to 1.0 (loud)
   final double audioActivity; // 0.0-1.0, relative change from baseline
@@ -96,6 +102,7 @@ class CameraAudioState {
     this.activeQuality,
     this.activeStreamUrl,
     this.availableQualities = const {},
+    this.remoteQualities = const {},
     this.streamInfo = const StreamInfo(),
     this.audioLevel = 0.0,
     this.audioActivity = 0.0,
@@ -116,6 +123,7 @@ class CameraAudioState {
     String? activeQuality,
     String? activeStreamUrl,
     Map<String, String>? availableQualities,
+    Map<String, String>? remoteQualities,
     StreamInfo? streamInfo,
     double? audioLevel,
     double? audioActivity,
@@ -133,6 +141,7 @@ class CameraAudioState {
         activeQuality: activeQuality ?? this.activeQuality,
         activeStreamUrl: activeStreamUrl ?? this.activeStreamUrl,
         availableQualities: availableQualities ?? this.availableQualities,
+        remoteQualities: remoteQualities ?? this.remoteQualities,
         streamInfo: streamInfo ?? this.streamInfo,
         audioLevel: audioLevel ?? this.audioLevel,
         audioActivity: audioActivity ?? this.audioActivity,

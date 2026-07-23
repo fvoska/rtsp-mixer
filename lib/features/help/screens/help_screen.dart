@@ -122,6 +122,52 @@ class HelpScreen extends StatelessWidget {
                 ),
                 const SizedBox(height: Spacing.md),
                 const _HelpSection(
+                  icon: Icons.vpn_lock_outlined,
+                  title: 'Remote access (VPN / Tailscale)',
+                  children: [
+                    _Note('A Remote URL is a second address for the same '
+                        'console or camera, reachable over a VPN — so the '
+                        'monitor keeps working when your phone is away from '
+                        'the home network.'),
+                    _Note('Connections always prefer the local address and '
+                        'fall back to the remote one only when local is '
+                        'unreachable. A connection fails only when BOTH '
+                        'addresses fail, and monitoring automatically '
+                        'recovers to the local stream when you are back '
+                        'home.'),
+                    _Note('Works with Tailscale, WireGuard, or any VPN that '
+                        'makes your camera network routable from your '
+                        'phone.'),
+                    SizedBox(height: Spacing.sm),
+                    _Step(1, 'Set up your VPN so the phone can reach the '
+                        'console or camera (e.g. install Tailscale on both '
+                        'ends, or enable a WireGuard tunnel on your '
+                        'router).'),
+                    _Step(2, 'For a UniFi console: open Settings → '
+                        'Connection and set "Console remote URL" to the '
+                        'console\'s VPN address (e.g. 100.64.0.9 or '
+                        'nvr.tailnet.ts.net).'),
+                    _Step(3, 'For a manually-added camera: enter the '
+                        '"Remote URL" in the Add camera dialog, or edit it '
+                        'later under Settings → Connection → Camera remote '
+                        'URLs.'),
+                    SizedBox(height: Spacing.sm),
+                    _UrlExample(
+                      label: 'Example manual-camera remote URL (Tailscale):',
+                      url: 'rtsp://100.64.0.9:554/stream1',
+                    ),
+                    _Note('Set the app up while away from home? Enter the '
+                        'VPN address first, then add the real local address '
+                        'later in Settings → Connection once you are back '
+                        'on your home network.'),
+                    _Note('Streaming over a VPN adds latency and battery '
+                        'cost compared to the local network — expect a '
+                        'slightly delayed and less efficient stream while '
+                        'remote.'),
+                  ],
+                ),
+                const SizedBox(height: Spacing.md),
+                const _HelpSection(
                   icon: Icons.tips_and_updates_outlined,
                   title: 'General RTSP tips',
                   children: [
