@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.5.0](https://github.com/fvoska/rtsp-mixer/compare/v1.4.0...v1.5.0) (2026-07-23)
+
+
+### Features
+
+* **monitoring:** redesign camera card with status banner for problem states ([#19](https://github.com/fvoska/rtsp-mixer/issues/19)) ([5a17b7f](https://github.com/fvoska/rtsp-mixer/commit/5a17b7f5c4d3a18bae91b367cdc94fc701f371c8))
+
 ## [1.4.0](https://github.com/fvoska/rtsp-mixer/compare/v1.3.0...v1.4.0) (2026-07-23)
 
 
