@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.7.0](https://github.com/fvoska/rtsp-mixer/compare/v1.6.0...v1.7.0) (2026-07-23)
+
+
+### Features
+
+* **monitoring:** quick-add cameras to a live session ([#25](https://github.com/fvoska/rtsp-mixer/issues/25)) ([7831f29](https://github.com/fvoska/rtsp-mixer/commit/7831f290bc38f5a8707057579ac06e95634bb54d))
+
+
+### Documentation
+
+* **conventions:** mandate deriving PR title/description from all branch commits ([#26](https://github.com/fvoska/rtsp-mixer/issues/26)) ([2e6bd49](https://github.com/fvoska/rtsp-mixer/commit/2e6bd497c09ab9725d5c7317da088f853ca9e70c))
+
 ## [1.6.0](https://github.com/fvoska/rtsp-mixer/compare/v1.5.1...v1.6.0) (2026-07-23)
 
 
