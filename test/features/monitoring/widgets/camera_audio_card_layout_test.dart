@@ -10,8 +10,11 @@ import 'package:rtsp_mixer/features/monitoring/widgets/camera_audio_card.dart';
 bool _wrapped(RenderParagraph rp) =>
     rp.size.height > rp.getMaxIntrinsicHeight(double.infinity) + 1.0;
 
-/// The only card text allowed to wrap is the full-sentence silence warning.
-bool _mayWrap(String data) => data.startsWith('No audio for');
+/// Multi-line text is only expected for the full-sentence silence warning and
+/// the (up-to-3-line) error banner copy. Every short status label
+/// (`Live`, `Connecting…`, `Reconnecting…`) must still be single-line.
+bool _mayWrap(String data) =>
+    data.startsWith('No audio for') || data.startsWith('Microphone is disabled');
 
 Future<void> _pumpCard(
   WidgetTester tester,
@@ -127,6 +130,15 @@ void main() {
   testWidgets('volume percentage never wraps (100%)', (tester) async {
     await _pumpCard(tester, scenarios['playing']!, 340);
     final rp = tester.renderObject<RenderParagraph>(find.text('100%'));
+    expect(_wrapped(rp), isFalse);
+  });
+
+  testWidgets('reconnecting @ 340dp renders full "Reconnecting…" single line',
+      (tester) async {
+    // Pins the fixed "Re…" truncation bug: on the narrowest live-card width the
+    // full label must render as one un-truncated line in its own banner.
+    await _pumpCard(tester, scenarios['reconnecting']!, 340);
+    final rp = tester.renderObject<RenderParagraph>(find.text('Reconnecting…'));
     expect(_wrapped(rp), isFalse);
   });
 }

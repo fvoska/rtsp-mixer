@@ -42,6 +42,25 @@ void main() {
     cameraName: 'Nursery',
     connectionStatus: CameraConnectionStatus.connecting,
   );
+  const error = CameraAudioState(
+    cameraId: 'cam1',
+    cameraName: 'Nursery',
+    connectionStatus: CameraConnectionStatus.error,
+    errorMessage: 'Stream failed',
+  );
+  const playing = CameraAudioState(
+    cameraId: 'cam1',
+    cameraName: 'Nursery',
+    connectionStatus: CameraConnectionStatus.playing,
+  );
+  const playingMuted = CameraAudioState(
+    cameraId: 'cam1',
+    cameraName: 'Nursery',
+    connectionStatus: CameraConnectionStatus.playing,
+    isMuted: true,
+  );
+
+  final bannerFinder = find.byKey(const ValueKey('status-banner'));
 
   group('CameraAudioCard reconnecting state (RELY-02 / D-10 / D-11)', () {
     testWidgets('renders a CircularProgressIndicator spinner', (tester) async {
@@ -72,6 +91,44 @@ void main() {
           reason: 'D-11 forbids attempt/retry/countdown on card — found: "$data"',
         );
       }
+    });
+  });
+
+  group('CameraAudioCard status banner slot (problem states only)', () {
+    testWidgets('reconnecting renders the banner slot', (tester) async {
+      await _pumpCard(tester, reconnecting);
+      expect(bannerFinder, findsOneWidget);
+    });
+
+    testWidgets('error renders the banner slot', (tester) async {
+      await _pumpCard(tester, error);
+      expect(bannerFinder, findsOneWidget);
+    });
+
+    testWidgets('playing renders NO banner slot', (tester) async {
+      await _pumpCard(tester, playing);
+      expect(bannerFinder, findsNothing);
+    });
+
+    testWidgets('connecting renders NO banner slot', (tester) async {
+      await _pumpCard(tester, connecting);
+      expect(bannerFinder, findsNothing);
+    });
+  });
+
+  group('CameraAudioCard muted clarity', () {
+    testWidgets('muted playing shows "Muted" and the volume-off icon',
+        (tester) async {
+      await _pumpCard(tester, playingMuted);
+      expect(find.text('Muted'), findsOneWidget);
+      expect(find.byIcon(Icons.volume_off), findsOneWidget);
+    });
+
+    testWidgets('un-muted playing shows a % value, not "Muted"',
+        (tester) async {
+      await _pumpCard(tester, playing);
+      expect(find.text('100%'), findsOneWidget);
+      expect(find.text('Muted'), findsNothing);
     });
   });
 
