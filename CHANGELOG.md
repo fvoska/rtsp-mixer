@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.8.0](https://github.com/fvoska/rtsp-mixer/compare/v1.7.0...v1.8.0) (2026-07-23)
+
+
+### Features
+
+* **monitoring:** absolute SPL level bar, variation-driven card highlight, and 10s waveform chart ([#29](https://github.com/fvoska/rtsp-mixer/issues/29)) ([e6b980a](https://github.com/fvoska/rtsp-mixer/commit/e6b980aeb61b0187e747fd36b96fd85178d48905))
+
+
+### Bug Fixes
+
+* **monitoring:** require positive liveness evidence before declaring a stream candidate alive ([#28](https://github.com/fvoska/rtsp-mixer/issues/28)) ([48e824c](https://github.com/fvoska/rtsp-mixer/commit/48e824c5a851c3d7184cc5141005838414d43368))
+
 ## [1.7.0](https://github.com/fvoska/rtsp-mixer/compare/v1.6.0...v1.7.0) (2026-07-23)
 
 
