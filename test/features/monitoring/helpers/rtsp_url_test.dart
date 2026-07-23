@@ -77,4 +77,52 @@ void main() {
       );
     });
   });
+
+  group('rewriteStreamUrlHosts', () {
+    const apiUrls = {
+      'low': 'rtsps://192.168.1.1:7441/aaa?enableSrtp',
+      'medium': 'rtsps://192.168.1.1:7441/bbb?enableSrtp',
+      'high': 'rtsps://192.168.1.1:7441/ccc?enableSrtp',
+    };
+
+    test('points every URL at the console host (Tailscale hostname)', () {
+      expect(
+        rewriteStreamUrlHosts(apiUrls, 'udm-pro.tail084b7.ts.net'),
+        {
+          'low': 'rtsps://udm-pro.tail084b7.ts.net:7441/aaa?enableSrtp',
+          'medium': 'rtsps://udm-pro.tail084b7.ts.net:7441/bbb?enableSrtp',
+          'high': 'rtsps://udm-pro.tail084b7.ts.net:7441/ccc?enableSrtp',
+        },
+      );
+    });
+
+    test('is a no-op when the console host matches the embedded IP', () {
+      expect(rewriteStreamUrlHosts(apiUrls, '192.168.1.1'), apiUrls);
+    });
+
+    test('returns urls unchanged when consoleHost is null or empty', () {
+      expect(rewriteStreamUrlHosts(apiUrls, null), same(apiUrls));
+      expect(rewriteStreamUrlHosts(apiUrls, ''), same(apiUrls));
+      expect(rewriteStreamUrlHosts(apiUrls, '   '), same(apiUrls));
+    });
+
+    test('leaves unparseable URLs untouched, rewrites the rest', () {
+      expect(
+        rewriteStreamUrlHosts(
+          {'low': 'not a url %%%', 'high': 'rtsp://192.168.1.1:7447/ccc'},
+          'nvr.tailnet.ts.net',
+        ),
+        {
+          'low': 'not a url %%%',
+          'high': 'rtsp://nvr.tailnet.ts.net:7447/ccc',
+        },
+      );
+    });
+
+    test('never throws on garbage input', () {
+      expect(() => rewriteStreamUrlHosts({'x': '::::'}, ':::'),
+          returnsNormally);
+      expect(() => rewriteStreamUrlHosts(const {}, 'host'), returnsNormally);
+    });
+  });
 }

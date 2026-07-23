@@ -50,6 +50,30 @@ String replaceUrlHost(String url, String newHost) {
   }
 }
 
+/// Rewrite the host of every stream URL in [urls] to [consoleHost].
+///
+/// The Protect integration API embeds the console's own LAN IP in the RTSPS
+/// URLs it returns, regardless of which address the API request came in on.
+/// When the app reaches the console through a different address (e.g. a
+/// Tailscale hostname or MagicDNS name), that embedded LAN IP is unreachable
+/// — so stream candidates must target the address the app actually uses.
+/// RTSP/RTSPS is served by the console itself (ports 7447/7441), the same
+/// machine that answers the API, so this rewrite is always safe.
+///
+/// Defensive by contract (CLAUDE.md): never throws. A null/empty
+/// [consoleHost] or any failure returns [urls] unchanged.
+Map<String, String> rewriteStreamUrlHosts(
+  Map<String, String> urls,
+  String? consoleHost,
+) {
+  try {
+    if (consoleHost == null || consoleHost.trim().isEmpty) return urls;
+    return urls.map((k, v) => MapEntry(k, replaceUrlHost(v, consoleHost)));
+  } catch (_) {
+    return urls;
+  }
+}
+
 /// Convert an RTSPS URL (from the Protect API) to plain RTSP.
 /// rtsps://host:7441/alias?enableSrtp → rtsp://host:7447/alias
 String rtspsToRtsp(String rtspsUrl) {

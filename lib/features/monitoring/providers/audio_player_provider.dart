@@ -540,8 +540,21 @@ class AudioPlayerNotifier extends AsyncNotifier<MonitoringState> {
           ? raw
           : resolveStreamUrl(raw, useRtsp: settings.useRtsp);
 
+      // The integration API embeds the console's own LAN IP in the RTSPS
+      // URLs it returns, regardless of which address the API was reached
+      // through. When the console is configured via a different address
+      // (e.g. a Tailscale hostname), that embedded IP is unreachable — so
+      // point the local candidates at the configured console address.
+      // Manual cameras keep their user-entered URL verbatim. Defensive:
+      // rewriteStreamUrlHosts never throws and degrades to the API URLs.
+      var localUrls = camera.rtspsStreamUrls;
+      if (!camera.isManual) {
+        localUrls = rewriteStreamUrlHosts(
+            localUrls, ref.read(authNotifierProvider).value?.host);
+      }
+
       final quality = camera.defaultQuality;
-      final rtspsUrl = camera.defaultStreamUrl;
+      final rtspsUrl = quality != null ? localUrls[quality] : null;
       final url = rtspsUrl != null ? resolveFor(rtspsUrl) : null;
 
       // Remote (VPN/Tailscale) candidates, parallel to availableQualities.
@@ -576,7 +589,7 @@ class AudioPlayerNotifier extends AsyncNotifier<MonitoringState> {
         cameraId: camera.id,
         cameraName: cameraName,
         connectionStatus: CameraConnectionStatus.connecting,
-        availableQualities: camera.rtspsStreamUrls.map(
+        availableQualities: localUrls.map(
           (k, v) => MapEntry(k, resolveFor(v)),
         ),
         remoteQualities: remoteQualities,
