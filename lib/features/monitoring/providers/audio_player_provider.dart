@@ -15,6 +15,7 @@ import '../../cameras/providers/camera_provider.dart';
 import '../helpers/audio_level_meter.dart';
 import '../helpers/rtsp_url.dart';
 import '../helpers/stream_candidates.dart';
+import '../helpers/stream_liveness.dart';
 import '../models/health_event.dart';
 import '../models/player_state.dart';
 import '../services/alert_policy.dart';
@@ -400,23 +401,80 @@ class AudioPlayerNotifier extends AsyncNotifier<MonitoringState> {
   /// moment AFTER open() reports success. Without this window a dead
   /// candidate would be declared the winner on every cycle and later
   /// candidates would never get a turn.
+  ///
+  /// A timeout of this window no longer implies alive: it triggers the
+  /// mpv `track-list/count` fallback check and, when that reads 0, one
+  /// [_openConfirmExtendedGrace] wait before the candidate is disqualified.
   static const _openConfirmGrace = Duration(seconds: 4);
+
+  /// Second-stage grace window entered only when [_openConfirmGrace]
+  /// elapsed with no signal AND mpv's `track-list/count` read 0 (no RTSP
+  /// session established yet). Gives slow VPN links (e.g. Tailscale) extra
+  /// time to produce a real track before a silent candidate is disqualified.
+  static const _openConfirmExtendedGrace = Duration(seconds: 6);
+
+  /// Sentinel returned by the confirmation completer's timeout so an
+  /// elapsed grace window is distinguishable from a real completion
+  /// (null = alive, any other string = an error-stream event). Never reuse
+  /// null for timeout — null means alive.
+  static const _confirmTimedOut = '__gsd_confirm_timed_out__';
 
   /// Cameras with an open/candidate loop currently running. Guards against
   /// a supervisor retry timer firing mid-attempt and running a second
   /// stop+reopen concurrently against the same player.
   final Set<String> _openingCameras = {};
 
-  /// Wait for evidence that the stream just opened on [player] is actually
-  /// alive: audioParams arriving (the audio decoder configured itself from
-  /// real stream data) confirms it; an error event within the grace window
-  /// disqualifies it (throws). No signal within [_openConfirmGrace] is
-  /// treated as alive — streams without an audio track (mic-disabled
-  /// cameras) never emit audioParams, and later failures are still caught
-  /// by the error listener + reconnect supervisor.
+  /// Read and parse mpv's `track-list/count` as the liveness fallback.
+  /// mpv's track-list contains only real demuxer tracks (no auto/no pseudo
+  /// entries), so 0 means no RTSP session was established. Returns null
+  /// when the property read throws or the value doesn't parse — the
+  /// "inconclusive" signal the caller treats as assume-alive (CLAUDE.md
+  /// defensive rule). Never throws.
+  Future<int?> _readLivenessTrackCount(
+      Player player, String cameraName) async {
+    try {
+      final raw = await (player.platform as NativePlayer)
+          .getProperty('track-list/count');
+      final count = parseTrackCount(raw);
+      if (count == null) {
+        appLog('AUDIO',
+            '$cameraName: liveness track-list fallback inconclusive '
+            '(raw="$raw") — assuming alive');
+      }
+      return count;
+    } catch (e) {
+      appLog('AUDIO',
+          '$cameraName: liveness track-list fallback read failed '
+          '(assuming alive): $e');
+      return null;
+    }
+  }
+
+  /// Wait for POSITIVE evidence that the stream just opened on [player] is
+  /// actually alive:
   ///
-  /// Defensive: failures of the confirmation plumbing itself must never
-  /// fail a good open — they degrade to "assume alive".
+  ///  - audioParams with sampleRate > 0 (audio decoder configured itself
+  ///    from real stream data), or
+  ///  - a real audio OR video track appearing on `player.stream.tracks`
+  ///    (see [hasRealTrack] — video-only keeps mic-disabled cameras
+  ///    working), or
+  ///  - mpv's `track-list/count` reading > 0.
+  ///
+  /// An error event within either grace window disqualifies the candidate
+  /// immediately (throws). Silence through [_openConfirmGrace] AND
+  /// [_openConfirmExtendedGrace] with `track-list/count` parsing to 0 both
+  /// times ALSO disqualifies it — this is the fix for the Tailscale
+  /// exit-node blackhole where SYNs to the console's LAN IP are silently
+  /// dropped (no RST/ICMP): FFmpeg's TCP connect hangs, no error event ever
+  /// arrives, and the dead `local` candidate used to be falsely declared
+  /// the winner so `_openFirstCandidate` never tried the working remote
+  /// (ts.net) candidate.
+  ///
+  /// Defensive: failures of the confirmation plumbing itself (tracks
+  /// subscription error, getProperty throwing, unparseable track count)
+  /// must never fail a good open — they degrade to "assume alive". The
+  /// deliberate no-signs-of-life disqualification is set as [failure] (not
+  /// thrown inside the try) so the defensive catch cannot swallow it.
   Future<void> _confirmStreamAlive(
       Player player, String cameraName, String label) async {
     final subs = <StreamSubscription<dynamic>>[];
@@ -431,8 +489,41 @@ class AudioPlayerNotifier extends AsyncNotifier<MonitoringState> {
           completer.complete(null);
         }
       }));
-      failure = await completer.future
-          .timeout(_openConfirmGrace, onTimeout: () => null);
+      subs.add(player.stream.tracks.listen((tracks) {
+        // A real audio OR video track proves the RTSP session was
+        // established (video-only = mic-disabled camera, still alive).
+        if (hasRealTrack(tracks) && !completer.isCompleted) {
+          completer.complete(null);
+        }
+      }));
+
+      final first = await completer.future
+          .timeout(_openConfirmGrace, onTimeout: () => _confirmTimedOut);
+      if (first == _confirmTimedOut) {
+        // First window elapsed in silence. Belt-and-braces: ask mpv how
+        // many real demuxer tracks exist. Inconclusive (null) or > 0 →
+        // assume alive; exactly 0 → no session yet, extend the wait.
+        final count = await _readLivenessTrackCount(player, cameraName);
+        if (count == 0) {
+          // Listeners are still attached — a late audioParams/tracks event
+          // completes alive, an error event completes dead.
+          final second = await completer.future.timeout(
+              _openConfirmExtendedGrace,
+              onTimeout: () => _confirmTimedOut);
+          if (second == _confirmTimedOut) {
+            final recount = await _readLivenessTrackCount(player, cameraName);
+            if (recount == 0) {
+              failure =
+                  '$label candidate showed no signs of life (no tracks) after open';
+            }
+            // recount null (inconclusive) or > 0 → assume alive.
+          } else if (second != null) {
+            failure = '$label candidate errored right after open: $second';
+          }
+        }
+      } else if (first != null) {
+        failure = '$label candidate errored right after open: $first';
+      }
     } catch (e) {
       appLog('AUDIO',
           '$cameraName: liveness check error (assuming alive): $e');
@@ -445,7 +536,7 @@ class AudioPlayerNotifier extends AsyncNotifier<MonitoringState> {
       }
     }
     if (failure != null) {
-      throw StateError('$label candidate errored right after open: $failure');
+      throw StateError(failure);
     }
   }
 
