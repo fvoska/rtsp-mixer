@@ -5,7 +5,7 @@ milestone_name: milestone
 status: executing
 stopped_at: Phase 4 UI-SPEC approved
 last_updated: "2026-04-24T10:25:55.850Z"
-last_activity: 2026-07-22 -- Quick task 260722-pdb (remote URL fallback connectivity for console + manual cameras)
+last_activity: 2026-07-24 -- Quick task 260724-eoz (README build status + latest release badges)
 progress:
   total_phases: 4
   completed_phases: 3
@@ -28,7 +28,7 @@ See: .planning/PROJECT.md (updated 2026-04-01)
 Phase: 04 (reliability-overnight-monitoring) — EXECUTING
 Plan: 1 of 5
 Status: Executing Phase 04
-Last activity: 2026-07-24 -- Completed quick task 260724-83t: Add About page with licenses, version info, changelog, made-by and contact
+Last activity: 2026-07-24 -- Completed quick task 260724-eoz: Add build status and latest release badges to README
 
 Progress: [█████░░░░░] 50%
 
@@ -104,6 +104,7 @@ None yet.
 | 260723-pki | 2026-07-23 | strengthen-claude-md-pr-title-descriptio | Rework CLAUDE.md "Never accept GitHub's auto-generated PR title" bullet into a 5-step "Creating a PR" procedure: review all branch commits (`git log --oneline main..HEAD`) before composing, title = Conventional Commits line for the OVERALL change (never the first pre-dispatch `docs:` plan commit), description summarizes the whole diff, always pass explicit title+body to `gh pr create`/MCP `create_pull_request`, fix already-opened PRs via `gh pr edit` | [PLAN](quick/260723-pki-strengthen-claude-md-pr-title-descriptio/260723-pki-PLAN.md) · [SUMMARY](quick/260723-pki-strengthen-claude-md-pr-title-descriptio/260723-pki-SUMMARY.md) |
 | 260723-sph | 2026-07-23 | redesign-spl-indicator-absolute-realtime | SPL indicator redesign: level bar now shows absolute pseudo-SPL from encoded `audio-bitrate` (log mapping 2→96 kbps via pure `audio_level_meter.dart` helper, pts flow kept for silence only); card outline alpha ∝ recent peak-to-trough variation of that level (baby-cry visualization, EMA `_baselineLevel` removed); new 10 s rolling Audacity-style mirrored `_WaveformChart` (CustomPaint, 20-slot `levelHistory` on `CameraAudioState`) on live cards | [PLAN](quick/260723-sph-redesign-spl-indicator-absolute-realtime/260723-sph-PLAN.md) · [SUMMARY](quick/260723-sph-redesign-spl-indicator-absolute-realtime/260723-sph-SUMMARY.md) |
 | 260724-83t | 2026-07-24 | add-about-page-with-licenses-version-inf | New `/about` page (Help pattern, top-level route above shell + Settings ListTile entry): runtime version via explicit `package_info_plus` dep, "Made by Filip Voska" + selectable contact email, bundled `CHANGELOG.md` asset rendered as selectable text, open-source licenses via `showLicensePage`; all async reads degrade gracefully (never crash) | [PLAN](quick/260724-83t-add-about-page-with-licenses-version-inf/260724-83t-PLAN.md) · [SUMMARY](quick/260724-83t-add-about-page-with-licenses-version-inf/260724-83t-SUMMARY.md) |
+| 260724-eoz | 2026-07-24 | add-build-status-and-latest-release-badg | README badges under title: Release workflow `badge.svg` linking to Actions runs page + shields.io `github/v/release` badge linking to latest release; markdown image-in-link syntax, title/description untouched | [PLAN](quick/260724-eoz-add-build-status-and-latest-release-badg/260724-eoz-PLAN.md) · [SUMMARY](quick/260724-eoz-add-build-status-and-latest-release-badg/260724-eoz-SUMMARY.md) |
 
 ### Blockers/Concerns
 
