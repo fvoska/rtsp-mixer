@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.10.0](https://github.com/fvoska/rtsp-mixer/compare/v1.9.2...v1.10.0) (2026-07-24)
+
+
+### Features
+
+* **about:** render changelog as collapsible markdown releases ([#37](https://github.com/fvoska/rtsp-mixer/issues/37)) ([eab2ab2](https://github.com/fvoska/rtsp-mixer/commit/eab2ab26157d6a191a50737a7e09c08ffe3d6107))
+
 ## [1.9.2](https://github.com/fvoska/rtsp-mixer/compare/v1.9.1...v1.9.2) (2026-07-24)
 
 
