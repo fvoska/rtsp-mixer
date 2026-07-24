@@ -13,7 +13,7 @@ import '../../../core/theme/spacing.dart';
 class AboutScreen extends StatelessWidget {
   const AboutScreen({super.key});
 
-  static const String _contactEmail = 'filip.voska@infinum.com';
+  static const String _contactEmail = 'filip@voska.tech';
   static const String _appName = 'RTSP Mixer';
 
   /// Reads package info, swallowing any failure into null so the caller can
