@@ -5,7 +5,7 @@ milestone_name: milestone
 status: executing
 stopped_at: Phase 4 UI-SPEC approved
 last_updated: "2026-04-24T10:25:55.850Z"
-last_activity: 2026-07-24 -- Quick task 260724-eoz (README build status + latest release badges)
+last_activity: 2026-07-24 -- Quick task 260724-fsd (README rewritten as selling-point feature overview)
 progress:
   total_phases: 4
   completed_phases: 3
@@ -28,7 +28,7 @@ See: .planning/PROJECT.md (updated 2026-04-01)
 Phase: 04 (reliability-overnight-monitoring) — EXECUTING
 Plan: 1 of 5
 Status: Executing Phase 04
-Last activity: 2026-07-24 -- Completed quick task 260724-eoz: Add build status and latest release badges to README
+Last activity: 2026-07-24 -- Completed quick task 260724-fsd: Rewrite README.md as an up-to-date selling-point overview of app features
 
 Progress: [█████░░░░░] 50%
 
@@ -105,6 +105,7 @@ None yet.
 | 260723-sph | 2026-07-23 | redesign-spl-indicator-absolute-realtime | SPL indicator redesign: level bar now shows absolute pseudo-SPL from encoded `audio-bitrate` (log mapping 2→96 kbps via pure `audio_level_meter.dart` helper, pts flow kept for silence only); card outline alpha ∝ recent peak-to-trough variation of that level (baby-cry visualization, EMA `_baselineLevel` removed); new 10 s rolling Audacity-style mirrored `_WaveformChart` (CustomPaint, 20-slot `levelHistory` on `CameraAudioState`) on live cards | [PLAN](quick/260723-sph-redesign-spl-indicator-absolute-realtime/260723-sph-PLAN.md) · [SUMMARY](quick/260723-sph-redesign-spl-indicator-absolute-realtime/260723-sph-SUMMARY.md) |
 | 260724-83t | 2026-07-24 | add-about-page-with-licenses-version-inf | New `/about` page (Help pattern, top-level route above shell + Settings ListTile entry): runtime version via explicit `package_info_plus` dep, "Made by Filip Voska" + selectable contact email, bundled `CHANGELOG.md` asset rendered as selectable text, open-source licenses via `showLicensePage`; all async reads degrade gracefully (never crash) | [PLAN](quick/260724-83t-add-about-page-with-licenses-version-inf/260724-83t-PLAN.md) · [SUMMARY](quick/260724-83t-add-about-page-with-licenses-version-inf/260724-83t-SUMMARY.md) |
 | 260724-eoz | 2026-07-24 | add-build-status-and-latest-release-badg | README badges under title: Release workflow `badge.svg` linking to Actions runs page + shields.io `github/v/release` badge linking to latest release; markdown image-in-link syntax, title/description untouched | [PLAN](quick/260724-eoz-add-build-status-and-latest-release-badg/260724-eoz-PLAN.md) · [SUMMARY](quick/260724-eoz-add-build-status-and-latest-release-badg/260724-eoz-SUMMARY.md) |
+| 260724-fsd | 2026-07-24 | rewrite-readme-md-as-an-up-to-date-selli | README rewritten from 5-line stub into selling-point feature overview: ten `##` sections (camera sources, listening & mixing, audio-first, overnight reliability, Android background, health & observability, audio activity, connectivity, persistence & UX, platforms); badges + H1 preserved verbatim; all claims traced to CHANGELOG/lib (no invented features, no deferred stereo-pan claim, web honestly marked unsupported) | [PLAN](quick/260724-fsd-rewrite-readme-md-as-an-up-to-date-selli/260724-fsd-PLAN.md) · [SUMMARY](quick/260724-fsd-rewrite-readme-md-as-an-up-to-date-selli/260724-fsd-SUMMARY.md) |
 
 ### Blockers/Concerns
 
