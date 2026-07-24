@@ -3,6 +3,7 @@ import 'package:flutter/services.dart' show rootBundle;
 import 'package:package_info_plus/package_info_plus.dart';
 
 import '../../../core/theme/spacing.dart';
+import '../changelog.dart';
 
 /// Static "About" detail page reachable from Settings. Mirrors HelpScreen's
 /// layout (Scaffold + AppBar + centered, width-constrained scroll view).
@@ -87,7 +88,7 @@ class AboutScreen extends StatelessWidget {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        'Made by Filip Voska',
+                        'Filip Voska',
                         style: theme.textTheme.bodyMedium,
                       ),
                       const SizedBox(height: Spacing.xs),
@@ -123,14 +124,28 @@ class AboutScreen extends StatelessWidget {
                           ),
                         );
                       } else {
-                        // Plain selectable text — no markdown renderer is a
-                        // dependency. Not scrollable itself; the page scrolls.
-                        body = SelectableText(
-                          text,
-                          style: theme.textTheme.bodySmall?.copyWith(
-                            fontFamily: 'monospace',
-                          ),
-                        );
+                        // Parse the release-please subset by hand (no markdown
+                        // renderer dependency). A non-empty result renders as
+                        // collapsible per-release sections; an empty result
+                        // (unexpected shape) degrades to plain text so the page
+                        // never loses the changelog.
+                        final releases = parseChangelog(text);
+                        if (releases.isEmpty) {
+                          body = SelectableText(
+                            text,
+                            style: theme.textTheme.bodySmall?.copyWith(
+                              fontFamily: 'monospace',
+                            ),
+                          );
+                        } else {
+                          body = Column(
+                            crossAxisAlignment: CrossAxisAlignment.stretch,
+                            children: [
+                              for (final release in releases)
+                                _ReleaseTile(release: release),
+                            ],
+                          );
+                        }
                       }
                     }
                     return _Section(
@@ -213,5 +228,146 @@ class _Section extends StatelessWidget {
         ),
       ),
     );
+  }
+}
+
+/// One collapsible release inside the Changelog card — collapsed by default
+/// (ExpansionTile's default) so the page stays scannable as history grows.
+/// Mirrors the Help screen's accordion pattern (Border() shapes to suppress
+/// ExpansionTile's own divider lines).
+class _ReleaseTile extends StatelessWidget {
+  const _ReleaseTile({required this.release});
+
+  final ChangelogRelease release;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final date = release.date;
+    return ExpansionTile(
+      // Align the header with the card's own padding instead of the default
+      // ExpansionTile inset, since this tile lives inside a padded Card.
+      tilePadding: EdgeInsets.zero,
+      shape: const Border(),
+      collapsedShape: const Border(),
+      title: Text(
+        release.version,
+        style: theme.textTheme.titleSmall?.copyWith(
+          fontWeight: FontWeight.w600,
+        ),
+      ),
+      subtitle: date == null
+          ? null
+          : Text(
+              date,
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: theme.colorScheme.onSurfaceVariant,
+              ),
+            ),
+      childrenPadding: const EdgeInsets.only(bottom: Spacing.sm),
+      expandedCrossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        if (release.sections.isEmpty)
+          Padding(
+            padding: const EdgeInsets.only(bottom: Spacing.sm),
+            child: Text(
+              'No details recorded for this release.',
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: theme.colorScheme.onSurfaceVariant,
+              ),
+            ),
+          )
+        else
+          for (final section in release.sections)
+            _ReleaseSection(section: section),
+      ],
+    );
+  }
+}
+
+/// A grouped change section (Features, Bug Fixes, …) with its bullets.
+class _ReleaseSection extends StatelessWidget {
+  const _ReleaseSection({required this.section});
+
+  final ChangelogSection section;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Padding(
+          padding: const EdgeInsets.only(top: Spacing.xs, bottom: Spacing.xs),
+          child: Text(
+            section.heading,
+            style: theme.textTheme.labelLarge?.copyWith(
+              color: theme.colorScheme.primary,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+        ),
+        for (final entry in section.entries)
+          Padding(
+            padding: const EdgeInsets.only(bottom: Spacing.xs),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('•  ', style: theme.textTheme.bodyMedium),
+                Expanded(
+                  child: Text.rich(
+                    TextSpan(children: _inlineSpans(entry, theme)),
+                    style: theme.textTheme.bodyMedium,
+                  ),
+                ),
+              ],
+            ),
+          ),
+      ],
+    );
+  }
+}
+
+/// Converts a raw release-please bullet into styled inline spans without a
+/// markdown package: `**scope:**` renders bold, and `[text](url)` renders the
+/// link text in the primary color (styling only — no tap handler is in scope).
+///
+/// Defensive per CLAUDE.md: any parse trouble falls back to the raw text so a
+/// bullet can never throw while building the page.
+List<InlineSpan> _inlineSpans(String raw, ThemeData theme) {
+  try {
+    final pattern = RegExp(r'\*\*(.+?)\*\*|\[([^\]]+)\]\(([^)]*)\)');
+    final spans = <InlineSpan>[];
+    var last = 0;
+    for (final match in pattern.allMatches(raw)) {
+      if (match.start > last) {
+        spans.add(TextSpan(text: raw.substring(last, match.start)));
+      }
+      final bold = match.group(1);
+      if (bold != null) {
+        spans.add(
+          TextSpan(
+            text: bold,
+            style: const TextStyle(fontWeight: FontWeight.bold),
+          ),
+        );
+      } else {
+        // Link: show the link text distinguished in the primary color.
+        spans.add(
+          TextSpan(
+            text: match.group(2),
+            style: TextStyle(color: theme.colorScheme.primary),
+          ),
+        );
+      }
+      last = match.end;
+    }
+    if (last < raw.length) {
+      spans.add(TextSpan(text: raw.substring(last)));
+    }
+    if (spans.isEmpty) return [TextSpan(text: raw)];
+    return spans;
+  } catch (_) {
+    return [TextSpan(text: raw)];
   }
 }
