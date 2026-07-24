@@ -28,7 +28,7 @@ See: .planning/PROJECT.md (updated 2026-04-01)
 Phase: 04 (reliability-overnight-monitoring) — EXECUTING
 Plan: 1 of 5
 Status: Executing Phase 04
-Last activity: 2026-07-24 -- Completed quick task 260724-fsd: Rewrite README.md as an up-to-date selling-point overview of app features
+Last activity: 2026-07-24 -- Completed quick task 260724-h2l: Render in-app changelog as markdown with collapsible releases; simplify Made by card
 
 Progress: [█████░░░░░] 50%
 
@@ -106,6 +106,7 @@ None yet.
 | 260724-83t | 2026-07-24 | add-about-page-with-licenses-version-inf | New `/about` page (Help pattern, top-level route above shell + Settings ListTile entry): runtime version via explicit `package_info_plus` dep, "Made by Filip Voska" + selectable contact email, bundled `CHANGELOG.md` asset rendered as selectable text, open-source licenses via `showLicensePage`; all async reads degrade gracefully (never crash) | [PLAN](quick/260724-83t-add-about-page-with-licenses-version-inf/260724-83t-PLAN.md) · [SUMMARY](quick/260724-83t-add-about-page-with-licenses-version-inf/260724-83t-SUMMARY.md) |
 | 260724-eoz | 2026-07-24 | add-build-status-and-latest-release-badg | README badges under title: Release workflow `badge.svg` linking to Actions runs page + shields.io `github/v/release` badge linking to latest release; markdown image-in-link syntax, title/description untouched | [PLAN](quick/260724-eoz-add-build-status-and-latest-release-badg/260724-eoz-PLAN.md) · [SUMMARY](quick/260724-eoz-add-build-status-and-latest-release-badg/260724-eoz-SUMMARY.md) |
 | 260724-fsd | 2026-07-24 | rewrite-readme-md-as-an-up-to-date-selli | README rewritten from 5-line stub into selling-point feature overview: ten `##` sections (camera sources, listening & mixing, audio-first, overnight reliability, Android background, health & observability, audio activity, connectivity, persistence & UX, platforms); badges + H1 preserved verbatim; all claims traced to CHANGELOG/lib (no invented features, no deferred stereo-pan claim, web honestly marked unsupported) | [PLAN](quick/260724-fsd-rewrite-readme-md-as-an-up-to-date-selli/260724-fsd-PLAN.md) · [SUMMARY](quick/260724-fsd-rewrite-readme-md-as-an-up-to-date-selli/260724-fsd-SUMMARY.md) |
+| 260724-h2l | 2026-07-24 | render-in-app-changelog-as-markdown-with | About changelog rendered as parsed markdown: dependency-free `parseChangelog()` (`lib/features/about/changelog.dart`) for the release-please subset; one collapsed-by-default `ExpansionTile` per release (Help accordion pattern) with bold scope prefixes and primary-colored link spans via `Text.rich`; empty/malformed parse falls back to existing plain monospace text; "Made by" card body trimmed to just name + email | [PLAN](quick/260724-h2l-render-in-app-changelog-as-markdown-with/260724-h2l-PLAN.md) · [SUMMARY](quick/260724-h2l-render-in-app-changelog-as-markdown-with/260724-h2l-SUMMARY.md) |
 
 ### Blockers/Concerns
 
