@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../features/auth/providers/auth_provider.dart';
+import '../../features/about/screens/about_screen.dart';
 import '../../features/auth/screens/login_screen.dart';
 import '../../features/help/screens/help_screen.dart';
 import '../../features/monitoring/providers/session_history_provider.dart';
@@ -56,6 +57,9 @@ final appRouterProvider = Provider<GoRouter>((ref) {
       // normal detail page with its own AppBar + back button, and is
       // reachable both before login and from inside the app.
       GoRoute(path: '/help', builder: (_, _) => const HelpScreen()),
+      // About lives ABOVE the shell (like /help) so it stacks as a normal
+      // detail page with its own AppBar + back button.
+      GoRoute(path: '/about', builder: (_, _) => const AboutScreen()),
       // Session detail lives ABOVE the shell so it stacks like a normal
       // detail page (its own AppBar + back button, no tab bar — standard
       // mobile pattern). Keeping it inside the ShellRoute hid it because
