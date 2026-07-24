@@ -181,6 +181,13 @@ class SettingsScreen extends ConsumerWidget {
           ),
           const Divider(height: 1),
           ListTile(
+            leading: const Icon(Icons.info_outline),
+            title: const Text('About'),
+            subtitle: const Text('Version, changelog, licenses, and credits.'),
+            onTap: () => context.push('/about'),
+          ),
+          const Divider(height: 1),
+          ListTile(
             leading: Icon(Icons.logout, color: theme.colorScheme.error),
             title: Text(
               isManualMode ? 'Reset setup' : 'Sign out',
