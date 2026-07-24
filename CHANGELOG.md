@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.9.0](https://github.com/fvoska/rtsp-mixer/compare/v1.8.0...v1.9.0) (2026-07-24)
+
+
+### Features
+
+* **about:** add About page with version, changelog, licenses, and contact info ([#31](https://github.com/fvoska/rtsp-mixer/issues/31)) ([b51df78](https://github.com/fvoska/rtsp-mixer/commit/b51df78b5182f5874ec266e3c09f90eed617cfbc))
+
 ## [1.8.0](https://github.com/fvoska/rtsp-mixer/compare/v1.7.0...v1.8.0) (2026-07-23)
 
 
