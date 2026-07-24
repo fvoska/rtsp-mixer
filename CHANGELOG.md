@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.9.1](https://github.com/fvoska/rtsp-mixer/compare/v1.9.0...v1.9.1) (2026-07-24)
+
+
+### Documentation
+
+* **readme:** add build status and latest release badges ([#33](https://github.com/fvoska/rtsp-mixer/issues/33)) ([22a4b74](https://github.com/fvoska/rtsp-mixer/commit/22a4b740c6549012493f12e3b65154c51ecff318))
+
 ## [1.9.0](https://github.com/fvoska/rtsp-mixer/compare/v1.8.0...v1.9.0) (2026-07-24)
 
 
