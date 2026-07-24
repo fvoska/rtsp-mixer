@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.9.2](https://github.com/fvoska/rtsp-mixer/compare/v1.9.1...v1.9.2) (2026-07-24)
+
+
+### Documentation
+
+* **readme:** rewrite README as a selling-point overview of app features ([#35](https://github.com/fvoska/rtsp-mixer/issues/35)) ([12fb9ed](https://github.com/fvoska/rtsp-mixer/commit/12fb9ed980b9cceb38d1bda25843f2534f0558d9))
+
 ## [1.9.1](https://github.com/fvoska/rtsp-mixer/compare/v1.9.0...v1.9.1) (2026-07-24)
 
 
