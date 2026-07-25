@@ -44,7 +44,7 @@ class _AppState extends ConsumerState<App> {
         if (notifier.isAllMuted) {
           notifier.unmuteAll();
           ForegroundServiceManager.updateNotification(
-            title: 'Baby Monitor Active',
+            title: 'Listening',
             text: _currentNotificationText(),
             notificationButtons: const [
               NotificationButton(id: 'pause', text: 'Pause'),
@@ -54,7 +54,7 @@ class _AppState extends ConsumerState<App> {
         } else {
           notifier.muteAll();
           ForegroundServiceManager.updateNotification(
-            title: 'Baby Monitor — Paused',
+            title: 'Paused',
             text: 'All cameras muted',
             notificationButtons: const [
               NotificationButton(id: 'pause', text: 'Resume'),
@@ -86,7 +86,7 @@ class _AppState extends ConsumerState<App> {
     final router = ref.watch(appRouterProvider);
     final settings = ref.watch(settingsProvider);
     final Widget app = MaterialApp.router(
-      title: 'RTSP Mixer',
+      title: 'Roomtone',
       theme: AppTheme.light,
       darkTheme: AppTheme.dark,
       themeMode: settings.themeMode,

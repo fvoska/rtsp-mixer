@@ -1,4 +1,4 @@
-# RTSP Mixer
+# Roomtone
 
 [![Release](https://github.com/fvoska/rtsp-mixer/actions/workflows/release.yml/badge.svg)](https://github.com/fvoska/rtsp-mixer/actions/workflows/release.yml) [![Latest release](https://img.shields.io/github/v/release/fvoska/rtsp-mixer)](https://github.com/fvoska/rtsp-mixer/releases/latest)
 

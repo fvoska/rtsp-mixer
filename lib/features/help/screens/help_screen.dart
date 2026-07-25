@@ -46,7 +46,7 @@ class HelpScreen extends StatelessWidget {
                         'Settings → Control Plane → Integrations).'),
                     _Step(3, 'Ensure the API is enabled, then choose '
                         '"Generate API Key". Give it a name like '
-                        '"Baby Monitor".'),
+                        '"Roomtone".'),
                     _Step(4, 'Copy the key immediately — Protect shows it '
                         'only once. If you lose it, generate a new one.'),
                     _Step(5, 'In this app, enter the console\'s IP address '

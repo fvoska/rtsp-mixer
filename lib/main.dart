@@ -22,6 +22,6 @@ void main() {
   ForegroundServiceManager.init();
   // ignore: unawaited_futures
   LocalNotificationsManager.init();
-  appLog('APP', 'Starting RTSP Mixer');
+  appLog('APP', 'Starting Roomtone');
   runApp(const ProviderScope(child: App()));
 }

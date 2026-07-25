@@ -33,7 +33,7 @@ class ForegroundServiceManager {
     FlutterForegroundTask.init(
       androidNotificationOptions: AndroidNotificationOptions(
         channelId: 'baby_monitor_service',
-        channelName: 'Baby Monitor',
+        channelName: 'Roomtone',
         channelDescription: 'Audio monitoring is active',
         channelImportance: NotificationChannelImportance.LOW,
         priority: NotificationPriority.LOW,
@@ -76,7 +76,7 @@ class ForegroundServiceManager {
     final notificationText = 'Monitoring: ${cameraNames.join(", ")}';
     await FlutterForegroundTask.startService(
       serviceId: 256,
-      notificationTitle: 'Baby Monitor Active',
+      notificationTitle: 'Listening',
       notificationText: notificationText,
       notificationIcon: _notificationIcon,
       notificationButtons: const [
@@ -93,7 +93,7 @@ class ForegroundServiceManager {
   /// Update the notification text, e.g. when connection status changes.
   static Future<void> updateNotification({
     required String text,
-    String title = 'Baby Monitor Active',
+    String title = 'Listening',
     List<NotificationButton>? notificationButtons,
   }) async {
     // Silent no-op on non-Android — this is a high-frequency caller and
