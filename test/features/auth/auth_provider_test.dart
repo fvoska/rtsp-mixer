@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rtsp_mixer/core/api/protect_api_client.dart';
@@ -13,17 +15,33 @@ class FakeApiClient extends ProtectApiClient {
   bool verifyResult = true;
   AppError? verifyError;
 
-  /// Counts verifyConnection calls. Background validation has no observable
-  /// state change on the "network error → stay authenticated" path (it logs
-  /// and returns), so the test waits on this counter to know the validation
-  /// actually ran before asserting that auth survived it.
-  int verifyCallCount = 0;
+  /// When set, [verifyConnection] blocks until this completes.
+  ///
+  /// The two background-validation tests assert on an ordering: the cached
+  /// session is served as authenticated *first*, and validation revokes (or
+  /// doesn't) *after*. Collapsing the notifier's delay to zero without a gate
+  /// just races those two — validation can land before the test ever observes
+  /// the cached state. The gate pins the order without any wall-clock waiting.
+  Completer<void>? gate;
+
+  /// Number of verifyConnection calls that have finished (returned or thrown).
+  ///
+  /// Background validation has no observable state change on the "network
+  /// error → stay authenticated" path — it logs and returns — so the test waits
+  /// on this counter to know validation really ran before asserting that auth
+  /// survived it. Without that, the test would also pass if validation never
+  /// happened at all.
+  int verifySettledCount = 0;
 
   @override
   Future<bool> verifyConnection(String host) async {
-    verifyCallCount++;
-    if (verifyError != null) throw verifyError!;
-    return verifyResult;
+    try {
+      if (gate != null) await gate!.future;
+      if (verifyError != null) throw verifyError!;
+      return verifyResult;
+    } finally {
+      verifySettledCount++;
+    }
   }
 
   @override
@@ -96,13 +114,16 @@ void main() {
     test('returns authenticated from cache then background validation revokes on failure', () async {
       await storage.saveCredentials('10.0.0.1', 'key');
       api.verifyResult = false;
+      // Hold validation until the cached state has been observed, so the two
+      // halves of this test are ordered rather than racing.
+      api.gate = Completer<void>();
       final c = createContainer(storage: storage, api: api);
       addTearDown(c.dispose);
       // Initial state: authenticated from cache
       final state = await waitForAuth(c);
       expect(state.isAuthenticated, true);
-      // Background validation then revokes. Waiting on the transition itself
-      // is the assertion — no sleep long enough to "probably" cover it.
+      // Release validation; waiting on the transition itself is the assertion.
+      api.gate!.complete();
       await waitFor(
         () => !_isAuthenticated(c),
         reason: 'background validation to revoke the cached session',
@@ -112,17 +133,20 @@ void main() {
     test('stays authenticated from cache on network error', () async {
       await storage.saveCredentials('10.0.0.1', 'key');
       api.verifyError = const AppError(type: AppErrorType.connectionRefused, message: 'fail');
+      api.gate = Completer<void>();
       final c = createContainer(storage: storage, api: api);
       addTearDown(c.dispose);
       final state = await waitForAuth(c);
       expect(state.isAuthenticated, true);
       // Background validation fails but doesn't kick the user out (network
       // error). "Still authenticated" is a negative — it can't be waited on —
-      // so wait for the validation attempt to have actually happened, then
-      // assert. Otherwise the test would pass even if validation never ran.
+      // so release validation, wait for the attempt to have actually
+      // completed, then assert. Otherwise the test would also pass if
+      // validation never ran at all.
+      api.gate!.complete();
       await waitFor(
-        () => api.verifyCallCount > 0,
-        reason: 'background validation to attempt verifyConnection',
+        () => api.verifySettledCount > 0,
+        reason: 'the background validation attempt to complete',
       );
       expect(_isAuthenticated(c), true);
     });

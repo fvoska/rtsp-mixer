@@ -3,6 +3,8 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:rtsp_mixer/core/theme/app_theme.dart';
 import 'package:rtsp_mixer/features/monitoring/screens/log_screen.dart';
 
+import '../../../support/logging.dart';
+
 Future<void> _pumpLogs(WidgetTester tester) async {
   await tester.pumpWidget(
     MaterialApp(
@@ -14,6 +16,10 @@ Future<void> _pumpLogs(WidgetTester tester) async {
 }
 
 void main() {
+  // LogScreen renders the global AppLogger buffer and registers a listener on
+  // it, so without this each test starts with whatever earlier tests logged.
+  installAppLoggerTestIsolation();
+
   group('LogScreen header (consistency refactor)', () {
     testWidgets('AppBar title is the static "Logs" — no dynamic count',
         (tester) async {
