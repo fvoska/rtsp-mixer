@@ -1,3 +1,5 @@
+import 'dart:math';
+
 import 'package:fake_async/fake_async.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rtsp_mixer/features/monitoring/services/reconnect_supervisor.dart';
@@ -13,6 +15,7 @@ void main() {
           onAttempt: (_) async {}, // success
           onStatusChange: (_, s) => statuses.add(s),
           onEvent: (t, _, _) => events.add(t),
+          random: Random(42),
         );
         sup.requestReconnect('cam1', cause: 'player_error');
         async.elapse(const Duration(seconds: 2));
@@ -39,6 +42,7 @@ void main() {
           },
           onStatusChange: (_, _) {},
           onEvent: (_, _, _) {},
+          random: Random(42),
         );
         sup.requestReconnect('cam1', cause: 'player_error');
         async.elapse(const Duration(seconds: 2)); // attempt 0 fires
