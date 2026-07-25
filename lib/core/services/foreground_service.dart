@@ -1,6 +1,8 @@
 // ignore_for_file: avoid_print
 import 'dart:io' show Platform;
 
+import 'dart:ui' show Color;
+
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter_foreground_task/flutter_foreground_task.dart';
 
@@ -48,6 +50,21 @@ class ForegroundServiceManager {
     appLog('FGS', 'Foreground service options initialized');
   }
 
+  /// Branding for the ongoing-monitoring notification.
+  ///
+  /// NOTE on the API surface: `AndroidNotificationOptions` in
+  /// flutter_foreground_task 9.2.2 exposes NO icon or accent-colour field —
+  /// verified against the installed pub-cache source, not assumed. The icon
+  /// travels on `startService(notificationIcon:)` instead, and it is addressed
+  /// by the name of an AndroidManifest `<meta-data>` entry pointing at a
+  /// drawable, not by a resource path. If the lookup fails, the plugin's
+  /// native side catches it and falls back to the app icon, so a wrong name
+  /// degrades the notification's look and never its behaviour.
+  static const _notificationIcon = NotificationIcon(
+    metaDataName: 'com.rtspmixer.notification.icon',
+    backgroundColor: Color(0xFF3FBFAD),
+  );
+
   /// Start the foreground service with camera names in the notification.
   static Future<void> start(List<String> cameraNames) async {
     if (kIsWeb || !Platform.isAndroid) {
@@ -61,6 +78,7 @@ class ForegroundServiceManager {
       serviceId: 256,
       notificationTitle: 'Baby Monitor Active',
       notificationText: notificationText,
+      notificationIcon: _notificationIcon,
       notificationButtons: const [
         // 'pause' toggles mute-all (label flips Pause <-> Resume).
         // 'stop' ends monitoring entirely.
@@ -85,6 +103,10 @@ class ForegroundServiceManager {
     await FlutterForegroundTask.updateService(
       notificationTitle: title,
       notificationText: text,
+      // Re-supplied on every update: the plugin rebuilds the notification from
+      // what it is handed, so omitting this would silently revert the small
+      // icon to the app icon on the first status change.
+      notificationIcon: _notificationIcon,
       notificationButtons: notificationButtons,
     );
   }
