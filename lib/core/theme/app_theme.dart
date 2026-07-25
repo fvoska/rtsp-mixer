@@ -158,6 +158,22 @@ abstract final class AppTheme {
         backgroundColor: nav,
         indicatorColor: colorScheme.primaryContainer,
       ),
+      // One place for every slider in the app: the camera card's volume and
+      // pan, and the Settings buffer/sensitivity sliders. A ~17px thumb on a
+      // 6px track is grabbable half-asleep; the M3 default is not.
+      sliderTheme: SliderThemeData(
+        trackHeight: 6,
+        thumbShape: const RoundSliderThumbShape(
+          enabledThumbRadius: 8.5,
+          disabledThumbRadius: 6,
+          pressedElevation: 4,
+        ),
+        overlayShape: const RoundSliderOverlayShape(overlayRadius: 22),
+        activeTrackColor: colorScheme.primary,
+        inactiveTrackColor: colorScheme.surfaceContainerHighest,
+        thumbColor: colorScheme.primary,
+        overlayColor: colorScheme.primary.withValues(alpha: 0.12),
+      ),
     );
   }
 }

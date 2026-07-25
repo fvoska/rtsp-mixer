@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../core/theme/app_typography.dart';
 import '../../../core/theme/spacing.dart';
 import '../../../core/theme/status_colors.dart';
+import '../helpers/uptime_format.dart';
 import '../models/health_event.dart';
 import '../models/session.dart';
 
@@ -168,7 +169,7 @@ class _SessionUptimeCard extends StatelessWidget {
             ),
             const SizedBox(height: Spacing.xs),
             Text(
-              _formatUptime(uptime),
+              formatUptime(uptime),
               // Tabular figures: this value ticks while a session is live.
               style: AppTypography.tabular(theme.textTheme.titleLarge),
             ),
@@ -176,14 +177,6 @@ class _SessionUptimeCard extends StatelessWidget {
         ),
       ),
     );
-  }
-
-  String _formatUptime(Duration d) {
-    if (d.inMinutes < 1) return '${d.inSeconds}s';
-    if (d.inHours < 1) return '${d.inMinutes}m';
-    final h = d.inHours;
-    final m = d.inMinutes - h * 60;
-    return '${h}h ${m}m';
   }
 }
 

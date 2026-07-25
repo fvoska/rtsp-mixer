@@ -8,6 +8,7 @@ import '../../../core/theme/app_typography.dart';
 import '../../../core/theme/spacing.dart';
 import '../../../core/theme/status_colors.dart';
 import '../../auth/providers/auth_provider.dart';
+import '../helpers/uptime_format.dart';
 import '../providers/session_history_provider.dart';
 
 /// Mini-bar shown above the bottom NavigationBar while monitoring is active
@@ -66,7 +67,7 @@ class _ActiveSessionBarState extends ConsumerState<ActiveSessionBar> {
     final theme = Theme.of(context);
     final startedAt = session?.startedAt ?? DateTime.now();
     final uptime = DateTime.now().difference(startedAt);
-    final formatted = session == null ? 'resuming…' : _formatUptime(uptime);
+    final formatted = session == null ? 'resuming…' : formatUptime(uptime);
     final semanticsLabel = session == null
         ? 'Resuming monitoring'
         : 'Return to monitoring, uptime $formatted';
@@ -144,14 +145,5 @@ class _ActiveSessionBarState extends ConsumerState<ActiveSessionBar> {
         ),
       ),
     );
-  }
-
-  /// Same xs / Mm / Hh Mm format used by HealthSummaryScreen's uptime card.
-  String _formatUptime(Duration d) {
-    if (d.inMinutes < 1) return '${d.inSeconds}s';
-    if (d.inHours < 1) return '${d.inMinutes}m';
-    final h = d.inHours;
-    final m = d.inMinutes - h * 60;
-    return '${h}h ${m}m';
   }
 }

@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io' show Platform;
 import 'dart:math' as math;
 
@@ -9,12 +10,14 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../core/logging/app_logger.dart';
 import '../../../core/providers/settings_provider.dart';
 import '../../../core/services/foreground_service.dart';
+import '../../../core/theme/app_typography.dart';
 import '../../../core/theme/spacing.dart';
 import '../../../core/theme/status_colors.dart';
 import '../../auth/providers/auth_provider.dart';
 import '../../cameras/models/protect_camera.dart';
 import '../../cameras/providers/camera_provider.dart';
 import '../../cameras/widgets/camera_source_badge.dart';
+import '../helpers/uptime_format.dart';
 import '../models/player_state.dart';
 import '../providers/audio_player_provider.dart';
 import '../providers/session_history_provider.dart';
@@ -415,6 +418,7 @@ class _LiveMonitoringView extends ConsumerWidget {
                     onToggleShowDetails: onToggleShowDetails,
                     onAddCamera: openAddPicker,
                   ),
+                  const _ListeningStatusLine(),
                   const SizedBox(height: Spacing.md),
                   Wrap(
                     spacing: Spacing.lg,
@@ -445,6 +449,113 @@ class _LiveMonitoringView extends ConsumerWidget {
           },
         );
       },
+    );
+  }
+}
+
+/// Calm header status line under the live toolbar: a slowly pulsing teal dot
+/// and "Listening · 6h 12m". This is the reassurance line — the thing a parent
+/// glances at to confirm the app is still awake — so it renders nothing at all
+/// rather than something misleading when there is no live session.
+///
+/// Follows [ActiveSessionBar]'s proven pattern: one 1-second [Timer.periodic],
+/// `setState` only while mounted, cancelled in `dispose`, opacity animated by
+/// [AnimatedOpacity]. Per CLAUDE.md every part of the tick is defensive —
+/// nothing here may throw out of a timer callback or a build during an
+/// overnight session.
+class _ListeningStatusLine extends ConsumerStatefulWidget {
+  const _ListeningStatusLine();
+
+  @override
+  ConsumerState<_ListeningStatusLine> createState() =>
+      _ListeningStatusLineState();
+}
+
+class _ListeningStatusLineState extends ConsumerState<_ListeningStatusLine> {
+  Timer? _tick;
+  bool _pulseHi = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _tick = Timer.periodic(const Duration(seconds: 1), (_) {
+      try {
+        if (!mounted) return;
+        setState(() => _pulseHi = !_pulseHi);
+      } catch (e) {
+        // A failed repaint must never propagate out of a timer callback.
+        appLog('MONITOR', 'Status line tick skipped: $e');
+      }
+    });
+  }
+
+  @override
+  void dispose() {
+    _tick?.cancel();
+    super.dispose();
+  }
+
+  /// Null when there is nothing honest to show (no session, unreadable
+  /// history, or a start time the clock disagrees with).
+  String? _uptimeLabel() {
+    try {
+      final startedAt =
+          ref.watch(sessionHistoryProvider).value?.current?.startedAt;
+      if (startedAt == null) return null;
+      final elapsed = DateTime.now().difference(startedAt);
+      // A future-dated startedAt (clock skew, restored session) reads as 0s
+      // rather than a negative duration.
+      return formatUptime(elapsed);
+    } catch (e) {
+      appLog('MONITOR', 'Uptime unavailable for status line: $e');
+      return null;
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final label = _uptimeLabel();
+    if (label == null) return const SizedBox.shrink();
+
+    final theme = Theme.of(context);
+    return Padding(
+      padding: const EdgeInsets.only(top: Spacing.sm),
+      child: Row(
+        children: [
+          AnimatedOpacity(
+            opacity: _pulseHi ? 1.0 : 0.45,
+            duration: const Duration(milliseconds: 800),
+            child: Container(
+              width: 8,
+              height: 8,
+              decoration: BoxDecoration(
+                color: context.statusColors.live,
+                shape: BoxShape.circle,
+              ),
+            ),
+          ),
+          const SizedBox(width: Spacing.sm),
+          Expanded(
+            child: Text.rich(
+              TextSpan(
+                text: 'Listening · ',
+                children: [
+                  TextSpan(
+                    text: label,
+                    // Tabular figures so the minute rollover doesn't shove
+                    // the line sideways once a second.
+                    style: AppTypography.tabular(theme.textTheme.bodyMedium),
+                  ),
+                ],
+              ),
+              style: theme.textTheme.bodyMedium
+                  ?.copyWith(color: theme.colorScheme.onSurfaceVariant),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
+        ],
+      ),
     );
   }
 }
