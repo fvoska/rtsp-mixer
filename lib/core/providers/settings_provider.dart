@@ -26,6 +26,9 @@ ThemeMode _themeModeFromName(Object? raw) {
   return ThemeMode.system;
 }
 
+/// Tolerant bool decode: anything that is not a real `true` reads as false.
+bool _boolOrFalse(Object? raw) => raw is bool && raw;
+
 class AppSettings {
   /// Use plain RTSP (port 7447) instead of RTSPS (port 7441 + SRTP).
   final bool useRtsp;
@@ -40,11 +43,21 @@ class AppSettings {
   /// System / Light / Dark, chosen by the user in Settings.
   final ThemeMode themeMode;
 
+  /// Use the true-black OLED dark theme instead of the standard petrol one.
+  ///
+  /// Orthogonal to [themeMode] by design: it is a property of the *dark*
+  /// theme, so it applies whenever dark is active — whether the user picked
+  /// [ThemeMode.dark] or the OS resolved dark under [ThemeMode.system]. It has
+  /// no effect while light is showing, and is deliberately still persisted in
+  /// that case so switching back to dark restores the user's choice.
+  final bool oledDark;
+
   const AppSettings({
     this.useRtsp = false,
     this.audioBufferSeconds = 0.5,
     this.activityThreshold = 0.05,
     this.themeMode = ThemeMode.system,
+    this.oledDark = false,
   });
 
   AppSettings copyWith({
@@ -52,12 +65,14 @@ class AppSettings {
     double? audioBufferSeconds,
     double? activityThreshold,
     ThemeMode? themeMode,
+    bool? oledDark,
   }) =>
       AppSettings(
         useRtsp: useRtsp ?? this.useRtsp,
         audioBufferSeconds: audioBufferSeconds ?? this.audioBufferSeconds,
         activityThreshold: activityThreshold ?? this.activityThreshold,
         themeMode: themeMode ?? this.themeMode,
+        oledDark: oledDark ?? this.oledDark,
       );
 
   @override
@@ -67,17 +82,24 @@ class AppSettings {
           useRtsp == other.useRtsp &&
           audioBufferSeconds == other.audioBufferSeconds &&
           activityThreshold == other.activityThreshold &&
-          themeMode == other.themeMode;
+          themeMode == other.themeMode &&
+          oledDark == other.oledDark;
 
   @override
-  int get hashCode =>
-      Object.hash(useRtsp, audioBufferSeconds, activityThreshold, themeMode);
+  int get hashCode => Object.hash(
+        useRtsp,
+        audioBufferSeconds,
+        activityThreshold,
+        themeMode,
+        oledDark,
+      );
 
   Map<String, dynamic> toJson() => {
         'useRtsp': useRtsp,
         'audioBufferSeconds': audioBufferSeconds,
         'activityThreshold': activityThreshold,
         'themeMode': _themeModeToName(themeMode),
+        'oledDark': oledDark,
       };
 
   factory AppSettings.fromJson(Map<String, dynamic> json) => AppSettings(
@@ -87,6 +109,10 @@ class AppSettings {
         activityThreshold:
             (json['activityThreshold'] as num?)?.toDouble() ?? 0.05,
         themeMode: _themeModeFromName(json['themeMode']),
+        // Same tolerance as themeMode, and for the same reason: a cast here
+        // would throw out of the whole decode, and _loadFromStorage swallows
+        // that — so one wrong-typed field would silently reset every setting.
+        oledDark: _boolOrFalse(json['oledDark']),
       );
 }
 
@@ -134,6 +160,12 @@ class SettingsNotifier extends Notifier<AppSettings> {
   void setThemeMode(ThemeMode value) {
     state = state.copyWith(themeMode: value);
     appLog('SETTINGS', 'Theme mode: ${_themeModeToName(value)}');
+    _save();
+  }
+
+  void setOledDark(bool value) {
+    state = state.copyWith(oledDark: value);
+    appLog('SETTINGS', 'OLED dark: $value');
     _save();
   }
 

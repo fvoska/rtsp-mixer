@@ -125,4 +125,69 @@ void main() {
       });
     });
   });
+
+  group('AppSettings.oledDark', () {
+    test('defaults to off', () {
+      expect(const AppSettings().oledDark, isFalse);
+    });
+
+    test('copyWith updates oledDark without touching other fields', () {
+      const s = AppSettings(
+        useRtsp: true,
+        audioBufferSeconds: 0.3,
+        activityThreshold: 0.2,
+        themeMode: ThemeMode.dark,
+      );
+      final next = s.copyWith(oledDark: true);
+      expect(next.oledDark, isTrue);
+      expect(next.useRtsp, true);
+      expect(next.audioBufferSeconds, 0.3);
+      expect(next.activityThreshold, 0.2);
+      expect(next.themeMode, ThemeMode.dark);
+    });
+
+    test('copyWith without oledDark preserves it', () {
+      const s = AppSettings(oledDark: true);
+      expect(s.copyWith(useRtsp: true).oledDark, isTrue);
+    });
+
+    test('survives being set under every theme mode', () {
+      // The preference is orthogonal to how dark mode is reached: it must
+      // persist under System (OS-resolved dark) and under an explicit Light
+      // choice, not just under an explicit Dark one.
+      for (final mode in ThemeMode.values) {
+        final round = AppSettings.fromJson(
+          AppSettings(themeMode: mode, oledDark: true).toJson(),
+        );
+        expect(round.oledDark, isTrue, reason: 'lost oledDark under $mode');
+        expect(round.themeMode, mode);
+      }
+    });
+
+    test('equality and hashCode cover oledDark', () {
+      const a = AppSettings(oledDark: true);
+      const b = AppSettings(oledDark: true);
+      const c = AppSettings(oledDark: false);
+      expect(a, b);
+      expect(a.hashCode, b.hashCode);
+      expect(a, isNot(c));
+      expect(a.hashCode, isNot(c.hashCode));
+    });
+
+    group('malformed persisted payloads degrade to off', () {
+      test('absent key (settings written before the field existed)', () {
+        final s = AppSettings.fromJson({'themeMode': 'dark'});
+        expect(s.oledDark, isFalse);
+        expect(s.themeMode, ThemeMode.dark);
+      });
+
+      test('explicit null', () {
+        expect(AppSettings.fromJson({'oledDark': null}).oledDark, isFalse);
+      });
+
+      test('wrong type', () {
+        expect(AppSettings.fromJson({'oledDark': 'yes'}).oledDark, isFalse);
+      });
+    });
+  });
 }
