@@ -154,11 +154,24 @@ decides login-vs-shell is the first thing a user hits.
 
 ## Flakiness and timing hazards
 
-The suite was green on 5 consecutive full runs and stayed green under CPU
-contention (16 busy loops on 4 cores), so none of the below is a
-currently-observed failure. They are hazards that pass on timing rather than on
-state — the kind that fails once a month on a loaded CI runner and gets
-re-run rather than fixed.
+Most of the below is not a currently-observed failure — the suite was green on 5
+consecutive full runs and stayed green under CPU contention (16 busy loops on 4
+cores). They are hazards that pass on timing rather than on state.
+
+**One was a real, reproducible flake, and CI found it on the very first run of
+the new workflow.** `per_camera_cancel_test.dart` asserted
+`expect(attempts, ['cam1', 'cam2'])` after elapsing past the first backoff for
+two cameras. `computeBackoff` applies ±20% jitter and the supervisor was built
+without a seed, so each camera's first retry landed anywhere in 800–1200ms and
+whichever drew the smaller jitter fired first — the CI log showed cam1 at 1178ms
+against cam2 at 1058ms. Measured **3 failures in 24 runs (~12.5%)**; at that
+rate a full suite passes ~45% of the time across six runs, which is exactly why
+six consecutive green local runs never surfaced it. 0 failures in 30 runs after
+seeding the `Random` and making the precondition order-insensitive.
+
+Worth noting for anyone tempted by affected-test selection: that test imports
+only `reconnect_supervisor.dart`, a file the branch that found it never touched.
+Any change-graph-based test selection would have skipped it.
 
 ### Fixed — this round
 
@@ -170,6 +183,7 @@ re-run rather than fixed.
 | `active_session_bar_test` uptime fixture | `DateTime.now() - 7min` asserted against exactly `"Monitoring · 7m"` — on the bucket edge, zero slack | anchored 7m30s back; `inMinutes` floors, so ±30s of drift still reads `7m` |
 | `AppLogger` file sink during tests | every log line a synchronous append to the fixed path `/tmp/rtsp_mixer.log`, shared by concurrently-running test processes | sink off under `FLUTTER_TEST`; `resetForTest()` + `installAppLoggerTestIsolation()` for the global buffer and listener list |
 | `ProtectApiClient.setDioForTest` | `late final Dio _dio` assigned in the constructor → `LateInitializationError` on every call. The only seam was dead by construction | fixed to `late Dio`; client coverage 7.2% → 93.2% |
+| `per_camera_cancel_test` attempt order | `expect(attempts, ['cam1', 'cam2'])` against a jitter-decided firing order, unseeded `Random` — ~12.5% failure rate, found by CI | seeded `Random(42)` + `unorderedEquals`; the two other unseeded supervisor constructions seeded prophylactically |
 
 One note on method, because it cost a round trip: collapsing
 `backgroundValidationDelay` to zero *by itself* made the revoke test flaky in
