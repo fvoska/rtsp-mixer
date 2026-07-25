@@ -23,14 +23,19 @@ enum SessionStatus { playing, connecting, reconnecting, error }
 SessionStatus resolveSessionStatus(AsyncValue<MonitoringState> monitoring) {
   if (monitoring.hasError) return SessionStatus.error;
   final state = monitoring.value;
-  if (state == null || state.cameras.isEmpty) return SessionStatus.connecting;
-  if (state.anyError) return SessionStatus.error;
-  if (state.allLive) return SessionStatus.playing;
+  if (state == null) return SessionStatus.connecting;
+  return sessionStatusOf(state.cameras);
+}
+
+/// Same rule as [resolveSessionStatus], for callers that already hold the
+/// camera list (the player notifier, the notification builders).
+SessionStatus sessionStatusOf(List<CameraAudioState> cameras) {
+  if (cameras.isEmpty) return SessionStatus.connecting;
+  if (cameras.any((c) => c.isError)) return SessionStatus.error;
+  if (cameras.every((c) => c.isLive)) return SessionStatus.playing;
   // A dropped-and-recovering stream is not a first connection; name it so the
   // UI doesn't imply a fresh, healthy start.
-  if (state.cameras.any((c) => c.isReconnecting)) {
-    return SessionStatus.reconnecting;
-  }
+  if (cameras.any((c) => c.isReconnecting)) return SessionStatus.reconnecting;
   return SessionStatus.connecting;
 }
 
@@ -52,6 +57,29 @@ Color sessionStatusColor(SessionStatus status, StatusColors colors) =>
       SessionStatus.reconnecting => colors.reconnecting,
       SessionStatus.error => colors.offline,
     };
+
+/// Title for the ongoing-monitoring notification and the lock-screen media
+/// item. Mirrors the in-app copy: "Listening" is reserved for an all-live mix,
+/// so a parent who checks the notification instead of the app gets the same
+/// truth. (Deliberately not [sessionStatusLabel]: the notification's healthy
+/// title has always been the first-person "Listening", not "Monitoring
+/// active".)
+String sessionNotificationTitle(SessionStatus status) => switch (status) {
+      SessionStatus.playing => 'Listening',
+      SessionStatus.connecting => 'Connecting…',
+      SessionStatus.reconnecting => 'Reconnecting…',
+      SessionStatus.error => 'Stream failed',
+    };
+
+/// Body text for the ongoing-monitoring notification: the camera names, each
+/// with a parenthesised status unless it is playing.
+String sessionNotificationText(List<CameraAudioState> cameras) {
+  final parts = cameras.map((c) {
+    final suffix = c.isLive ? '' : ' (${c.connectionStatus.name})';
+    return '${c.cameraName}$suffix';
+  });
+  return 'Monitoring: ${parts.join(", ")}';
+}
 
 extension SessionStatusX on SessionStatus {
   /// True only when every camera in the mix is streaming — the one state

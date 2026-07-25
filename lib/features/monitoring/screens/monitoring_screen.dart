@@ -121,11 +121,17 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen>
     final monState = ref.read(audioPlayerProvider).value;
     if (monState != null && monState.cameras.isNotEmpty) {
       final names = monState.cameras.map((c) => c.cameraName).toList();
-      await ForegroundServiceManager.start(names);
+      // Seed both notifications with the health we already know: a camera that
+      // failed to open must not spend its first second labelled "Listening".
+      // Subsequent transitions are pushed by the notifier's own refresh.
+      final title =
+          sessionNotificationTitle(sessionStatusOf(monState.cameras));
+      await ForegroundServiceManager.start(names, title: title);
       await ref.read(storageProvider).write('was_monitoring', 'true');
       try {
         final handler = await ref.read(audioHandlerProvider.future);
         handler.setCameraNames(names);
+        handler.setStatusTitle(title);
         handler.setPlaying();
       } catch (e) {
         appLog('AUDIO_SERVICE', 'Failed to init audio handler: $e');

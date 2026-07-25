@@ -10,6 +10,7 @@ import 'core/providers/settings_provider.dart';
 import 'core/router/app_router.dart';
 import 'core/services/foreground_service.dart';
 import 'core/theme/app_theme.dart';
+import 'features/monitoring/helpers/session_status.dart';
 import 'features/monitoring/providers/audio_player_provider.dart';
 
 class App extends ConsumerStatefulWidget {
@@ -44,7 +45,9 @@ class _AppState extends ConsumerState<App> {
         if (notifier.isAllMuted) {
           notifier.unmuteAll();
           ForegroundServiceManager.updateNotification(
-            title: 'Listening',
+            // Un-pausing returns to whatever the streams are actually doing —
+            // it does not promise "Listening".
+            title: _currentNotificationTitle(),
             text: _currentNotificationText(),
             notificationButtons: const [
               NotificationButton(id: 'pause', text: 'Pause'),
@@ -77,9 +80,12 @@ class _AppState extends ConsumerState<App> {
   String _currentNotificationText() {
     final monState = ref.read(audioPlayerProvider).value;
     if (monState == null) return 'Monitoring';
-    final names = monState.cameras.map((c) => c.cameraName).join(', ');
-    return 'Monitoring: $names';
+    return sessionNotificationText(monState.cameras);
   }
+
+  String _currentNotificationTitle() => sessionNotificationTitle(
+        resolveSessionStatus(ref.read(audioPlayerProvider)),
+      );
 
   @override
   Widget build(BuildContext context) {
