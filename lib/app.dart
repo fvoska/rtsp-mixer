@@ -6,6 +6,7 @@ import 'package:flutter_foreground_task/flutter_foreground_task.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'core/logging/app_logger.dart';
+import 'core/providers/settings_provider.dart';
 import 'core/router/app_router.dart';
 import 'core/services/foreground_service.dart';
 import 'core/theme/app_theme.dart';
@@ -83,9 +84,12 @@ class _AppState extends ConsumerState<App> {
   @override
   Widget build(BuildContext context) {
     final router = ref.watch(appRouterProvider);
+    final settings = ref.watch(settingsProvider);
     final Widget app = MaterialApp.router(
       title: 'RTSP Mixer',
-      theme: AppTheme.dark,
+      theme: AppTheme.light,
+      darkTheme: AppTheme.dark,
+      themeMode: settings.themeMode,
       routerConfig: router,
       debugShowCheckedModeBanner: false,
     );

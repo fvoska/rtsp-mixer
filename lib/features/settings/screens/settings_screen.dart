@@ -34,6 +34,45 @@ class SettingsScreen extends ConsumerWidget {
       body: ListView(
         padding: const EdgeInsets.symmetric(vertical: Spacing.sm),
         children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(
+              Spacing.lg,
+              Spacing.md,
+              Spacing.lg,
+              0,
+            ),
+            child: Text(
+              'Appearance',
+              style: theme.textTheme.labelLarge?.copyWith(
+                color: theme.colorScheme.primary,
+              ),
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(
+              Spacing.lg,
+              Spacing.sm,
+              Spacing.lg,
+              Spacing.md,
+            ),
+            child: SegmentedButton<ThemeMode>(
+              // Labels only: with icons the three segments overflow on a
+              // ~320dp phone, and this control has to survive the narrowest
+              // screen the app supports.
+              showSelectedIcon: false,
+              segments: const [
+                ButtonSegment(value: ThemeMode.system, label: Text('System')),
+                ButtonSegment(value: ThemeMode.light, label: Text('Light')),
+                ButtonSegment(value: ThemeMode.dark, label: Text('Dark')),
+              ],
+              selected: {settings.themeMode},
+              onSelectionChanged: (selection) {
+                if (selection.isEmpty) return;
+                notifier.setThemeMode(selection.first);
+              },
+            ),
+          ),
+          const Divider(height: 1),
           SwitchListTile(
             title: const Text('Use plain RTSP'),
             subtitle: Text(
