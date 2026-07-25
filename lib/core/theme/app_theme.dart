@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import 'app_typography.dart';
 import 'status_colors.dart';
 
 /// The "Roomtone" palette: a petrol/teal identity built for a room that is
@@ -119,6 +120,10 @@ abstract final class AppTheme {
       scaffoldBackgroundColor: ground,
       canvasColor: ground,
       dividerColor: hairline,
+      textTheme: AppTypography.textTheme(brightness),
+      // Anything that bypasses the TextTheme still inherits the UI face
+      // instead of falling back to the platform default.
+      fontFamily: AppTypography.ui,
       extensions: <ThemeExtension<dynamic>>[
         StatusColors.forBrightness(brightness),
       ],

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../core/theme/app_typography.dart';
 import '../../../core/theme/spacing.dart';
 import '../../../core/theme/status_colors.dart';
 import '../models/health_event.dart';
@@ -168,7 +169,8 @@ class _SessionUptimeCard extends StatelessWidget {
             const SizedBox(height: Spacing.xs),
             Text(
               _formatUptime(uptime),
-              style: theme.textTheme.titleLarge,
+              // Tabular figures: this value ticks while a session is live.
+              style: AppTypography.tabular(theme.textTheme.titleLarge),
             ),
           ],
         ),
@@ -276,7 +278,7 @@ class _MetricRow extends StatelessWidget {
               ?.copyWith(color: theme.colorScheme.onSurfaceVariant),
         ),
         const Spacer(),
-        Text(value, style: theme.textTheme.titleMedium),
+        Text(value, style: AppTypography.tabular(theme.textTheme.titleMedium)),
       ],
     );
   }

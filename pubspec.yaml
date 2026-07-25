@@ -81,6 +81,31 @@ flutter:
   assets:
     - CHANGELOG.md
 
+  # Typography is VENDORED, never fetched at run time: a nursery with flaky
+  # WiFi still has to render text. Verify with tool/branding/verify_fonts.py.
+  fonts:
+    # Display / headlines — the app's voice.
+    - family: Outfit
+      fonts:
+        - asset: assets/fonts/Outfit-SemiBold.ttf
+          weight: 600
+    # UI text — titles, body, labels.
+    - family: Nunito Sans
+      fonts:
+        - asset: assets/fonts/NunitoSans-Regular.ttf
+          weight: 400
+        - asset: assets/fonts/NunitoSans-SemiBold.ttf
+          weight: 600
+        - asset: assets/fonts/NunitoSans-Bold.ttf
+          weight: 700
+    # Numerics — uptime, levels, bitrates, timestamps (tabular figures).
+    - family: Roboto Mono
+      fonts:
+        - asset: assets/fonts/RobotoMono-Regular.ttf
+          weight: 400
+        - asset: assets/fonts/RobotoMono-Medium.ttf
+          weight: 500
+
   # To add assets to your application, add an assets section, like this:
   # assets:
   #   - images/a_dot_burr.jpeg

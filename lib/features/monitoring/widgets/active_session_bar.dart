@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../../core/theme/app_typography.dart';
 import '../../../core/theme/spacing.dart';
 import '../../../core/theme/status_colors.dart';
 import '../../auth/providers/auth_provider.dart';
@@ -109,8 +110,22 @@ class _ActiveSessionBarState extends ConsumerState<ActiveSessionBar> {
                   ),
                   const SizedBox(width: Spacing.sm),
                   Expanded(
-                    child: Text(
-                      'Monitoring · $formatted',
+                    // The duration ticks every second, so it renders in the
+                    // tabular-figure numeric face while the word stays in the
+                    // UI face. Same string, same formatting logic — only the
+                    // span it sits in changed.
+                    child: Text.rich(
+                      TextSpan(
+                        text: 'Monitoring · ',
+                        children: [
+                          TextSpan(
+                            text: formatted,
+                            style: AppTypography.tabular(
+                              theme.textTheme.titleSmall,
+                            ),
+                          ),
+                        ],
+                      ),
                       style: theme.textTheme.titleSmall?.copyWith(
                         color: theme.colorScheme.onSecondaryContainer,
                       ),

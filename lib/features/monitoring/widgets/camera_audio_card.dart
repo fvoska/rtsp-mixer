@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:media_kit_video/media_kit_video.dart';
 
+import '../../../core/theme/app_typography.dart';
 import '../../../core/theme/spacing.dart';
 import '../../../core/theme/status_colors.dart';
 import '../../cameras/widgets/camera_source_badge.dart';
@@ -858,12 +859,13 @@ class _StreamInfoPanel extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final dimStyle = theme.textTheme.bodySmall?.copyWith(
-      fontSize: 11,
+    // Vendored Roboto Mono with tabular figures: these rows tick every poll,
+    // and a proportional (or platform-default 'monospace') face made the
+    // values shuffle sideways as digits changed.
+    final dimStyle = AppTypography.numericSmall.copyWith(
       color: theme.colorScheme.onSurface.withValues(alpha: 0.6),
-      fontFamily: 'monospace',
     );
-    final labelStyle = dimStyle?.copyWith(
+    final labelStyle = dimStyle.copyWith(
       color: theme.colorScheme.onSurface.withValues(alpha: 0.4),
     );
     final si = streamInfo;

@@ -107,7 +107,7 @@ void main() {
         currentSession: _liveSession(),
       );
       // Uptime format is "7m" for a 7-minute-old session.
-      expect(find.text('Monitoring · 7m'), findsOneWidget);
+      expect(find.text('Monitoring · 7m', findRichText: true), findsOneWidget);
     });
 
     testWidgets(
@@ -121,7 +121,7 @@ void main() {
         selectedIndex: 1,
         resumeMonitoring: true,
       );
-      expect(find.text('Monitoring · resuming…'), findsOneWidget);
+      expect(find.text('Monitoring · resuming…', findRichText: true), findsOneWidget);
     });
 
     testWidgets(
@@ -143,8 +143,8 @@ void main() {
         currentSession: _liveSession(),
         resumeMonitoring: true,
       );
-      expect(find.text('Monitoring · resuming…'), findsNothing);
-      expect(find.text('Monitoring · 7m'), findsOneWidget);
+      expect(find.text('Monitoring · resuming…', findRichText: true), findsNothing);
+      expect(find.text('Monitoring · 7m', findRichText: true), findsOneWidget);
     });
   });
 }
