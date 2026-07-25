@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rtsp_mixer/core/theme/app_theme.dart';
+import 'package:rtsp_mixer/core/theme/status_colors.dart';
 import 'package:rtsp_mixer/features/monitoring/models/player_state.dart';
 import 'package:rtsp_mixer/features/monitoring/widgets/camera_audio_card.dart';
 
@@ -203,7 +204,7 @@ void main() {
       );
       final valueColor =
           (indicator.valueColor as AlwaysStoppedAnimation<Color?>).value;
-      expect(valueColor, AppTheme.statusOnline);
+      expect(valueColor, AppTheme.dark.statusColors.live);
       expect(valueColor, isNot(Colors.amber));
     });
   });

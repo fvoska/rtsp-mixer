@@ -9,8 +9,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../core/logging/app_logger.dart';
 import '../../../core/providers/settings_provider.dart';
 import '../../../core/services/foreground_service.dart';
-import '../../../core/theme/app_theme.dart';
 import '../../../core/theme/spacing.dart';
+import '../../../core/theme/status_colors.dart';
 import '../../auth/providers/auth_provider.dart';
 import '../../cameras/models/protect_camera.dart';
 import '../../cameras/providers/camera_provider.dart';
@@ -280,10 +280,11 @@ class _InlineStopBanner extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final statusColors = context.statusColors;
     final background = switch (status) {
-      _BannerStatus.playing => AppTheme.statusOnline,
-      _BannerStatus.connecting => AppTheme.statusConnecting,
-      _BannerStatus.error => AppTheme.statusOffline,
+      _BannerStatus.playing => statusColors.live,
+      _BannerStatus.connecting => statusColors.connecting,
+      _BannerStatus.error => statusColors.offline,
     };
     const foreground = Colors.black87;
     return Material(
@@ -620,8 +621,8 @@ class _AddCameraSheet extends StatelessWidget {
                             decoration: BoxDecoration(
                               shape: BoxShape.circle,
                               color: cam.isConnected
-                                  ? AppTheme.statusOnline
-                                  : AppTheme.statusOffline,
+                                  ? context.statusColors.live
+                                  : context.statusColors.offline,
                             ),
                           ),
                     title: Row(
@@ -925,8 +926,8 @@ class _IdleCameraPicker extends ConsumerWidget {
                                   decoration: BoxDecoration(
                                     shape: BoxShape.circle,
                                     color: cam.isConnected
-                                        ? AppTheme.statusOnline
-                                        : AppTheme.statusOffline,
+                                        ? context.statusColors.live
+                                        : context.statusColors.offline,
                                   ),
                                 ),
                         );
@@ -1098,8 +1099,8 @@ class _CameraPickerTile extends StatelessWidget {
                             decoration: BoxDecoration(
                               shape: BoxShape.circle,
                               color: camera.isConnected
-                                  ? AppTheme.statusOnline
-                                  : AppTheme.statusOffline,
+                                  ? context.statusColors.live
+                                  : context.statusColors.offline,
                             ),
                           ),
                           const SizedBox(width: Spacing.xs),

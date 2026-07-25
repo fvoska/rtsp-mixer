@@ -4,8 +4,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
-import '../../../core/theme/app_theme.dart';
 import '../../../core/theme/spacing.dart';
+import '../../../core/theme/status_colors.dart';
 import '../../auth/providers/auth_provider.dart';
 import '../providers/session_history_provider.dart';
 
@@ -101,8 +101,8 @@ class _ActiveSessionBarState extends ConsumerState<ActiveSessionBar> {
                     child: Container(
                       width: 8,
                       height: 8,
-                      decoration: const BoxDecoration(
-                        color: AppTheme.statusOnline,
+                      decoration: BoxDecoration(
+                        color: context.statusColors.live,
                         shape: BoxShape.circle,
                       ),
                     ),

@@ -1,8 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../../../core/theme/app_theme.dart';
 import '../../../core/theme/spacing.dart';
+import '../../../core/theme/status_colors.dart';
 import '../models/health_event.dart';
 import '../models/session.dart';
 
@@ -436,10 +436,10 @@ class _EventRow extends StatelessWidget {
       case HealthEventType.monitoringStarted:
       case HealthEventType.streamStarted:
       case HealthEventType.reconnectSuccess:
-        return AppTheme.statusOnline;
+        return theme.statusColors.live;
       case HealthEventType.streamError:
       case HealthEventType.zombieDetected:
-        return AppTheme.statusOffline;
+        return theme.statusColors.offline;
       case HealthEventType.reconnectAttempt:
       case HealthEventType.wifiDropped:
       case HealthEventType.alertFired:

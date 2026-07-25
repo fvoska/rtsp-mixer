@@ -4,8 +4,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:media_kit_video/media_kit_video.dart';
 
-import '../../../core/theme/app_theme.dart';
 import '../../../core/theme/spacing.dart';
+import '../../../core/theme/status_colors.dart';
 import '../../cameras/widgets/camera_source_badge.dart';
 import '../helpers/audio_level_meter.dart';
 import '../models/player_state.dart';
@@ -118,6 +118,7 @@ class _CameraAudioCardState extends ConsumerState<CameraAudioCard> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final status = context.statusColors;
     final cs = widget.cameraState;
     final idx = widget.cameraIndex;
     final isConnecting =
@@ -131,7 +132,7 @@ class _CameraAudioCardState extends ConsumerState<CameraAudioCard> {
     // loudness and not on deviation-from-baseline.
     final hasActivity = cs.isLive && cs.audioActivity > widget.activityThreshold;
     final borderColor = hasActivity
-        ? AppTheme.statusOnline.withValues(
+        ? status.live.withValues(
             alpha: ((cs.audioActivity - widget.activityThreshold) /
                     (1.0 - widget.activityThreshold))
                 .clamp(0.15, 0.9))
@@ -195,12 +196,12 @@ class _CameraAudioCardState extends ConsumerState<CameraAudioCard> {
                   decoration: BoxDecoration(
                     shape: BoxShape.circle,
                     color: cs.isLive
-                        ? AppTheme.statusOnline
+                        ? status.live
                         : cs.isError
-                            ? AppTheme.statusOffline
+                            ? status.offline
                             : cs.connectionStatus ==
                                     CameraConnectionStatus.reconnecting
-                                ? theme.colorScheme.tertiary
+                                ? status.reconnecting
                                 : theme.colorScheme.onSurface
                                     .withValues(alpha: 0.5),
                   ),
@@ -492,8 +493,8 @@ class _CameraAudioCardState extends ConsumerState<CameraAudioCard> {
                                         ? 'Muted'
                                         : '${cs.volume.round()}%'),
                                     style: cs.isMuted
-                                        ? theme.textTheme.bodySmall?.copyWith(
-                                            color: AppTheme.statusOffline)
+                                        ? theme.textTheme.bodySmall
+                                            ?.copyWith(color: status.offline)
                                         : theme.textTheme.bodySmall,
                                     textAlign: TextAlign.right,
                                     maxLines: 1,
@@ -532,15 +533,16 @@ class _StatusBanner extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;
+    final statusColors = context.statusColors;
     final bool isReconnecting =
         status == CameraConnectionStatus.reconnecting;
 
-    // D-10: the amber accent (tertiary) is reserved for reconnecting only.
+    // D-10: the amber accent is reserved for reconnecting only.
     final Color background = isReconnecting
         ? scheme.tertiaryContainer.withValues(alpha: 0.3)
-        : AppTheme.statusOffline.withValues(alpha: 0.12);
+        : statusColors.offline.withValues(alpha: 0.12);
     final Color foreground =
-        isReconnecting ? scheme.tertiary : AppTheme.statusOffline;
+        isReconnecting ? statusColors.reconnecting : statusColors.offline;
 
     final Widget leading = isReconnecting
         ? SizedBox(
@@ -548,13 +550,13 @@ class _StatusBanner extends StatelessWidget {
             height: 14,
             child: CircularProgressIndicator(
               strokeWidth: 2.0,
-              valueColor: AlwaysStoppedAnimation(scheme.tertiary),
+              valueColor: AlwaysStoppedAnimation(statusColors.reconnecting),
             ),
           )
-        : const Icon(
+        : Icon(
             Icons.error_outline,
             size: 14,
-            color: AppTheme.statusOffline,
+            color: statusColors.offline,
           );
 
     // D-11: reconnecting is status-ONLY — no attempt count, countdown, or
@@ -620,6 +622,7 @@ class _StatusLine extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;
+    final statusColors = context.statusColors;
 
     Widget content;
 
@@ -637,14 +640,14 @@ class _StatusLine extends StatelessWidget {
                   valueColor: AlwaysStoppedAnimation(scheme.primary),
                 ),
               )
-            : const Icon(
+            : Icon(
                 Icons.graphic_eq,
                 size: 14,
-                color: AppTheme.statusOnline,
+                color: statusColors.live,
               );
         final String label = isConnecting ? 'Connecting…' : 'Live';
         final Color color =
-            isConnecting ? scheme.primary : AppTheme.statusOnline;
+            isConnecting ? scheme.primary : statusColors.live;
         content = Column(
           // Keyed by status so Live ↔ Connecting… crossfades in the switcher.
           key: ValueKey(status),
@@ -709,8 +712,9 @@ class _AudioLevelIndicator extends StatelessWidget {
     // shows an ABSOLUTE pseudo-SPL now, so a low level is a normally quiet
     // nursery — not a degraded state. An amber "low" branch would glow all
     // night; deliberately removed (pinned by a widget test).
+    final statusColors = context.statusColors;
     final Color barColor =
-        isSuspiciouslySilent ? AppTheme.statusOffline : AppTheme.statusOnline;
+        isSuspiciouslySilent ? statusColors.offline : statusColors.live;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -733,7 +737,7 @@ class _AudioLevelIndicator extends StatelessWidget {
           Text(
             'No audio for ${silenceDuration.toStringAsFixed(0)}s — stream may be broken',
             style: theme.textTheme.bodySmall?.copyWith(
-              color: AppTheme.statusOffline,
+              color: statusColors.offline,
               fontSize: 11,
             ),
           ),
