@@ -1,7 +1,9 @@
+import 'package:flutter/gestures.dart' show TapGestureRecognizer;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart' show rootBundle;
 import 'package:package_info_plus/package_info_plus.dart';
 
+import '../../../core/services/external_link_launcher.dart';
 import '../../../core/theme/spacing.dart';
 import '../changelog.dart';
 
@@ -28,9 +30,13 @@ class AboutScreen extends StatelessWidget {
   }
 
   /// Loads the bundled CHANGELOG, resolving load failures to null.
-  Future<String?> _loadChangelog() async {
+  ///
+  /// Reads through [bundle] — `DefaultAssetBundle.of(context)`, which falls
+  /// back to [rootBundle] in the app and lets tests supply a fixed changelog
+  /// instead of asserting against the repo's real one.
+  Future<String?> _loadChangelog(AssetBundle bundle) async {
     try {
-      return await rootBundle.loadString('CHANGELOG.md');
+      return await bundle.loadString('CHANGELOG.md');
     } catch (_) {
       return null;
     }
@@ -104,7 +110,7 @@ class AboutScreen extends StatelessWidget {
                 const SizedBox(height: Spacing.md),
                 // Changelog — bundled asset; null/empty shows a fallback line.
                 FutureBuilder<String?>(
-                  future: _loadChangelog(),
+                  future: _loadChangelog(DefaultAssetBundle.of(context)),
                   builder: (context, snapshot) {
                     final Widget body;
                     if (snapshot.connectionState != ConnectionState.done) {
@@ -244,6 +250,10 @@ class _ReleaseTile extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final date = release.date;
+    final compareUrl = release.compareUrl;
+    final compareUri = compareUrl == null
+        ? null
+        : tryParseLaunchableLink(compareUrl);
     return ExpansionTile(
       // Align the header with the card's own padding instead of the default
       // ExpansionTile inset, since this tile lives inside a padded Card.
@@ -280,7 +290,41 @@ class _ReleaseTile extends StatelessWidget {
         else
           for (final section in release.sections)
             _ReleaseSection(section: section),
+        // The compare URL parsed off the release header, as a real link. Kept
+        // out of the ExpansionTile header on purpose — a tappable span up there
+        // would compete with the tile's own expand/collapse tap target.
+        if (compareUri != null) _CompareLink(url: compareUri),
       ],
+    );
+  }
+}
+
+/// "View changes on GitHub" row linking a release to its compare URL.
+class _CompareLink extends StatelessWidget {
+  const _CompareLink({required this.url});
+
+  final Uri url;
+
+  @override
+  Widget build(BuildContext context) {
+    final label = url.host.endsWith('github.com')
+        ? 'View changes on GitHub'
+        : 'View changes';
+    return Align(
+      alignment: Alignment.centerLeft,
+      child: TextButton.icon(
+        onPressed: () {
+          // Fire-and-forget: openExternalLink never throws and never rejects,
+          // so there is nothing to await or handle here.
+          openExternalLink(url);
+        },
+        icon: const Icon(Icons.open_in_new, size: 16),
+        label: Text(label),
+        style: TextButton.styleFrom(
+          padding: const EdgeInsets.symmetric(horizontal: Spacing.xs),
+          visualDensity: VisualDensity.compact,
+        ),
+      ),
     );
   }
 }
@@ -314,12 +358,7 @@ class _ReleaseSection extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text('•  ', style: theme.textTheme.bodyMedium),
-                Expanded(
-                  child: Text.rich(
-                    TextSpan(children: _inlineSpans(entry, theme)),
-                    style: theme.textTheme.bodyMedium,
-                  ),
-                ),
+                Expanded(child: _BulletText(raw: entry)),
               ],
             ),
           ),
@@ -328,46 +367,107 @@ class _ReleaseSection extends StatelessWidget {
   }
 }
 
-/// Converts a raw release-please bullet into styled inline spans without a
-/// markdown package: `**scope:**` renders bold, and `[text](url)` renders the
-/// link text in the primary color (styling only — no tap handler is in scope).
+/// Renders one release-please bullet without a markdown package: `**scope:**`
+/// renders bold, and `[text](url)` renders as a tappable link that opens in the
+/// external browser.
 ///
-/// Defensive per CLAUDE.md: any parse trouble falls back to the raw text so a
-/// bullet can never throw while building the page.
-List<InlineSpan> _inlineSpans(String raw, ThemeData theme) {
-  try {
-    final pattern = RegExp(r'\*\*(.+?)\*\*|\[([^\]]+)\]\(([^)]*)\)');
+/// Stateful because each link span needs a [TapGestureRecognizer], and those
+/// must be disposed — a `TextSpan.recognizer` built inline in `build()` leaks
+/// one recognizer per rebuild. They are rebuilt only when [raw] changes, so a
+/// theme change or a parent rebuild cannot dispose a recognizer mid-gesture.
+class _BulletText extends StatefulWidget {
+  const _BulletText({required this.raw});
+
+  /// The raw bullet text, markdown intact.
+  final String raw;
+
+  @override
+  State<_BulletText> createState() => _BulletTextState();
+}
+
+class _BulletTextState extends State<_BulletText> {
+  late List<ChangelogInline> _parts;
+
+  /// Recognizers by index into [_parts]. Only launchable links get one.
+  final Map<int, TapGestureRecognizer> _recognizers = {};
+
+  @override
+  void initState() {
+    super.initState();
+    _parse();
+  }
+
+  @override
+  void didUpdateWidget(covariant _BulletText oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.raw != widget.raw) _parse();
+  }
+
+  @override
+  void dispose() {
+    _disposeRecognizers();
+    super.dispose();
+  }
+
+  void _disposeRecognizers() {
+    for (final recognizer in _recognizers.values) {
+      recognizer.dispose();
+    }
+    _recognizers.clear();
+  }
+
+  /// Splits the bullet and wires a recognizer to each launchable link.
+  ///
+  /// Defensive per CLAUDE.md: a link whose target does not parse to an
+  /// http(s) URL gets no recognizer and renders as plain text, so nothing on
+  /// screen looks tappable while being inert.
+  void _parse() {
+    _disposeRecognizers();
+    _parts = parseInlineMarkdown(widget.raw);
+    for (var i = 0; i < _parts.length; i++) {
+      final part = _parts[i];
+      if (!part.isLink) continue;
+      final uri = tryParseLaunchableLink(part.url!);
+      if (uri == null) continue;
+      _recognizers[i] = TapGestureRecognizer()
+        ..onTap = () {
+          // Fire-and-forget: openExternalLink never throws and never rejects,
+          // so there is nothing to await or handle here.
+          openExternalLink(uri);
+        };
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final bodyStyle = theme.textTheme.bodyMedium;
+
+    // Underline as well as tint: colour alone is not an accessible affordance,
+    // and these links sit inline in body text.
+    final linkStyle = TextStyle(
+      color: theme.colorScheme.primary,
+      decoration: TextDecoration.underline,
+      decorationColor: theme.colorScheme.primary,
+    );
+
     final spans = <InlineSpan>[];
-    var last = 0;
-    for (final match in pattern.allMatches(raw)) {
-      if (match.start > last) {
-        spans.add(TextSpan(text: raw.substring(last, match.start)));
-      }
-      final bold = match.group(1);
-      if (bold != null) {
-        spans.add(
-          TextSpan(
-            text: bold,
-            style: const TextStyle(fontWeight: FontWeight.bold),
-          ),
-        );
-      } else {
-        // Link: show the link text distinguished in the primary color.
-        spans.add(
-          TextSpan(
-            text: match.group(2),
-            style: TextStyle(color: theme.colorScheme.primary),
-          ),
-        );
-      }
-      last = match.end;
+    for (var i = 0; i < _parts.length; i++) {
+      final part = _parts[i];
+      final recognizer = _recognizers[i];
+      spans.add(
+        TextSpan(
+          // TextSpan already derives the hover cursor from `recognizer`
+          // (SystemMouseCursors.click when set), so it is not passed here.
+          text: part.text,
+          recognizer: recognizer,
+          style: part.isBold
+              ? const TextStyle(fontWeight: FontWeight.bold)
+              : (recognizer == null ? null : linkStyle),
+        ),
+      );
     }
-    if (last < raw.length) {
-      spans.add(TextSpan(text: raw.substring(last)));
-    }
-    if (spans.isEmpty) return [TextSpan(text: raw)];
-    return spans;
-  } catch (_) {
-    return [TextSpan(text: raw)];
+
+    return Text.rich(TextSpan(children: spans), style: bodyStyle);
   }
 }

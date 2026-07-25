@@ -143,6 +143,77 @@ List<ChangelogRelease> parseChangelog(String raw) {
   }
 }
 
+/// One run of inline content inside a bullet — plain text, bold text, or a
+/// markdown link.
+///
+/// The renderer maps these to `TextSpan`s. Keeping the parse here (rather than
+/// inside a private widget helper) makes it unit-testable and keeps the widget
+/// free of regexes.
+class ChangelogInline {
+  const ChangelogInline.text(this.text)
+    : isBold = false,
+      url = null;
+
+  const ChangelogInline.bold(this.text)
+    : isBold = true,
+      url = null;
+
+  const ChangelogInline.link(this.text, String this.url) : isBold = false;
+
+  /// The text to display. For a link this is the label, not the target.
+  final String text;
+
+  /// Whether the run came from `**…**`.
+  final bool isBold;
+
+  /// The raw link target for `[label](target)`, else null. Not validated here —
+  /// the renderer decides whether it is launchable.
+  final String? url;
+
+  /// Whether this run is a link.
+  bool get isLink => url != null;
+}
+
+/// Matches `**bold**` or `[label](target)`.
+final RegExp _inlineMarkdown = RegExp(
+  r'\*\*(.+?)\*\*|\[([^\]]+)\]\(([^)]*)\)',
+);
+
+/// Splits a raw changelog bullet into ordered inline runs.
+///
+/// Unmatched text passes through verbatim, so an unbalanced `**` or a stray
+/// bracket renders as the literal characters rather than being dropped.
+///
+/// Defensive per CLAUDE.md: any failure degrades to a single plain-text run
+/// carrying [raw] unchanged — a malformed bullet must never break the page.
+List<ChangelogInline> parseInlineMarkdown(String raw) {
+  try {
+    if (raw.isEmpty) return const [];
+
+    final parts = <ChangelogInline>[];
+    var last = 0;
+    for (final match in _inlineMarkdown.allMatches(raw)) {
+      if (match.start > last) {
+        parts.add(ChangelogInline.text(raw.substring(last, match.start)));
+      }
+      final bold = match.group(1);
+      if (bold != null) {
+        parts.add(ChangelogInline.bold(bold));
+      } else {
+        parts.add(ChangelogInline.link(match.group(2)!, match.group(3) ?? ''));
+      }
+      last = match.end;
+    }
+    if (last < raw.length) {
+      parts.add(ChangelogInline.text(raw.substring(last)));
+    }
+    if (parts.isEmpty) return [ChangelogInline.text(raw)];
+    return parts;
+  } catch (_) {
+    return [ChangelogInline.text(raw)];
+  }
+}
+
 class _ReleaseBuilder {
   _ReleaseBuilder({required this.version, this.compareUrl, this.date});
 
