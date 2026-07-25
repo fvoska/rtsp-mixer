@@ -2,6 +2,7 @@ import 'dart:io';
 
 import 'package:dio/dio.dart';
 import 'package:dio/io.dart';
+import 'package:flutter/foundation.dart';
 
 import '../logging/app_logger.dart';
 import '../models/app_error.dart';
@@ -10,7 +11,11 @@ import '../../features/cameras/models/protect_camera.dart';
 /// Client for the official Unifi Protect API (integration/v1).
 /// Authenticates via X-API-Key header.
 class ProtectApiClient {
-  late final Dio _dio;
+  // Not `late final`: the constructor assigns it, so `late final` made
+  // setDioForTest throw LateInitializationError on every call — the client's
+  // only injection seam was dead by construction and nothing could test the
+  // error mapping or the 429 retry.
+  late Dio _dio;
   String? _apiKey;
 
   ProtectApiClient() {
@@ -33,7 +38,7 @@ class ProtectApiClient {
         if (error.response?.statusCode == 429) {
           final retries = (error.requestOptions.extra['_retryCount'] as int?) ?? 0;
           if (retries < 3) {
-            final delay = Duration(seconds: 1 << retries); // 1s, 2s, 4s
+            final delay = retryBaseDelay * (1 << retries); // 1s, 2s, 4s
             appLog('API', '429 rate limited, retry ${retries + 1}/3 after ${delay.inSeconds}s');
             await Future.delayed(delay);
             error.requestOptions.extra['_retryCount'] = retries + 1;
@@ -50,11 +55,25 @@ class ProtectApiClient {
     ));
   }
 
+  /// Base delay for the 429 retry backoff (1×, 2×, 4×). Injectable so tests
+  /// exercise the retry path without spending 7 real seconds asleep.
+  @visibleForTesting
+  static Duration retryBaseDelay = const Duration(seconds: 1);
+
   void setApiKey(String key) => _apiKey = key;
 
   // ignore: use_setters_to_change_properties
   /// Test-only: replace the Dio instance with a mock.
+  @visibleForTesting
   void setDioForTest(Dio dio) => _dio = dio;
+
+  /// Test-only: swap the transport while keeping this client's real [Dio] —
+  /// its BaseOptions and the 429 retry interceptor stay in place, which
+  /// [setDioForTest] discards. Use this to test behaviour that lives in the
+  /// interceptor rather than in the request methods.
+  @visibleForTesting
+  void setHttpClientAdapterForTest(HttpClientAdapter adapter) =>
+      _dio.httpClientAdapter = adapter;
 
   String _url(String host, String path) =>
       'https://$host/proxy/protect/integration/v1$path';
