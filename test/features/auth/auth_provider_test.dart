@@ -7,12 +7,21 @@ import 'package:rtsp_mixer/features/auth/models/auth_state.dart';
 import 'package:rtsp_mixer/features/auth/providers/auth_provider.dart';
 import 'package:rtsp_mixer/features/cameras/models/protect_camera.dart';
 
+import '../../support/async.dart';
+
 class FakeApiClient extends ProtectApiClient {
   bool verifyResult = true;
   AppError? verifyError;
 
+  /// Counts verifyConnection calls. Background validation has no observable
+  /// state change on the "network error → stay authenticated" path (it logs
+  /// and returns), so the test waits on this counter to know the validation
+  /// actually ran before asserting that auth survived it.
+  int verifyCallCount = 0;
+
   @override
   Future<bool> verifyConnection(String host) async {
+    verifyCallCount++;
     if (verifyError != null) throw verifyError!;
     return verifyResult;
   }
@@ -35,14 +44,19 @@ ProviderContainer createContainer({
 }
 
 Future<AuthState> waitForAuth(ProviderContainer c) async {
-  for (var i = 0; i < 100; i++) {
-    final v = c.read(authNotifierProvider);
-    if (v is AsyncData<AuthState>) return v.value;
-    if (v is AsyncError) throw v.error!;
-    await Future.delayed(const Duration(milliseconds: 10));
-  }
-  throw StateError('AuthNotifier did not settle');
+  return waitForValue<AuthState>(
+    () {
+      final v = c.read(authNotifierProvider);
+      if (v is AsyncError) throw v.error!;
+      return v is AsyncData<AuthState> ? v.value : null;
+    },
+    reason: 'AuthNotifier to settle into AsyncData',
+  );
 }
+
+/// Whether the notifier currently reports an authenticated session.
+bool _isAuthenticated(ProviderContainer c) =>
+    c.read(authNotifierProvider).value?.isAuthenticated ?? false;
 
 void main() {
   late StorageService storage;
@@ -51,6 +65,14 @@ void main() {
   setUp(() {
     storage = StorageService();
     api = FakeApiClient();
+    // Background validation normally waits 2s before it may revoke cached
+    // auth. Collapse it so the two tests below observe the outcome without
+    // sleeping through a real timer (and without racing its 1s of slack).
+    AuthNotifier.backgroundValidationDelay = Duration.zero;
+  });
+
+  tearDown(() {
+    AuthNotifier.backgroundValidationDelay = const Duration(seconds: 2);
   });
 
   group('AuthNotifier', () {
@@ -79,9 +101,12 @@ void main() {
       // Initial state: authenticated from cache
       final state = await waitForAuth(c);
       expect(state.isAuthenticated, true);
-      // Background validation runs after 2s delay and revokes
-      await Future.delayed(const Duration(seconds: 3));
-      expect(c.read(authNotifierProvider).value?.isAuthenticated, false);
+      // Background validation then revokes. Waiting on the transition itself
+      // is the assertion — no sleep long enough to "probably" cover it.
+      await waitFor(
+        () => !_isAuthenticated(c),
+        reason: 'background validation to revoke the cached session',
+      );
     });
 
     test('stays authenticated from cache on network error', () async {
@@ -91,9 +116,15 @@ void main() {
       addTearDown(c.dispose);
       final state = await waitForAuth(c);
       expect(state.isAuthenticated, true);
-      // Background validation fails but doesn't kick user out (network error)
-      await Future.delayed(const Duration(seconds: 3));
-      expect(c.read(authNotifierProvider).value?.isAuthenticated, true);
+      // Background validation fails but doesn't kick the user out (network
+      // error). "Still authenticated" is a negative — it can't be waited on —
+      // so wait for the validation attempt to have actually happened, then
+      // assert. Otherwise the test would pass even if validation never ran.
+      await waitFor(
+        () => api.verifyCallCount > 0,
+        reason: 'background validation to attempt verifyConnection',
+      );
+      expect(_isAuthenticated(c), true);
     });
 
     test('login saves credentials on success', () async {

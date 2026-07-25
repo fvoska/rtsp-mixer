@@ -7,6 +7,8 @@ import 'package:rtsp_mixer/features/cameras/models/protect_camera.dart';
 import 'package:rtsp_mixer/features/cameras/providers/camera_provider.dart';
 import 'package:rtsp_mixer/features/cameras/providers/camera_state.dart';
 
+import '../../support/async.dart';
+
 class FakeApiClient extends ProtectApiClient {
   List<ProtectCamera> cameras = const [
     ProtectCamera(id: 'c1', name: 'Nursery', state: 'CONNECTED'),
@@ -36,27 +38,30 @@ ProviderContainer createContainer({
 }
 
 Future<CameraState> waitForCameras(ProviderContainer c) async {
-  for (var i = 0; i < 100; i++) {
-    final v = c.read(cameraNotifierProvider);
-    if (v is AsyncData<CameraState>) return v.value;
-    if (v is AsyncError) throw v.error!;
-    await Future.delayed(const Duration(milliseconds: 10));
-  }
-  throw StateError('CameraNotifier did not settle');
+  return waitForValue<CameraState>(
+    () {
+      final v = c.read(cameraNotifierProvider);
+      if (v is AsyncError) throw v.error!;
+      return v is AsyncData<CameraState> ? v.value : null;
+    },
+    reason: 'CameraNotifier to settle into AsyncData',
+  );
 }
 
 /// Wait for cameras to have RTSPS URLs (background refresh complete).
 Future<CameraState> waitForCamerasWithUrls(ProviderContainer c) async {
-  for (var i = 0; i < 100; i++) {
-    final v = c.read(cameraNotifierProvider);
-    if (v is AsyncData<CameraState> &&
-        v.value.cameras.isNotEmpty &&
-        v.value.cameras.every((cam) => cam.rtspsStreamUrls.isNotEmpty)) {
-      return v.value;
-    }
-    await Future.delayed(const Duration(milliseconds: 10));
-  }
-  throw StateError('Cameras did not get RTSPS URLs');
+  return waitForValue<CameraState>(
+    () {
+      final v = c.read(cameraNotifierProvider);
+      if (v is! AsyncData<CameraState>) return null;
+      final cams = v.value.cameras;
+      if (cams.isEmpty) return null;
+      return cams.every((cam) => cam.rtspsStreamUrls.isNotEmpty)
+          ? v.value
+          : null;
+    },
+    reason: 'every camera to receive its RTSPS stream URLs',
+  );
 }
 
 void main() {
@@ -165,9 +170,18 @@ void main() {
       await c.read(cameraNotifierProvider.notifier).loadCameras('h');
       await waitForCamerasWithUrls(c);
 
+      // toggleCamera fires the storage write without awaiting it, so the write
+      // is only observable once it lands — polling for it is the wait. A fixed
+      // 50ms sleep here was a race that merely happened to be long enough.
       c.read(cameraNotifierProvider.notifier).toggleCamera('c1');
-      await Future.delayed(const Duration(milliseconds: 50));
-      expect(await storage.loadSelectedCameraIds(), ['c1']);
+      final persisted = await waitForAsyncValue<List<String>>(
+        () async {
+          final ids = await storage.loadSelectedCameraIds();
+          return ids.isEmpty ? null : ids;
+        },
+        reason: "toggleCamera's fire-and-forget write to reach storage",
+      );
+      expect(persisted, ['c1']);
     });
   });
 
@@ -249,11 +263,14 @@ void main() {
       await c.read(cameraNotifierProvider.notifier).loadCameras('h');
       // The list starts with just the manual camera, then the Unifi API
       // refresh appends the 3 fake cameras — wait for the full merged list.
-      for (var i = 0; i < 100; i++) {
-        final s = c.read(cameraNotifierProvider).value;
-        if (s != null && s.cameras.length == 4) break;
-        await Future.delayed(const Duration(milliseconds: 10));
-      }
+      // The old loop expired silently and let the length assertion below
+      // report "Expected: 4 Actual: 1", which reads as a merge bug rather
+      // than a timeout.
+      await waitFor(
+        () => c.read(cameraNotifierProvider).value?.cameras.length == 4,
+        reason: 'the Unifi refresh to merge into the manual camera list '
+            '(3 Unifi + 1 manual)',
+      );
 
       final state = c.read(cameraNotifierProvider).value!;
       // 3 Unifi (fake) + 1 manual.
