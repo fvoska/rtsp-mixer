@@ -1,0 +1,53 @@
+name: Tests
+
+# Nothing gated the test suite before this workflow existed: `flutter test`
+# only ever ran on a developer's machine, so a red suite could be merged into
+# main unnoticed. This is a baby monitor — the tests are the only thing that
+# catches a refactor which silently breaks overnight reconnect behaviour, so
+# they run on every PR.
+#
+# To make this blocking, add the `test` job as a required status check in the
+# main branch protection rule (alongside the conventional-commits checks).
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+# A new push to a PR makes the in-flight run obsolete.
+concurrency:
+  group: tests-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - run: flutter pub get
+
+      # --fatal-infos so lint regressions fail here rather than accumulating.
+      - name: Analyze
+        run: flutter analyze --fatal-infos
+
+      - name: Test
+        run: flutter test --coverage
+
+      # Kept as an artifact so coverage can be inspected on a PR without
+      # re-running the suite locally.
+      - name: Upload coverage
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: lcov
+          path: coverage/lcov.info
+          if-no-files-found: warn
