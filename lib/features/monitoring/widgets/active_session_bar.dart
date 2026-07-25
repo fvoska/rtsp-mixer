@@ -8,7 +8,9 @@ import '../../../core/theme/app_typography.dart';
 import '../../../core/theme/spacing.dart';
 import '../../../core/theme/status_colors.dart';
 import '../../auth/providers/auth_provider.dart';
+import '../helpers/session_status.dart';
 import '../helpers/uptime_format.dart';
+import '../providers/audio_player_provider.dart';
 import '../providers/session_history_provider.dart';
 
 /// Mini-bar shown above the bottom NavigationBar while monitoring is active
@@ -19,6 +21,11 @@ import '../providers/session_history_provider.dart';
 ///   - hidden if no current session
 ///   - hidden when [selectedIndex] == 0 (already on Monitor)
 ///   - otherwise shown
+///
+/// The reassuring "Monitoring · uptime" copy is reserved for
+/// [SessionStatus.playing]. When a camera is connecting, reconnecting or
+/// failed the bar names that state instead — the parent must not be told audio
+/// is flowing while it isn't.
 class ActiveSessionBar extends ConsumerStatefulWidget {
   const ActiveSessionBar({super.key, required this.selectedIndex});
 
@@ -68,9 +75,21 @@ class _ActiveSessionBarState extends ConsumerState<ActiveSessionBar> {
     final startedAt = session?.startedAt ?? DateTime.now();
     final uptime = DateTime.now().difference(startedAt);
     final formatted = session == null ? 'resuming…' : formatUptime(uptime);
+
+    // While a session is in flight the bar tracks stream health, not just the
+    // clock: only an all-live mix earns "Monitoring · uptime". A pending
+    // resume has no player state yet, so it keeps its own "resuming…" copy.
+    final status = session == null
+        ? SessionStatus.connecting
+        : resolveSessionStatus(ref.watch(audioPlayerProvider));
+    final healthy = session == null || status.isHealthy;
+    final dotColor = sessionStatusColor(status, context.statusColors);
+
     final semanticsLabel = session == null
         ? 'Resuming monitoring'
-        : 'Return to monitoring, uptime $formatted';
+        : healthy
+            ? 'Return to monitoring, uptime $formatted'
+            : 'Return to monitoring, ${sessionStatusLabel(status)}';
 
     return Semantics(
       label: semanticsLabel,
@@ -104,7 +123,7 @@ class _ActiveSessionBarState extends ConsumerState<ActiveSessionBar> {
                       width: 8,
                       height: 8,
                       decoration: BoxDecoration(
-                        color: context.statusColors.live,
+                        color: dotColor,
                         shape: BoxShape.circle,
                       ),
                     ),
@@ -116,19 +135,25 @@ class _ActiveSessionBarState extends ConsumerState<ActiveSessionBar> {
                     // UI face. Same string, same formatting logic — only the
                     // span it sits in changed.
                     child: Text.rich(
-                      TextSpan(
-                        text: 'Monitoring · ',
-                        children: [
-                          TextSpan(
-                            text: formatted,
-                            style: AppTypography.tabular(
-                              theme.textTheme.titleSmall,
-                            ),
-                          ),
-                        ],
-                      ),
+                      healthy
+                          ? TextSpan(
+                              text: 'Monitoring · ',
+                              children: [
+                                TextSpan(
+                                  text: formatted,
+                                  style: AppTypography.tabular(
+                                    theme.textTheme.titleSmall,
+                                  ),
+                                ),
+                              ],
+                            )
+                          // No uptime next to a degraded state: "Reconnecting…
+                          // · 6h 12m" reads as six hours of reconnecting.
+                          : TextSpan(text: sessionStatusLabel(status)),
                       style: theme.textTheme.titleSmall?.copyWith(
-                        color: theme.colorScheme.onSecondaryContainer,
+                        color: healthy
+                            ? theme.colorScheme.onSecondaryContainer
+                            : dotColor,
                       ),
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,

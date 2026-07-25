@@ -5,8 +5,11 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../../core/theme/spacing.dart';
+import '../../../core/theme/status_colors.dart';
+import '../helpers/session_status.dart';
 import '../models/health_event.dart';
 import '../models/session.dart';
+import '../providers/audio_player_provider.dart';
 import '../providers/session_history_provider.dart';
 
 /// `/sessions` tab — lists the in-flight session (if any) followed by up to
@@ -15,12 +18,17 @@ import '../providers/session_history_provider.dart';
 /// Per the 260514-siv plan: the in-flight row uses a 1-second periodic
 /// StreamBuilder so the uptime ticks live. Finalized rows render their
 /// frozen duration computed once from the events list.
+///
+/// The in-flight row's badge tracks live stream health via
+/// [resolveSessionStatus] — an "In progress" chip while a camera is
+/// reconnecting or failed would be a lie the parent might sleep through.
 class SessionsListScreen extends ConsumerWidget {
   const SessionsListScreen({super.key});
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final asyncHistory = ref.watch(sessionHistoryProvider);
+    final liveStatus = resolveSessionStatus(ref.watch(audioPlayerProvider));
 
     return Scaffold(
       appBar: AppBar(title: const Text('Sessions')),
@@ -33,6 +41,7 @@ class SessionsListScreen extends ConsumerWidget {
             entries.add(_SessionCard(
               session: history.current!,
               isCurrent: true,
+              liveStatus: liveStatus,
             ));
           }
           for (final s in history.past) {
@@ -93,10 +102,18 @@ class _EmptyState extends StatelessWidget {
 }
 
 class _SessionCard extends StatelessWidget {
-  const _SessionCard({required this.session, required this.isCurrent});
+  const _SessionCard({
+    required this.session,
+    required this.isCurrent,
+    this.liveStatus,
+  });
 
   final Session session;
   final bool isCurrent;
+
+  /// Live stream health — set only for the in-flight session, drives the
+  /// badge's label and colour. Null on finalized rows (which show no badge).
+  final SessionStatus? liveStatus;
 
   @override
   Widget build(BuildContext context) {
@@ -124,22 +141,7 @@ class _SessionCard extends StatelessWidget {
                     ),
                   ),
                   if (isCurrent)
-                    Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: Spacing.sm,
-                        vertical: 2,
-                      ),
-                      decoration: BoxDecoration(
-                        color: theme.colorScheme.primaryContainer,
-                        borderRadius: BorderRadius.circular(999),
-                      ),
-                      child: Text(
-                        'In progress',
-                        style: theme.textTheme.labelSmall?.copyWith(
-                          color: theme.colorScheme.onPrimaryContainer,
-                        ),
-                      ),
-                    ),
+                    _LiveBadge(status: liveStatus ?? SessionStatus.connecting),
                 ],
               ),
               const SizedBox(height: Spacing.sm),
@@ -170,6 +172,40 @@ class _SessionCard extends StatelessWidget {
   Duration _sessionDuration(Session s) {
     final end = s.endedAt ?? DateTime.now();
     return end.difference(s.startedAt);
+  }
+}
+
+/// Badge on the in-flight session row. "In progress" is reserved for an
+/// all-live mix; a degraded session says what is actually happening, tinted
+/// with the same status palette the camera cards use.
+class _LiveBadge extends StatelessWidget {
+  const _LiveBadge({required this.status});
+
+  final SessionStatus status;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final healthy = status.isHealthy;
+    final accent = sessionStatusColor(status, context.statusColors);
+    return Container(
+      padding: const EdgeInsets.symmetric(
+        horizontal: Spacing.sm,
+        vertical: 2,
+      ),
+      decoration: BoxDecoration(
+        color: healthy
+            ? theme.colorScheme.primaryContainer
+            : accent.withValues(alpha: 0.16),
+        borderRadius: BorderRadius.circular(999),
+      ),
+      child: Text(
+        healthy ? 'In progress' : sessionStatusLabel(status),
+        style: theme.textTheme.labelSmall?.copyWith(
+          color: healthy ? theme.colorScheme.onPrimaryContainer : accent,
+        ),
+      ),
+    );
   }
 }
 

@@ -4,7 +4,9 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:rtsp_mixer/core/theme/app_theme.dart';
 import 'package:rtsp_mixer/features/auth/models/auth_state.dart';
 import 'package:rtsp_mixer/features/auth/providers/auth_provider.dart';
+import 'package:rtsp_mixer/features/monitoring/models/player_state.dart';
 import 'package:rtsp_mixer/features/monitoring/models/session.dart';
+import 'package:rtsp_mixer/features/monitoring/providers/audio_player_provider.dart';
 import 'package:rtsp_mixer/features/monitoring/providers/session_history_provider.dart';
 import 'package:rtsp_mixer/features/monitoring/widgets/active_session_bar.dart';
 
@@ -16,6 +18,26 @@ class _FakeSessionHistoryNotifier extends SessionHistoryNotifier {
   @override
   Future<SessionHistory> build() async => seed;
 }
+
+/// Test double — returns a pre-seeded MonitoringState without opening players.
+/// The bar reads it to decide whether "Monitoring · uptime" is honest, so every
+/// pump seeds an explicit per-camera health.
+class _FakeAudioNotifier extends AudioPlayerNotifier {
+  _FakeAudioNotifier(this.seed);
+  final MonitoringState seed;
+
+  @override
+  Future<MonitoringState> build() async => seed;
+}
+
+CameraAudioState _cam(CameraConnectionStatus status, {String id = 'cam1'}) =>
+    CameraAudioState(
+      cameraId: id,
+      cameraName: 'Nursery',
+      connectionStatus: status,
+      activeQuality: 'low',
+      availableQualities: const {'low': 'a'},
+    );
 
 /// Test double — returns a pre-seeded AuthState without touching storage.
 class _FakeAuthNotifier extends AuthNotifier {
@@ -31,7 +53,14 @@ Future<void> _pumpBar(
   required int selectedIndex,
   Session? currentSession,
   bool resumeMonitoring = false,
+  List<CameraAudioState>? cameras,
 }) async {
+  // Default to an all-live mix so the bar's healthy copy is the baseline; the
+  // degraded cases pass their own camera states.
+  final mix = cameras ??
+      (currentSession == null
+          ? const <CameraAudioState>[]
+          : [_cam(CameraConnectionStatus.playing)]);
   await tester.pumpWidget(
     ProviderScope(
       overrides: [
@@ -39,6 +68,9 @@ Future<void> _pumpBar(
           () => _FakeSessionHistoryNotifier(
             SessionHistory(current: currentSession, past: const []),
           ),
+        ),
+        audioPlayerProvider.overrideWith(
+          () => _FakeAudioNotifier(MonitoringState(cameras: mix)),
         ),
         authNotifierProvider.overrideWith(
           () => _FakeAuthNotifier(
@@ -60,7 +92,8 @@ Future<void> _pumpBar(
       ),
     ),
   );
-  // Let the AsyncNotifier settle.
+  // Let the AsyncNotifiers settle.
+  await tester.pump();
   await tester.pump(const Duration(milliseconds: 50));
 }
 
@@ -145,6 +178,48 @@ void main() {
       );
       expect(find.text('Monitoring · resuming…', findRichText: true), findsNothing);
       expect(find.text('Monitoring · 7m', findRichText: true), findsOneWidget);
+    });
+  });
+
+  // The bar must never claim audio is flowing while it isn't: the reassuring
+  // "Monitoring · uptime" copy belongs to an all-live mix only.
+  group('ActiveSessionBar honesty', () {
+    testWidgets('says "Reconnecting…" while a camera is reconnecting',
+        (tester) async {
+      await _pumpBar(
+        tester,
+        selectedIndex: 1,
+        currentSession: _liveSession(),
+        cameras: [_cam(CameraConnectionStatus.reconnecting)],
+      );
+      expect(find.text('Reconnecting…', findRichText: true), findsOneWidget);
+      expect(find.textContaining('Monitoring ·'), findsNothing);
+    });
+
+    testWidgets('says "Stream failed" when a camera errored', (tester) async {
+      await _pumpBar(
+        tester,
+        selectedIndex: 1,
+        currentSession: _liveSession(),
+        cameras: [
+          _cam(CameraConnectionStatus.playing),
+          _cam(CameraConnectionStatus.error, id: 'cam2'),
+        ],
+      );
+      expect(find.text('Stream failed', findRichText: true), findsOneWidget);
+      expect(find.textContaining('Monitoring ·'), findsNothing);
+    });
+
+    testWidgets('says "Connecting…" before the first stream is live',
+        (tester) async {
+      await _pumpBar(
+        tester,
+        selectedIndex: 1,
+        currentSession: _liveSession(),
+        cameras: [_cam(CameraConnectionStatus.connecting)],
+      );
+      expect(find.text('Connecting…', findRichText: true), findsOneWidget);
+      expect(find.textContaining('Monitoring ·'), findsNothing);
     });
   });
 }
