@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.12.0](https://github.com/fvoska/rtsp-mixer/compare/v1.11.0...v1.12.0) (2026-07-25)
+
+
+### Features
+
+* **theme:** add an OLED black mode to the dark theme ([#44](https://github.com/fvoska/rtsp-mixer/issues/44)) ([b69f645](https://github.com/fvoska/rtsp-mixer/commit/b69f6450a0c575621ac738a98079176bb6866b21))
+
+
+### Bug Fixes
+
+* **monitoring:** make every session status surface tell the truth about stream health ([#46](https://github.com/fvoska/rtsp-mixer/issues/46)) ([78554fc](https://github.com/fvoska/rtsp-mixer/commit/78554fccc808f5f3b85cfa5b103059536d211716))
+
 ## [1.11.0](https://github.com/fvoska/rtsp-mixer/compare/v1.10.1...v1.11.0) (2026-07-25)
 
 
