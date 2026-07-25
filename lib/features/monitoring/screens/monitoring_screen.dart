@@ -17,6 +17,7 @@ import '../../auth/providers/auth_provider.dart';
 import '../../cameras/models/protect_camera.dart';
 import '../../cameras/providers/camera_provider.dart';
 import '../../cameras/widgets/camera_source_badge.dart';
+import '../helpers/session_status.dart';
 import '../helpers/uptime_format.dart';
 import '../models/player_state.dart';
 import '../providers/audio_player_provider.dart';
@@ -120,11 +121,17 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen>
     final monState = ref.read(audioPlayerProvider).value;
     if (monState != null && monState.cameras.isNotEmpty) {
       final names = monState.cameras.map((c) => c.cameraName).toList();
-      await ForegroundServiceManager.start(names);
+      // Seed both notifications with the health we already know: a camera that
+      // failed to open must not spend its first second labelled "Listening".
+      // Subsequent transitions are pushed by the notifier's own refresh.
+      final title =
+          sessionNotificationTitle(sessionStatusOf(monState.cameras));
+      await ForegroundServiceManager.start(names, title: title);
       await ref.read(storageProvider).write('was_monitoring', 'true');
       try {
         final handler = await ref.read(audioHandlerProvider.future);
         handler.setCameraNames(names);
+        handler.setStatusTitle(title);
         handler.setPlaying();
       } catch (e) {
         appLog('AUDIO_SERVICE', 'Failed to init audio handler: $e');
@@ -232,7 +239,7 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen>
         children: [
           if (hasCurrentSession)
             _InlineStopBanner(
-              status: _resolveBannerStatus(monitoringState),
+              status: resolveSessionStatus(monitoringState),
               onStop: _onStopPressed,
             ),
           Expanded(
@@ -257,27 +264,14 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen>
   }
 }
 
-/// Health status for the sticky monitoring banner. Drives banner color so a
-/// glance gives the user honest feedback (green = streaming, blue =
-/// connecting / reconnecting, red = error) rather than always reading as
-/// "error" the way a hard-coded red bar did.
-enum _BannerStatus { playing, connecting, error }
-
-_BannerStatus _resolveBannerStatus(AsyncValue<MonitoringState> async) {
-  if (async.hasError) return _BannerStatus.error;
-  final state = async.value;
-  if (state == null || state.cameras.isEmpty) return _BannerStatus.connecting;
-  if (state.anyError) return _BannerStatus.error;
-  if (state.allLive) return _BannerStatus.playing;
-  return _BannerStatus.connecting;
-}
-
 /// Sticky banner at the top of the monitoring body that lets the user stop
-/// the session at any time. Color reflects current stream health.
+/// the session at any time. Color AND label both reflect current stream
+/// health — see [resolveSessionStatus] — so the bar can never read
+/// "Monitoring active" while a camera is reconnecting or failed.
 class _InlineStopBanner extends StatelessWidget {
   const _InlineStopBanner({required this.status, required this.onStop});
 
-  final _BannerStatus status;
+  final SessionStatus status;
   final VoidCallback onStop;
 
   @override
@@ -285,9 +279,10 @@ class _InlineStopBanner extends StatelessWidget {
     final theme = Theme.of(context);
     final statusColors = context.statusColors;
     final background = switch (status) {
-      _BannerStatus.playing => statusColors.live,
-      _BannerStatus.connecting => statusColors.connecting,
-      _BannerStatus.error => statusColors.offline,
+      SessionStatus.playing => statusColors.live,
+      SessionStatus.connecting || SessionStatus.reconnecting =>
+        statusColors.connecting,
+      SessionStatus.error => statusColors.offline,
     };
     const foreground = Colors.black87;
     return Material(
@@ -310,7 +305,7 @@ class _InlineStopBanner extends StatelessWidget {
               const SizedBox(width: Spacing.sm),
               Expanded(
                 child: Text(
-                  'Monitoring active',
+                  sessionStatusLabel(status),
                   style: theme.textTheme.titleSmall?.copyWith(
                     color: foreground,
                   ),
@@ -418,7 +413,9 @@ class _LiveMonitoringView extends ConsumerWidget {
                     onToggleShowDetails: onToggleShowDetails,
                     onAddCamera: openAddPicker,
                   ),
-                  const _ListeningStatusLine(),
+                  _ListeningStatusLine(
+                    status: resolveSessionStatus(monitoringState),
+                  ),
                   const SizedBox(height: Spacing.md),
                   Wrap(
                     spacing: Spacing.lg,
@@ -456,7 +453,9 @@ class _LiveMonitoringView extends ConsumerWidget {
 /// Calm header status line under the live toolbar: a slowly pulsing teal dot
 /// and "Listening · 6h 12m". This is the reassurance line — the thing a parent
 /// glances at to confirm the app is still awake — so it renders nothing at all
-/// rather than something misleading when there is no live session.
+/// rather than something misleading when there is no live session, and it only
+/// says "Listening" when [SessionStatus.playing] (every camera streaming).
+/// Any degraded state names itself instead.
 ///
 /// Follows [ActiveSessionBar]'s proven pattern: one 1-second [Timer.periodic],
 /// `setState` only while mounted, cancelled in `dispose`, opacity animated by
@@ -464,7 +463,9 @@ class _LiveMonitoringView extends ConsumerWidget {
 /// nothing here may throw out of a timer callback or a build during an
 /// overnight session.
 class _ListeningStatusLine extends ConsumerStatefulWidget {
-  const _ListeningStatusLine();
+  const _ListeningStatusLine({required this.status});
+
+  final SessionStatus status;
 
   @override
   ConsumerState<_ListeningStatusLine> createState() =>
@@ -514,10 +515,25 @@ class _ListeningStatusLineState extends ConsumerState<_ListeningStatusLine> {
 
   @override
   Widget build(BuildContext context) {
-    final label = _uptimeLabel();
-    if (label == null) return const SizedBox.shrink();
-
     final theme = Theme.of(context);
+    final statusColors = context.statusColors;
+    final status = widget.status;
+    final isLive = status == SessionStatus.playing;
+
+    // The uptime suffix belongs to the healthy state only — "Reconnecting… ·
+    // 6h 12m" reads as six hours of reconnecting. Degraded states show the
+    // bare status, and the healthy state hides the line entirely when there
+    // is no trustworthy uptime to pair with "Listening".
+    final uptime = isLive ? _uptimeLabel() : null;
+    if (isLive && uptime == null) return const SizedBox.shrink();
+
+    final color = switch (status) {
+      SessionStatus.playing => statusColors.live,
+      SessionStatus.connecting => statusColors.connecting,
+      SessionStatus.reconnecting => statusColors.reconnecting,
+      SessionStatus.error => statusColors.offline,
+    };
+
     return Padding(
       padding: const EdgeInsets.only(top: Spacing.sm),
       child: Row(
@@ -529,7 +545,7 @@ class _ListeningStatusLineState extends ConsumerState<_ListeningStatusLine> {
               width: 8,
               height: 8,
               decoration: BoxDecoration(
-                color: context.statusColors.live,
+                color: color,
                 shape: BoxShape.circle,
               ),
             ),
@@ -537,19 +553,23 @@ class _ListeningStatusLineState extends ConsumerState<_ListeningStatusLine> {
           const SizedBox(width: Spacing.sm),
           Expanded(
             child: Text.rich(
-              TextSpan(
-                text: 'Listening · ',
-                children: [
-                  TextSpan(
-                    text: label,
-                    // Tabular figures so the minute rollover doesn't shove
-                    // the line sideways once a second.
-                    style: AppTypography.tabular(theme.textTheme.bodyMedium),
-                  ),
-                ],
+              isLive
+                  ? TextSpan(
+                      text: 'Listening · ',
+                      children: [
+                        TextSpan(
+                          text: uptime,
+                          // Tabular figures so the minute rollover doesn't
+                          // shove the line sideways once a second.
+                          style:
+                              AppTypography.tabular(theme.textTheme.bodyMedium),
+                        ),
+                      ],
+                    )
+                  : TextSpan(text: sessionStatusLabel(status)),
+              style: theme.textTheme.bodyMedium?.copyWith(
+                color: isLive ? theme.colorScheme.onSurfaceVariant : color,
               ),
-              style: theme.textTheme.bodyMedium
-                  ?.copyWith(color: theme.colorScheme.onSurfaceVariant),
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
             ),

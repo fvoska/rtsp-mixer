@@ -183,6 +183,61 @@ void main() {
     expect(find.byType(ErrorWidget), findsNothing);
   });
 
+  // The header must never overstate stream health: "Monitoring active" and
+  // "Listening · <uptime>" are reserved for an all-live mix. Anything else
+  // names the degraded state (the banner colour already did — the text lagged).
+  group('header honesty', () {
+    CameraAudioState cam(CameraConnectionStatus status, {String id = 'c1'}) =>
+        CameraAudioState(
+          cameraId: id,
+          cameraName: 'Cam $id',
+          connectionStatus: status,
+          activeQuality: 'low',
+          availableQualities: const {'low': 'a'},
+        );
+
+    testWidgets('all-live mix says "Monitoring active" and "Listening"',
+        (tester) async {
+      await _pumpLive(tester, [fiona, porch]);
+      expect(find.text('Monitoring active'), findsOneWidget);
+      expect(
+        find.textContaining('Listening · ', findRichText: true),
+        findsOneWidget,
+      );
+    });
+
+    testWidgets('a reconnecting camera drops both claims', (tester) async {
+      await _pumpLive(
+        tester,
+        [fiona, cam(CameraConnectionStatus.reconnecting, id: 'c2')],
+      );
+      expect(find.text('Monitoring active'), findsNothing);
+      expect(find.textContaining('Listening', findRichText: true), findsNothing);
+      // Banner + header line + the camera's own card banner.
+      expect(find.text('Reconnecting…'), findsWidgets);
+    });
+
+    testWidgets('a failed camera drops both claims', (tester) async {
+      await _pumpLive(
+        tester,
+        [fiona, cam(CameraConnectionStatus.error, id: 'c2')],
+      );
+      expect(find.text('Monitoring active'), findsNothing);
+      expect(find.textContaining('Listening', findRichText: true), findsNothing);
+      expect(find.text('Stream failed'), findsWidgets);
+    });
+
+    testWidgets('a still-connecting camera drops both claims', (tester) async {
+      await _pumpLive(
+        tester,
+        [fiona, cam(CameraConnectionStatus.connecting, id: 'c2')],
+      );
+      expect(find.text('Monitoring active'), findsNothing);
+      expect(find.textContaining('Listening', findRichText: true), findsNothing);
+      expect(find.text('Connecting…'), findsWidgets);
+    });
+  });
+
   testWidgets('add picker lists only cameras not already in the session',
       (tester) async {
     await _pumpLive(tester, [fiona, porch], allCameras: allCameras);

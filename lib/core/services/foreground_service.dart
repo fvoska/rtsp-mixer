@@ -66,7 +66,15 @@ class ForegroundServiceManager {
   );
 
   /// Start the foreground service with camera names in the notification.
-  static Future<void> start(List<String> cameraNames) async {
+  ///
+  /// [title] defaults to the healthy copy; callers that already know the
+  /// session's health should pass the status-derived title (see
+  /// `sessionNotificationTitle`) so the very first notification doesn't claim
+  /// "Listening" over a camera that failed to open.
+  static Future<void> start(
+    List<String> cameraNames, {
+    String title = 'Listening',
+  }) async {
     if (kIsWeb || !Platform.isAndroid) {
       appLog('FGS',
           'Foreground service unsupported on this platform — skipping start');
@@ -76,7 +84,7 @@ class ForegroundServiceManager {
     final notificationText = 'Monitoring: ${cameraNames.join(", ")}';
     await FlutterForegroundTask.startService(
       serviceId: 256,
-      notificationTitle: 'Listening',
+      notificationTitle: title,
       notificationText: notificationText,
       notificationIcon: _notificationIcon,
       notificationButtons: const [
@@ -90,7 +98,9 @@ class ForegroundServiceManager {
     appLog('FGS', 'Foreground service started: $notificationText');
   }
 
-  /// Update the notification text, e.g. when connection status changes.
+  /// Update the notification text and title, e.g. when connection status
+  /// changes. [title] defaults to the healthy copy for callers that only have
+  /// text to say; status-aware callers pass `sessionNotificationTitle`.
   static Future<void> updateNotification({
     required String text,
     String title = 'Listening',

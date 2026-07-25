@@ -17,12 +17,31 @@ class MonitoringAudioHandler extends BaseAudioHandler {
 
   MonitoringAudioHandler(this._ref);
 
+  /// Cameras in the mix and the current status title, kept so either can be
+  /// refreshed without losing the other.
+  List<String> _cameraNames = const [];
+  String _statusTitle = 'Listening';
+
   /// Update the media notification metadata with camera names.
   void setCameraNames(List<String> cameraNames) {
+    _cameraNames = List.unmodifiable(cameraNames);
+    _publishMediaItem();
+  }
+
+  /// Keep the lock-screen title as honest as the in-app header: "Listening"
+  /// belongs to an all-live mix only — see `sessionNotificationTitle`. No-op
+  /// when the title hasn't changed, since this is called from the 1s poll.
+  void setStatusTitle(String title) {
+    if (title == _statusTitle) return;
+    _statusTitle = title;
+    _publishMediaItem();
+  }
+
+  void _publishMediaItem() {
     mediaItem.add(MediaItem(
       id: 'baby_monitor',
-      title: 'Listening',
-      artist: 'Monitoring: ${cameraNames.join(", ")}',
+      title: _statusTitle,
+      artist: 'Monitoring: ${_cameraNames.join(", ")}',
       album: 'Roomtone',
     ));
   }

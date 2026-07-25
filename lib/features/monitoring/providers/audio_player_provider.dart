@@ -14,6 +14,7 @@ import '../../cameras/models/protect_camera.dart';
 import '../../cameras/providers/camera_provider.dart';
 import '../helpers/audio_level_meter.dart';
 import '../helpers/rtsp_url.dart';
+import '../helpers/session_status.dart';
 import '../helpers/stream_candidates.dart';
 import '../helpers/stream_liveness.dart';
 import '../models/health_event.dart';
@@ -38,6 +39,7 @@ class AudioPlayerNotifier extends AsyncNotifier<MonitoringState> {
   Timer? _levelPollTimer;
   final Map<String, double> _lastAudioPts = {};
   String _lastNotificationText = '';
+  String _lastNotificationTitle = '';
 
   /// Serializes lifecycle operations (start / stop / settings-driven restart)
   /// so they can never interleave. Concurrent invocations chain on this
@@ -881,18 +883,7 @@ class AudioPlayerNotifier extends AsyncNotifier<MonitoringState> {
     appLog('AUDIO', 'Monitoring started for ${cameraStates.length} cameras');
 
     // Update foreground notification with camera status
-    try {
-      final statusParts = cameraStates.map((c) {
-        final status = c.connectionStatus == CameraConnectionStatus.playing
-            ? '' : ' (${c.connectionStatus.name})';
-        return '${c.cameraName}$status';
-      }).toList();
-      final text = 'Monitoring: ${statusParts.join(", ")}';
-      _lastNotificationText = text;
-      await ForegroundServiceManager.updateNotification(text: text);
-    } catch (e) {
-      appLog('FGS', 'Failed to update notification: $e');
-    }
+    await _refreshNotification();
 
     // Start polling audio-pts to detect silence / estimate activity.
     _startLevelPolling();
@@ -1066,20 +1057,53 @@ class AudioPlayerNotifier extends AsyncNotifier<MonitoringState> {
 
     if (changed) {
       state = AsyncData(updated);
+    }
 
-      // Update notification if status text changed
+    // Notification refresh runs on EVERY tick, not only when the poll saw a
+    // level change: connection-status transitions are written by the reconnect
+    // supervisor, the buffering listener and switchQuality, none of which set
+    // `changed`. Polling the current state here is what keeps the notification
+    // title honest no matter which path flipped a camera. Cheap — it no-ops
+    // unless the (title, text) pair actually moved.
+    // ignore: unawaited_futures
+    _refreshNotification();
+  }
+
+  /// Push the current session status to the foreground-service notification
+  /// and the lock-screen media item.
+  ///
+  /// Single path for every caller (start, add-camera, the 1s level poll) so
+  /// neither surface can claim "Listening" while a camera is connecting,
+  /// reconnecting or failed — the same rule the in-app header follows.
+  /// De-duplicated on the (title, text) pair since the poll calls it every
+  /// tick. Per CLAUDE.md nothing here may throw into a timer callback: a
+  /// notification is never worth killing audio over.
+  Future<void> _refreshNotification() async {
+    try {
+      final cameras = state.value?.cameras ?? const <CameraAudioState>[];
+      if (cameras.isEmpty) return;
+      final text = sessionNotificationText(cameras);
+      final title = sessionNotificationTitle(sessionStatusOf(cameras));
+      if (text == _lastNotificationText && title == _lastNotificationTitle) {
+        return;
+      }
+      _lastNotificationText = text;
+      _lastNotificationTitle = title;
+      await ForegroundServiceManager.updateNotification(
+        text: text,
+        title: title,
+      );
+      // The lock-screen media item carries the same title. Read the handler
+      // without awaiting its future: by the time a session is running it is
+      // already initialized, and a pending init must not block the poll.
       try {
-        final statusParts = updated.cameras.map((c) {
-          final status = c.connectionStatus == CameraConnectionStatus.playing
-              ? '' : ' (${c.connectionStatus.name})';
-          return '${c.cameraName}$status';
-        }).toList();
-        final newText = 'Monitoring: ${statusParts.join(", ")}';
-        if (newText != _lastNotificationText) {
-          _lastNotificationText = newText;
-          ForegroundServiceManager.updateNotification(text: newText);
-        }
-      } catch (_) {}
+        ref.read(audioHandlerProvider).value?.setStatusTitle(title);
+      } catch (e) {
+        appLog('AUDIO_SERVICE',
+            'Media item title refresh failed (continuing): $e');
+      }
+    } catch (e) {
+      appLog('FGS', 'Failed to update notification: $e');
     }
   }
 
@@ -1597,6 +1621,7 @@ class AudioPlayerNotifier extends AsyncNotifier<MonitoringState> {
     }
     _lastAudioPts.clear();
     _lastNotificationText = '';
+    _lastNotificationTitle = '';
     for (final sub in _subscriptions) {
       sub.cancel();
     }
@@ -1860,20 +1885,7 @@ class AudioPlayerNotifier extends AsyncNotifier<MonitoringState> {
         appLog('HEALTH',
             'addCameraToSession: failed to record streamStarted: $e');
       }
-      try {
-        final cams = state.value?.cameras ?? const <CameraAudioState>[];
-        final statusParts = cams.map((c) {
-          final status = c.connectionStatus == CameraConnectionStatus.playing
-              ? '' : ' (${c.connectionStatus.name})';
-          return '${c.cameraName}$status';
-        }).toList();
-        final text = 'Monitoring: ${statusParts.join(", ")}';
-        _lastNotificationText = text;
-        await ForegroundServiceManager.updateNotification(text: text);
-      } catch (e) {
-        appLog('FGS',
-            'addCameraToSession: failed to update notification: $e');
-      }
+      await _refreshNotification();
     });
   }
 
