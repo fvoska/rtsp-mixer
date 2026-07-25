@@ -19,6 +19,18 @@ abstract final class _Roomtone {
   static const darkHairline = Color(0xFF23393B);
   static const darkOutline = Color(0xFF3A5254);
 
+  // ---- Dark (OLED) ---------------------------------------------------
+  // An OLED panel draws no current for a fully black pixel, so the two
+  // largest, always-on areas — the scaffold ground and the bottom bar — go to
+  // true #000000. The layers above them stay *near*-black rather than black:
+  // if a card collapsed onto the ground the Nightwatch stack would lose its
+  // depth cues entirely, which is a worse trade than a few microwatts.
+  static const oledGround = Color(0xFF000000);
+  static const oledNav = Color(0xFF000000);
+  static const oledSurface = Color(0xFF0A1213); // cards, sheets, app bar
+  static const oledInset = Color(0xFF141F20); // wells, chips, inputs
+  static const oledHairline = Color(0xFF1E2C2D);
+
   // ---- Light ---------------------------------------------------------
   static const lightGround = Color(0xFFEBF0EF);
   static const lightSurface = Color(0xFFFFFFFF);
@@ -33,6 +45,19 @@ abstract final class _Roomtone {
 abstract final class AppTheme {
   static final light = _build(Brightness.light);
   static final dark = _build(Brightness.dark);
+
+  /// [dark] with every background layer pushed down to (near-)black, for
+  /// minimal panel luminance on OLED screens overnight.
+  static final darkOled = _build(Brightness.dark, oled: true);
+
+  /// The dark theme to hand [MaterialApp.darkTheme].
+  ///
+  /// Selecting the variant here — rather than at each `Theme.of` call site —
+  /// is what makes the OLED preference independent of *how* dark mode was
+  /// reached: Flutter applies `darkTheme` both when the user picked
+  /// [ThemeMode.dark] explicitly and when [ThemeMode.system] resolves dark
+  /// from the OS, so a single swap covers both.
+  static ThemeData darkFor({required bool oled}) => oled ? darkOled : dark;
 
   static ColorScheme _darkScheme() => const ColorScheme(
         brightness: Brightness.dark,
@@ -68,6 +93,24 @@ abstract final class AppTheme {
         surfaceTint: Color(0xFF3FBFAD),
         shadow: Color(0xFF000000),
         scrim: Color(0xFF000000),
+      );
+
+  /// The dark scheme with only its surface family re-grounded on black.
+  ///
+  /// Derived with `copyWith` on purpose: the petrol/teal accents, the status
+  /// ambers and reds, and every `on*` pairing are shared with [dark], so the
+  /// OLED variant can never drift away from the brand as those evolve.
+  static ColorScheme _oledScheme() => _darkScheme().copyWith(
+        surface: _Roomtone.oledSurface,
+        surfaceContainerLowest: _Roomtone.oledGround,
+        surfaceContainerLow: const Color(0xFF060C0D),
+        surfaceContainer: _Roomtone.oledSurface,
+        surfaceContainerHigh: const Color(0xFF0F1819),
+        surfaceContainerHighest: _Roomtone.oledInset,
+        outlineVariant: _Roomtone.oledHairline,
+        // The inverse pair backs SnackBars and tooltips: light plate, and the
+        // text on it has to be as black as the theme it belongs to.
+        onInverseSurface: _Roomtone.oledGround,
       );
 
   static ColorScheme _lightScheme() => const ColorScheme(
@@ -106,12 +149,30 @@ abstract final class AppTheme {
         scrim: Color(0xFF000000),
       );
 
-  static ThemeData _build(Brightness brightness) {
+  /// [oled] only ever applies to [Brightness.dark] — there is no low-luminance
+  /// variant of a light theme, so it is ignored for light and the light build
+  /// stays byte-identical.
+  static ThemeData _build(Brightness brightness, {bool oled = false}) {
     final isDark = brightness == Brightness.dark;
-    final colorScheme = isDark ? _darkScheme() : _lightScheme();
-    final ground = isDark ? _Roomtone.darkGround : _Roomtone.lightGround;
-    final nav = isDark ? _Roomtone.darkNav : _Roomtone.lightNav;
-    final hairline = isDark ? _Roomtone.darkHairline : _Roomtone.lightHairline;
+    final isOled = isDark && oled;
+    final colorScheme = isDark
+        ? (isOled ? _oledScheme() : _darkScheme())
+        : _lightScheme();
+    final ground = isOled
+        ? _Roomtone.oledGround
+        : isDark
+            ? _Roomtone.darkGround
+            : _Roomtone.lightGround;
+    final nav = isOled
+        ? _Roomtone.oledNav
+        : isDark
+            ? _Roomtone.darkNav
+            : _Roomtone.lightNav;
+    final hairline = isOled
+        ? _Roomtone.oledHairline
+        : isDark
+            ? _Roomtone.darkHairline
+            : _Roomtone.lightHairline;
 
     return ThemeData(
       brightness: brightness,

@@ -88,7 +88,10 @@ class _AppState extends ConsumerState<App> {
     final Widget app = MaterialApp.router(
       title: 'Roomtone',
       theme: AppTheme.light,
-      darkTheme: AppTheme.dark,
+      // The OLED variant is chosen here, not via themeMode, so it applies to
+      // OS-resolved dark (ThemeMode.system) exactly as it does to the
+      // explicitly-chosen Dark setting.
+      darkTheme: AppTheme.darkFor(oled: settings.oledDark),
       themeMode: settings.themeMode,
       routerConfig: router,
       debugShowCheckedModeBanner: false,

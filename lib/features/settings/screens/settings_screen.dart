@@ -72,6 +72,16 @@ class SettingsScreen extends ConsumerWidget {
               },
             ),
           ),
+          SwitchListTile(
+            title: const Text('OLED black'),
+            subtitle: Text(
+              _oledSubtitle(theme.brightness, settings.oledDark),
+              style: theme.textTheme.bodySmall,
+            ),
+            value: settings.oledDark,
+            onChanged: notifier.setOledDark,
+            secondary: const Icon(Icons.contrast),
+          ),
           const Divider(height: 1),
           SwitchListTile(
             title: const Text('Use plain RTSP'),
@@ -242,6 +252,21 @@ class SettingsScreen extends ConsumerWidget {
         ],
       ),
     );
+  }
+
+  /// Copy for the OLED switch.
+  ///
+  /// The toggle stays usable in light mode — it is a property of the dark
+  /// theme, not a mode of its own — so when light is on screen the subtitle has
+  /// to say the flip won't show yet. [brightness] is the *rendered* brightness,
+  /// which is what makes this honest under System: it reads light or dark from
+  /// the OS rather than guessing from the stored ThemeMode.
+  String _oledSubtitle(Brightness brightness, bool enabled) {
+    final base = enabled
+        ? 'Pure-black backgrounds — a black pixel emits no light on OLED'
+        : 'Dark mode uses the standard petrol backgrounds';
+    if (brightness == Brightness.dark) return base;
+    return '$base. Applies once dark mode is active.';
   }
 
   // The threshold gates the card-border highlight on recent VARIATION in
