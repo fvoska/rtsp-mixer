@@ -1668,7 +1668,7 @@ class AudioPlayerNotifier extends AsyncNotifier<MonitoringState> {
         appLog('AUDIO', 'failed to stop FGS (continuing): $e');
       }
       // Flip the MediaSession/audio_service notification to idle. Without this
-      // the media notification ("Baby Monitor Active" with Pause/Stop controls)
+      // the media notification ("Listening" with Pause/Stop controls)
       // keeps showing an active-looking state and re-surfaces when the app is
       // backgrounded — only the media notification's own Stop button called
       // setIdle() before, so stopping from the inline banner or the FGS

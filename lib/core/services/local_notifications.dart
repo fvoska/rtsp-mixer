@@ -27,7 +27,7 @@ class LocalNotificationsManager {
       // GUID is a stable random identifier for the notification activation
       // callback; appUserModelId mirrors the Android/macOS bundle ID.
       const windowsInit = WindowsInitializationSettings(
-        appName: 'RTSP Mixer',
+        appName: 'Roomtone',
         appUserModelId: 'tech.voska.rtsp_mixer',
         guid: '9b5e3f8a-7c4d-4a2e-bf91-8d6c5e4f3a2b',
       );

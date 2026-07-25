@@ -4,15 +4,52 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:media_kit_video/media_kit_video.dart';
 
-import '../../../core/theme/app_theme.dart';
+import '../../../core/logging/app_logger.dart';
+import '../../../core/theme/app_typography.dart';
 import '../../../core/theme/spacing.dart';
+import '../../../core/theme/status_colors.dart';
 import '../../cameras/widgets/camera_source_badge.dart';
 import '../helpers/audio_level_meter.dart';
 import '../models/player_state.dart';
 import '../providers/audio_player_provider.dart';
 
-/// Per-camera control card with volume slider, pan slider, status, mute,
-/// quality selector, and optional video preview.
+/// Normalised, sanitised activity intensity in `[0.15, 0.9]`, or null when the
+/// input cannot be trusted.
+///
+/// `audioActivity` is written by a twice-a-second poll of mpv properties. A
+/// NaN, an infinity, or a threshold of exactly 1.0 would produce an invalid
+/// `BoxShadow` and throw out of `build` — during an overnight session, with
+/// audio playing. Per CLAUDE.md a silently haloless card is the correct
+/// degraded mode; an exception is not.
+double? _activityIntensity(double activity, double threshold) {
+  try {
+    if (!activity.isFinite || !threshold.isFinite) return null;
+    if (threshold >= 1.0) return null;
+    final normalised = (activity - threshold) / (1.0 - threshold);
+    if (!normalised.isFinite) return null;
+    return normalised.clamp(0.15, 0.9);
+  } catch (e) {
+    _warnHaloOnce(e);
+    return null;
+  }
+}
+
+bool _haloWarned = false;
+
+void _warnHaloOnce(Object error) {
+  if (_haloWarned) return;
+  _haloWarned = true;
+  try {
+    appLog('CARD', 'Activity halo disabled after bad input: $error');
+  } catch (_) {}
+}
+
+/// Per-camera control card with volume slider, status, mute, quality
+/// selector, and optional video preview.
+///
+/// (The doc comment used to promise a pan slider too. There has never been one
+/// in this widget — L/R panning is deferred because the prebuilt media_kit
+/// FFmpeg ships no `pan` filter, see CLAUDE.md.)
 class CameraAudioCard extends ConsumerStatefulWidget {
   final CameraAudioState cameraState;
   final int cameraIndex;
@@ -118,6 +155,7 @@ class _CameraAudioCardState extends ConsumerState<CameraAudioCard> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final status = context.statusColors;
     final cs = widget.cameraState;
     final idx = widget.cameraIndex;
     final isConnecting =
@@ -125,29 +163,44 @@ class _CameraAudioCardState extends ConsumerState<CameraAudioCard> {
 
     final videoCtrl = widget.showVideoPreview ? _videoController : null;
 
-    // Google Meet-style border highlight on recent VARIATION in pseudo-SPL
+    // Google Meet-style highlight on recent VARIATION in pseudo-SPL
     // (peak-to-trough of the level history over ~5 s). A baby crying means
-    // big swings, so the border lights up on change bursts — not on steady
+    // big swings, so the card lights up on change bursts — not on steady
     // loudness and not on deviation-from-baseline.
     final hasActivity = cs.isLive && cs.audioActivity > widget.activityThreshold;
-    final borderColor = hasActivity
-        ? AppTheme.statusOnline.withValues(
-            alpha: ((cs.audioActivity - widget.activityThreshold) /
-                    (1.0 - widget.activityThreshold))
-                .clamp(0.15, 0.9))
-        : Colors.transparent;
+    final intensity = hasActivity
+        ? _activityIntensity(cs.audioActivity, widget.activityThreshold)
+        : null;
+    final borderColor =
+        intensity != null ? status.live.withValues(alpha: intensity) : null;
 
     return AnimatedContainer(
       duration: const Duration(milliseconds: 300),
       decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(12),
+        borderRadius: BorderRadius.circular(Radii.card),
         border: Border.all(
-          color: borderColor,
+          color: borderColor ?? Colors.transparent,
           width: 2.0,
         ),
+        // Nightwatch halo: the same tuned intensity that drives the border
+        // also drives a soft outward glow, so a noisy room reads from across
+        // the room instead of needing a squint at a 2px outline. Null (no
+        // shadow) whenever the intensity could not be trusted.
+        boxShadow: intensity == null
+            ? null
+            : [
+                BoxShadow(
+                  color: status.live.withValues(alpha: intensity * 0.55),
+                  blurRadius: 8.0 + intensity * 20.0,
+                  spreadRadius: intensity * 6.0,
+                ),
+              ],
       ),
       child: Card.filled(
         margin: EdgeInsets.zero,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(Radii.card),
+        ),
         // Clip so the edge-to-edge status banner honours the card's rounded
         // top corners.
         clipBehavior: Clip.antiAlias,
@@ -180,7 +233,7 @@ class _CameraAudioCardState extends ConsumerState<CameraAudioCard> {
               ),
             ),
             Padding(
-        padding: const EdgeInsets.all(Spacing.md),
+        padding: const EdgeInsets.all(Spacing.lg),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
@@ -195,12 +248,12 @@ class _CameraAudioCardState extends ConsumerState<CameraAudioCard> {
                   decoration: BoxDecoration(
                     shape: BoxShape.circle,
                     color: cs.isLive
-                        ? AppTheme.statusOnline
+                        ? status.live
                         : cs.isError
-                            ? AppTheme.statusOffline
+                            ? status.offline
                             : cs.connectionStatus ==
                                     CameraConnectionStatus.reconnecting
-                                ? theme.colorScheme.tertiary
+                                ? status.reconnecting
                                 : theme.colorScheme.onSurface
                                     .withValues(alpha: 0.5),
                   ),
@@ -226,15 +279,17 @@ class _CameraAudioCardState extends ConsumerState<CameraAudioCard> {
                     ],
                   ),
                 ),
-                // Compact action buttons; nothing else competes on this row.
+                // Action buttons. Each is a full 48dp target — this row is
+                // tapped one-handed in the dark.
                 Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
                     IconButton(
-                      visualDensity: VisualDensity.compact,
                       padding: EdgeInsets.zero,
-                      constraints:
-                          const BoxConstraints(minWidth: 36, minHeight: 36),
+                      constraints: const BoxConstraints(
+                        minWidth: Touch.target,
+                        minHeight: Touch.target,
+                      ),
                       icon: Icon(
                         cs.isMuted ? Icons.volume_off : Icons.volume_up,
                       ),
@@ -245,10 +300,11 @@ class _CameraAudioCardState extends ConsumerState<CameraAudioCard> {
                     ),
                     if (widget.onToggleVideo != null)
                       IconButton(
-                        visualDensity: VisualDensity.compact,
                         padding: EdgeInsets.zero,
-                        constraints:
-                            const BoxConstraints(minWidth: 36, minHeight: 36),
+                        constraints: const BoxConstraints(
+                          minWidth: Touch.target,
+                          minHeight: Touch.target,
+                        ),
                         icon: Icon(
                           widget.showVideoPreview
                               ? Icons.videocam
@@ -262,10 +318,11 @@ class _CameraAudioCardState extends ConsumerState<CameraAudioCard> {
                       ),
                     if (widget.onRemove != null)
                       IconButton(
-                        visualDensity: VisualDensity.compact,
                         padding: EdgeInsets.zero,
-                        constraints:
-                            const BoxConstraints(minWidth: 36, minHeight: 36),
+                        constraints: const BoxConstraints(
+                          minWidth: Touch.target,
+                          minHeight: Touch.target,
+                        ),
                         icon: Icon(
                           Icons.close_rounded,
                           size: 20,
@@ -293,25 +350,28 @@ class _CameraAudioCardState extends ConsumerState<CameraAudioCard> {
 
             // Audio level indicator + rolling waveform
             if (cs.isLive) ...[
-              const SizedBox(height: Spacing.xs),
+              const SizedBox(height: Spacing.sm),
               _AudioLevelIndicator(
                 level: cs.audioLevel,
                 isSuspiciouslySilent: cs.isSuspiciouslySilent,
                 silenceDuration: cs.silenceDuration,
               ),
-              const SizedBox(height: Spacing.xs),
+              const SizedBox(height: Spacing.sm),
               _WaveformChart(history: cs.levelHistory),
             ],
 
             // Quality selector + stream URL debug info
             if (cs.availableQualities.isNotEmpty) ...[
-              const SizedBox(height: Spacing.xs),
+              const SizedBox(height: Spacing.sm),
               Row(
                 children: [
                   // Quality dropdown
                   DropdownButton<String>(
                     value: cs.activeQuality,
-                    isDense: true,
+                    // Not dense: this is a real control and needs a real
+                    // target, not a 24dp strip of text.
+                    isDense: false,
+                    itemHeight: Touch.target,
                     underline: const SizedBox.shrink(),
                     style: theme.textTheme.bodySmall,
                     items: cs.availableQualities.keys.map((q) {
@@ -341,7 +401,7 @@ class _CameraAudioCardState extends ConsumerState<CameraAudioCard> {
 
             // Debug/stream info
             if (widget.showDebugInfo && cs.isLive) ...[
-              const SizedBox(height: Spacing.xs),
+              const SizedBox(height: Spacing.sm),
               _StreamInfoPanel(
                 streamInfo: cs.streamInfo,
                 cameraState: cs,
@@ -351,9 +411,10 @@ class _CameraAudioCardState extends ConsumerState<CameraAudioCard> {
 
             // Video preview with pinch-to-zoom and pan
             if (videoCtrl != null) ...[
-              const SizedBox(height: Spacing.sm),
+              const SizedBox(height: Spacing.md),
               ClipRRect(
-                borderRadius: BorderRadius.circular(8),
+                // Nested inside a 20px card, so this rounds less.
+                borderRadius: BorderRadius.circular(Radii.inner),
                 child: Stack(
                   children: [
                     AspectRatio(
@@ -457,7 +518,7 @@ class _CameraAudioCardState extends ConsumerState<CameraAudioCard> {
                         crossAxisAlignment: CrossAxisAlignment.start,
                         mainAxisSize: MainAxisSize.min,
                         children: [
-                          const SizedBox(height: Spacing.sm),
+                          const SizedBox(height: Spacing.md),
                           Row(
                             children: [
                               const Icon(Icons.volume_down, size: 20),
@@ -492,8 +553,8 @@ class _CameraAudioCardState extends ConsumerState<CameraAudioCard> {
                                         ? 'Muted'
                                         : '${cs.volume.round()}%'),
                                     style: cs.isMuted
-                                        ? theme.textTheme.bodySmall?.copyWith(
-                                            color: AppTheme.statusOffline)
+                                        ? theme.textTheme.bodySmall
+                                            ?.copyWith(color: status.offline)
                                         : theme.textTheme.bodySmall,
                                     textAlign: TextAlign.right,
                                     maxLines: 1,
@@ -532,15 +593,16 @@ class _StatusBanner extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;
+    final statusColors = context.statusColors;
     final bool isReconnecting =
         status == CameraConnectionStatus.reconnecting;
 
-    // D-10: the amber accent (tertiary) is reserved for reconnecting only.
+    // D-10: the amber accent is reserved for reconnecting only.
     final Color background = isReconnecting
         ? scheme.tertiaryContainer.withValues(alpha: 0.3)
-        : AppTheme.statusOffline.withValues(alpha: 0.12);
+        : statusColors.offline.withValues(alpha: 0.12);
     final Color foreground =
-        isReconnecting ? scheme.tertiary : AppTheme.statusOffline;
+        isReconnecting ? statusColors.reconnecting : statusColors.offline;
 
     final Widget leading = isReconnecting
         ? SizedBox(
@@ -548,13 +610,13 @@ class _StatusBanner extends StatelessWidget {
             height: 14,
             child: CircularProgressIndicator(
               strokeWidth: 2.0,
-              valueColor: AlwaysStoppedAnimation(scheme.tertiary),
+              valueColor: AlwaysStoppedAnimation(statusColors.reconnecting),
             ),
           )
-        : const Icon(
+        : Icon(
             Icons.error_outline,
             size: 14,
-            color: AppTheme.statusOffline,
+            color: statusColors.offline,
           );
 
     // D-11: reconnecting is status-ONLY — no attempt count, countdown, or
@@ -620,6 +682,7 @@ class _StatusLine extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;
+    final statusColors = context.statusColors;
 
     Widget content;
 
@@ -637,21 +700,21 @@ class _StatusLine extends StatelessWidget {
                   valueColor: AlwaysStoppedAnimation(scheme.primary),
                 ),
               )
-            : const Icon(
+            : Icon(
                 Icons.graphic_eq,
                 size: 14,
-                color: AppTheme.statusOnline,
+                color: statusColors.live,
               );
         final String label = isConnecting ? 'Connecting…' : 'Live';
         final Color color =
-            isConnecting ? scheme.primary : AppTheme.statusOnline;
+            isConnecting ? scheme.primary : statusColors.live;
         content = Column(
           // Keyed by status so Live ↔ Connecting… crossfades in the switcher.
           key: ValueKey(status),
           crossAxisAlignment: CrossAxisAlignment.start,
           mainAxisSize: MainAxisSize.min,
           children: [
-            const SizedBox(height: Spacing.xs),
+            const SizedBox(height: Spacing.sm),
             Row(
               // The label is always single-line here, so centering the 14x14
               // leading box against the taller text line-box optically centers
@@ -709,8 +772,9 @@ class _AudioLevelIndicator extends StatelessWidget {
     // shows an ABSOLUTE pseudo-SPL now, so a low level is a normally quiet
     // nursery — not a degraded state. An amber "low" branch would glow all
     // night; deliberately removed (pinned by a widget test).
+    final statusColors = context.statusColors;
     final Color barColor =
-        isSuspiciouslySilent ? AppTheme.statusOffline : AppTheme.statusOnline;
+        isSuspiciouslySilent ? statusColors.offline : statusColors.live;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -733,7 +797,7 @@ class _AudioLevelIndicator extends StatelessWidget {
           Text(
             'No audio for ${silenceDuration.toStringAsFixed(0)}s — stream may be broken',
             style: theme.textTheme.bodySmall?.copyWith(
-              color: AppTheme.statusOffline,
+              color: statusColors.offline,
               fontSize: 11,
             ),
           ),
@@ -854,12 +918,13 @@ class _StreamInfoPanel extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final dimStyle = theme.textTheme.bodySmall?.copyWith(
-      fontSize: 11,
+    // Vendored Roboto Mono with tabular figures: these rows tick every poll,
+    // and a proportional (or platform-default 'monospace') face made the
+    // values shuffle sideways as digits changed.
+    final dimStyle = AppTypography.numericSmall.copyWith(
       color: theme.colorScheme.onSurface.withValues(alpha: 0.6),
-      fontFamily: 'monospace',
     );
-    final labelStyle = dimStyle?.copyWith(
+    final labelStyle = dimStyle.copyWith(
       color: theme.colorScheme.onSurface.withValues(alpha: 0.4),
     );
     final si = streamInfo;
@@ -949,17 +1014,20 @@ class _OverlayButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Material(
-      color: Colors.black54,
-      borderRadius: BorderRadius.circular(4),
-      child: InkWell(
-        borderRadius: BorderRadius.circular(4),
-        onTap: onPressed,
-        child: Padding(
-          padding: const EdgeInsets.all(4),
+    // Full 48dp target: these sit over a live video preview and were a 26dp
+    // square, which is not hittable one-handed in the dark.
+    return SizedBox(
+      width: Touch.target,
+      height: Touch.target,
+      child: Material(
+        color: Colors.black54,
+        borderRadius: BorderRadius.circular(Radii.control),
+        child: InkWell(
+          borderRadius: BorderRadius.circular(Radii.control),
+          onTap: onPressed,
           child: Tooltip(
             message: tooltip,
-            child: Icon(icon, size: 18, color: Colors.white),
+            child: Icon(icon, size: 20, color: Colors.white),
           ),
         ),
       ),

@@ -2,13 +2,15 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rtsp_mixer/core/theme/app_theme.dart';
+import 'package:rtsp_mixer/core/theme/status_colors.dart';
 import 'package:rtsp_mixer/features/monitoring/models/player_state.dart';
 import 'package:rtsp_mixer/features/monitoring/widgets/camera_audio_card.dart';
 
 Future<void> _pumpCard(
   WidgetTester tester,
-  CameraAudioState state,
-) async {
+  CameraAudioState state, {
+  double activityThreshold = 0.1,
+}) async {
   await tester.pumpWidget(
     ProviderScope(
       child: MaterialApp(
@@ -19,7 +21,7 @@ Future<void> _pumpCard(
             cameraIndex: 0,
             showVideoPreview: false,
             showDebugInfo: false,
-            activityThreshold: 0.1,
+            activityThreshold: activityThreshold,
             onToggleVideo: () {},
           ),
         ),
@@ -203,8 +205,127 @@ void main() {
       );
       final valueColor =
           (indicator.valueColor as AlwaysStoppedAnimation<Color?>).value;
-      expect(valueColor, AppTheme.statusOnline);
+      expect(valueColor, AppTheme.dark.statusColors.live);
       expect(valueColor, isNot(Colors.amber));
+    });
+  });
+
+  group('CameraAudioCard Nightwatch shape (quick-260725-ev6)', () {
+    // The outer AnimatedContainer carries the card's radius, activity border,
+    // and halo. It is the first one in the tree.
+    BoxDecoration decorationOf(WidgetTester tester) {
+      final container = tester.widget<AnimatedContainer>(
+        find.byType(AnimatedContainer).first,
+      );
+      return container.decoration! as BoxDecoration;
+    }
+
+    const loud = CameraAudioState(
+      cameraId: 'cam1',
+      cameraName: 'Nursery',
+      connectionStatus: CameraConnectionStatus.playing,
+      audioActivity: 0.85,
+    );
+    const belowThreshold = CameraAudioState(
+      cameraId: 'cam1',
+      cameraName: 'Nursery',
+      connectionStatus: CameraConnectionStatus.playing,
+      audioActivity: 0.02,
+    );
+    const notLive = CameraAudioState(
+      cameraId: 'cam1',
+      cameraName: 'Nursery',
+      connectionStatus: CameraConnectionStatus.connecting,
+      audioActivity: 0.85,
+    );
+
+    testWidgets('card corners are 20px', (tester) async {
+      await _pumpCard(tester, playing);
+      final radius = decorationOf(tester).borderRadius! as BorderRadius;
+      expect(radius.topLeft.x, 20);
+      expect(radius.bottomRight.x, 20);
+    });
+
+    testWidgets('activity above threshold produces a teal border AND a halo',
+        (tester) async {
+      await _pumpCard(tester, loud);
+      final decoration = decorationOf(tester);
+
+      expect(decoration.boxShadow, isNotNull);
+      expect(decoration.boxShadow, isNotEmpty);
+      final shadow = decoration.boxShadow!.first;
+      expect(shadow.blurRadius, greaterThan(0));
+      expect(shadow.offset, Offset.zero);
+      // Halo and border are the same teal, differing only in alpha.
+      final live = AppTheme.dark.statusColors.live;
+      expect(shadow.color.r, live.r);
+      expect(shadow.color.g, live.g);
+      expect(shadow.color.b, live.b);
+      expect(decoration.border!.top.color.a, greaterThan(0));
+    });
+
+    testWidgets('activity below threshold produces no halo and no border',
+        (tester) async {
+      await _pumpCard(tester, belowThreshold);
+      final decoration = decorationOf(tester);
+      expect(decoration.boxShadow, anyOf(isNull, isEmpty));
+      expect(decoration.border!.top.color, Colors.transparent);
+    });
+
+    testWidgets('a non-live camera never haloes, however loud', (tester) async {
+      await _pumpCard(tester, notLive);
+      expect(decorationOf(tester).boxShadow, anyOf(isNull, isEmpty));
+    });
+
+    testWidgets('halo intensity rises with the activity value', (tester) async {
+      await _pumpCard(tester, belowThreshold.copyWith(audioActivity: 0.3));
+      final quiet = decorationOf(tester).boxShadow!.first.blurRadius;
+      await _pumpCard(tester, loud);
+      final loudBlur = decorationOf(tester).boxShadow!.first.blurRadius;
+      expect(loudBlur, greaterThan(quiet));
+    });
+
+    testWidgets('a NaN activity degrades to no halo instead of throwing',
+        (tester) async {
+      // audioActivity is written by a twice-a-second property poll; a bad
+      // value must not throw out of build during an overnight session.
+      await _pumpCard(tester, playing.copyWith(audioActivity: double.nan));
+      expect(tester.takeException(), isNull);
+      expect(decorationOf(tester).boxShadow, anyOf(isNull, isEmpty));
+    });
+
+    testWidgets('an infinite activity degrades to no halo', (tester) async {
+      await _pumpCard(tester, playing.copyWith(audioActivity: double.infinity));
+      expect(tester.takeException(), isNull);
+      expect(decorationOf(tester).boxShadow, anyOf(isNull, isEmpty));
+    });
+
+    testWidgets('a threshold of 1.0 cannot divide by zero', (tester) async {
+      await _pumpCard(tester, loud, activityThreshold: 1.0);
+      expect(tester.takeException(), isNull);
+      expect(decorationOf(tester).boxShadow, anyOf(isNull, isEmpty));
+    });
+
+    testWidgets('header action buttons are at least 48dp', (tester) async {
+      await _pumpCard(tester, playing);
+      for (final element in find.byType(IconButton).evaluate()) {
+        final size = tester.getSize(find.byWidget(element.widget));
+        expect(size.height, greaterThanOrEqualTo(48.0),
+            reason: 'tap target too short');
+        expect(size.width, greaterThanOrEqualTo(48.0),
+            reason: 'tap target too narrow');
+      }
+    });
+
+    testWidgets('every pre-existing control survives the restyle',
+        (tester) async {
+      await _pumpCard(tester, playingWithHistory);
+      expect(find.byType(Slider), findsWidgets, reason: 'volume slider');
+      expect(find.byTooltip('Mute'), findsOneWidget);
+      expect(find.byTooltip('Show video'), findsOneWidget);
+      expect(waveformFinder, findsOneWidget);
+      expect(find.text('Live'), findsOneWidget);
+      expect(find.text('Nursery'), findsOneWidget);
     });
   });
 

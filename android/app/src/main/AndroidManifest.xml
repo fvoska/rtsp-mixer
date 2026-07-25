@@ -7,7 +7,7 @@
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
     <application
-        android:label="RTSP Mixer"
+        android:label="Roomtone"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher">
         <activity
@@ -37,6 +37,14 @@
         <meta-data
             android:name="flutterEmbedding"
             android:value="2" />
+        <!-- Small status-bar icon for the foreground-service notification.
+             flutter_foreground_task 9.2.2 resolves a custom icon by looking up
+             a meta-data name (see NotificationIcon.metaDataName), so the
+             drawable has to be registered here rather than passed directly.
+             Alpha-only artwork: Android tints it. -->
+        <meta-data
+            android:name="com.rtspmixer.notification.icon"
+            android:resource="@drawable/ic_stat_monitor" />
         <!-- flutter_foreground_task service (primary foreground service) -->
         <service
             android:name="com.pravera.flutter_foreground_task.service.ForegroundService"

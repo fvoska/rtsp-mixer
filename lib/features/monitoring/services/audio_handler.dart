@@ -21,9 +21,9 @@ class MonitoringAudioHandler extends BaseAudioHandler {
   void setCameraNames(List<String> cameraNames) {
     mediaItem.add(MediaItem(
       id: 'baby_monitor',
-      title: 'Baby Monitor Active',
+      title: 'Listening',
       artist: 'Monitoring: ${cameraNames.join(", ")}',
-      album: 'RTSP Mixer',
+      album: 'Roomtone',
     ));
   }
 
@@ -125,7 +125,7 @@ final audioHandlerProvider = FutureProvider<MonitoringAudioHandler>((ref) async 
     builder: () => handler,
     config: const AudioServiceConfig(
       androidNotificationChannelId: 'baby_monitor_media',
-      androidNotificationChannelName: 'Baby Monitor Media',
+      androidNotificationChannelName: 'Roomtone Media',
       androidNotificationOngoing: false,
       androidStopForegroundOnPause: true,
     ),

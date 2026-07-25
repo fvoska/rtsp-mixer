@@ -1,9 +1,30 @@
 import 'dart:convert';
 
+import 'package:flutter/material.dart' show ThemeMode;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../features/auth/providers/auth_provider.dart';
 import '../logging/app_logger.dart';
+
+/// Persisted as a stable string rather than the enum index: reordering
+/// [ThemeMode] in a future SDK must never silently flip a user's theme.
+const _themeModeNames = <ThemeMode, String>{
+  ThemeMode.system: 'system',
+  ThemeMode.light: 'light',
+  ThemeMode.dark: 'dark',
+};
+
+String _themeModeToName(ThemeMode mode) => _themeModeNames[mode] ?? 'system';
+
+/// Tolerant by design: a null, absent, or unrecognised value (a settings blob
+/// written by an older or newer build) decodes to system instead of throwing.
+ThemeMode _themeModeFromName(Object? raw) {
+  if (raw is! String) return ThemeMode.system;
+  for (final entry in _themeModeNames.entries) {
+    if (entry.value == raw) return entry.key;
+  }
+  return ThemeMode.system;
+}
 
 class AppSettings {
   /// Use plain RTSP (port 7447) instead of RTSPS (port 7441 + SRTP).
@@ -16,21 +37,27 @@ class AppSettings {
   /// 0.01 = most sensitive (any sound), 0.5 = least.
   final double activityThreshold;
 
+  /// System / Light / Dark, chosen by the user in Settings.
+  final ThemeMode themeMode;
+
   const AppSettings({
     this.useRtsp = false,
     this.audioBufferSeconds = 0.5,
     this.activityThreshold = 0.05,
+    this.themeMode = ThemeMode.system,
   });
 
   AppSettings copyWith({
     bool? useRtsp,
     double? audioBufferSeconds,
     double? activityThreshold,
+    ThemeMode? themeMode,
   }) =>
       AppSettings(
         useRtsp: useRtsp ?? this.useRtsp,
         audioBufferSeconds: audioBufferSeconds ?? this.audioBufferSeconds,
         activityThreshold: activityThreshold ?? this.activityThreshold,
+        themeMode: themeMode ?? this.themeMode,
       );
 
   @override
@@ -39,16 +66,18 @@ class AppSettings {
       other is AppSettings &&
           useRtsp == other.useRtsp &&
           audioBufferSeconds == other.audioBufferSeconds &&
-          activityThreshold == other.activityThreshold;
+          activityThreshold == other.activityThreshold &&
+          themeMode == other.themeMode;
 
   @override
   int get hashCode =>
-      Object.hash(useRtsp, audioBufferSeconds, activityThreshold);
+      Object.hash(useRtsp, audioBufferSeconds, activityThreshold, themeMode);
 
   Map<String, dynamic> toJson() => {
         'useRtsp': useRtsp,
         'audioBufferSeconds': audioBufferSeconds,
         'activityThreshold': activityThreshold,
+        'themeMode': _themeModeToName(themeMode),
       };
 
   factory AppSettings.fromJson(Map<String, dynamic> json) => AppSettings(
@@ -57,6 +86,7 @@ class AppSettings {
             (json['audioBufferSeconds'] as num?)?.toDouble() ?? 0.5,
         activityThreshold:
             (json['activityThreshold'] as num?)?.toDouble() ?? 0.05,
+        themeMode: _themeModeFromName(json['themeMode']),
       );
 }
 
@@ -98,6 +128,12 @@ class SettingsNotifier extends Notifier<AppSettings> {
   void setAudioBufferSeconds(double value) {
     state = state.copyWith(audioBufferSeconds: value);
     appLog('SETTINGS', 'Audio buffer: ${value}s');
+    _save();
+  }
+
+  void setThemeMode(ThemeMode value) {
+    state = state.copyWith(themeMode: value);
+    appLog('SETTINGS', 'Theme mode: ${_themeModeToName(value)}');
     _save();
   }
 

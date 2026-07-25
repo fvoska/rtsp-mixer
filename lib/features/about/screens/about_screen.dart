@@ -17,7 +17,7 @@ class AboutScreen extends StatelessWidget {
   const AboutScreen({super.key});
 
   static const String _contactEmail = 'filip@voska.tech';
-  static const String _appName = 'RTSP Mixer';
+  static const String _appName = 'Roomtone';
 
   /// Reads package info, swallowing any failure into null so the caller can
   /// render an "unavailable" state instead of throwing.

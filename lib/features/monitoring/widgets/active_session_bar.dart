@@ -4,9 +4,11 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
-import '../../../core/theme/app_theme.dart';
+import '../../../core/theme/app_typography.dart';
 import '../../../core/theme/spacing.dart';
+import '../../../core/theme/status_colors.dart';
 import '../../auth/providers/auth_provider.dart';
+import '../helpers/uptime_format.dart';
 import '../providers/session_history_provider.dart';
 
 /// Mini-bar shown above the bottom NavigationBar while monitoring is active
@@ -65,7 +67,7 @@ class _ActiveSessionBarState extends ConsumerState<ActiveSessionBar> {
     final theme = Theme.of(context);
     final startedAt = session?.startedAt ?? DateTime.now();
     final uptime = DateTime.now().difference(startedAt);
-    final formatted = session == null ? 'resuming…' : _formatUptime(uptime);
+    final formatted = session == null ? 'resuming…' : formatUptime(uptime);
     final semanticsLabel = session == null
         ? 'Resuming monitoring'
         : 'Return to monitoring, uptime $formatted';
@@ -101,16 +103,30 @@ class _ActiveSessionBarState extends ConsumerState<ActiveSessionBar> {
                     child: Container(
                       width: 8,
                       height: 8,
-                      decoration: const BoxDecoration(
-                        color: AppTheme.statusOnline,
+                      decoration: BoxDecoration(
+                        color: context.statusColors.live,
                         shape: BoxShape.circle,
                       ),
                     ),
                   ),
                   const SizedBox(width: Spacing.sm),
                   Expanded(
-                    child: Text(
-                      'Monitoring · $formatted',
+                    // The duration ticks every second, so it renders in the
+                    // tabular-figure numeric face while the word stays in the
+                    // UI face. Same string, same formatting logic — only the
+                    // span it sits in changed.
+                    child: Text.rich(
+                      TextSpan(
+                        text: 'Monitoring · ',
+                        children: [
+                          TextSpan(
+                            text: formatted,
+                            style: AppTypography.tabular(
+                              theme.textTheme.titleSmall,
+                            ),
+                          ),
+                        ],
+                      ),
                       style: theme.textTheme.titleSmall?.copyWith(
                         color: theme.colorScheme.onSecondaryContainer,
                       ),
@@ -129,14 +145,5 @@ class _ActiveSessionBarState extends ConsumerState<ActiveSessionBar> {
         ),
       ),
     );
-  }
-
-  /// Same xs / Mm / Hh Mm format used by HealthSummaryScreen's uptime card.
-  String _formatUptime(Duration d) {
-    if (d.inMinutes < 1) return '${d.inSeconds}s';
-    if (d.inHours < 1) return '${d.inMinutes}m';
-    final h = d.inHours;
-    final m = d.inMinutes - h * 60;
-    return '${h}h ${m}m';
   }
 }
