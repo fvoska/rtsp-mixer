@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.11.0](https://github.com/fvoska/rtsp-mixer/compare/v1.10.1...v1.11.0) (2026-07-25)
+
+
+### Features
+
+* **ui:** rebrand as Roomtone with light/dark theming, vendored typography, and a new logo ([#42](https://github.com/fvoska/rtsp-mixer/issues/42)) ([f019a4c](https://github.com/fvoska/rtsp-mixer/commit/f019a4c2b662ba319c6f0d8585d0557ce0a77dcc))
+
 ## [1.10.1](https://github.com/fvoska/rtsp-mixer/compare/v1.10.0...v1.10.1) (2026-07-25)
 
 
