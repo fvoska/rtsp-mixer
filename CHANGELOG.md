@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.10.1](https://github.com/fvoska/rtsp-mixer/compare/v1.10.0...v1.10.1) (2026-07-25)
+
+
+### Bug Fixes
+
+* **about:** make in-app changelog hyperlinks tappable ([#40](https://github.com/fvoska/rtsp-mixer/issues/40)) ([50fdb77](https://github.com/fvoska/rtsp-mixer/commit/50fdb7736477474d60b5b031ae7487919797865b))
+
 ## [1.10.0](https://github.com/fvoska/rtsp-mixer/compare/v1.9.2...v1.10.0) (2026-07-24)
 
 
