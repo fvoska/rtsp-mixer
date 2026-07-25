@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/api/protect_api_client.dart';
@@ -134,10 +135,20 @@ class AuthNotifier extends AsyncNotifier<AuthState> {
     }
   }
 
+  /// How long background validation waits before it may revoke cached auth.
+  ///
+  /// Injectable so tests don't have to sleep through it in real time. Two auth
+  /// tests used to `await Future.delayed(const Duration(seconds: 3))` to
+  /// observe the revoke — 6s of suite time riding on the assumption that the
+  /// runner never stalls for the 1s of slack. Tests set this to
+  /// [Duration.zero] and poll for the state transition instead.
+  @visibleForTesting
+  static Duration backgroundValidationDelay = const Duration(seconds: 2);
+
   void _validateInBackground(String host, String? remoteHost, String apiKey) {
     Future(() async {
       // Let the UI settle with cached state before potentially revoking
-      await Future.delayed(const Duration(seconds: 2));
+      await Future.delayed(backgroundValidationDelay);
       try {
         final client = ref.read(apiClientProvider);
         final result = await _verifyWithFallback(client, host, remoteHost);

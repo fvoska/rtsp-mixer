@@ -24,6 +24,17 @@ class AppLogger {
   static const _logFile = '/tmp/rtsp_mixer.log';
   static const _maxLines = 500;
 
+  /// Whether [log] appends to [_logFile].
+  ///
+  /// Off under `flutter test`. Every logged line is a synchronous append, and
+  /// the path is a fixed one shared by every test process — `flutter test` runs
+  /// test files concurrently, so the whole suite was serialising on one file
+  /// and any assertion on [exportFromDisk] would see other files' lines.
+  /// Disabling the sink keeps the in-memory buffer (which the UI and tests
+  /// actually read) and drops only the side effect.
+  static bool fileSinkEnabled =
+      !Platform.environment.containsKey('FLUTTER_TEST');
+
   final _buffer = ListQueue<String>();
   final _listeners = <VoidCallback>[];
 
@@ -33,7 +44,9 @@ class AppLogger {
   String get exportText => _buffer.join('\n');
 
   /// Full log from disk (includes lines that may have rotated out of memory).
+  /// Falls back to [exportText] when the file sink is disabled or unreadable.
   String get exportFromDisk {
+    if (!fileSinkEnabled) return exportText;
     try {
       return File(_logFile).readAsStringSync();
     } catch (_) {
@@ -52,9 +65,21 @@ class AppLogger {
 
   /// Call once at app start to clear the log file.
   void init() {
+    if (!fileSinkEnabled) return;
     try {
       File(_logFile).writeAsStringSync('--- App started ${DateTime.now()} ---\n');
     } catch (_) {}
+  }
+
+  /// Test-only: drop the buffered lines and any registered listeners.
+  ///
+  /// This is a process-global singleton, so without a reset the ring buffer
+  /// carries one test's lines into the next, and a widget that registers a
+  /// listener but is never disposed leaks it into every later test in the file.
+  @visibleForTesting
+  void resetForTest() {
+    _buffer.clear();
+    _listeners.clear();
   }
 
   /// Log a message with a tag.
@@ -66,9 +91,11 @@ class AppLogger {
     debugPrint(line);
 
     // 2. File
-    try {
-      File(_logFile).writeAsStringSync('$line\n', mode: FileMode.append);
-    } catch (_) {}
+    if (fileSinkEnabled) {
+      try {
+        File(_logFile).writeAsStringSync('$line\n', mode: FileMode.append);
+      } catch (_) {}
+    }
 
     // 3. Ring buffer → UI
     _buffer.addLast(line);

@@ -1,3 +1,5 @@
+import 'dart:math';
+
 import 'package:fake_async/fake_async.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rtsp_mixer/features/monitoring/services/reconnect_supervisor.dart';
@@ -14,13 +16,22 @@ void main() {
           },
           onStatusChange: (_, _) {},
           onEvent: (_, _, _) {},
+          // Seeded: computeBackoff applies ±20% jitter, so with the default
+          // unseeded Random the first backoff for each camera lands anywhere in
+          // 800–1200ms and the schedule differs run to run.
+          random: Random(42),
         );
 
         sup.requestReconnect('cam1', cause: 'test');
         sup.requestReconnect('cam2', cause: 'test');
         // Let the first attempts fire.
         async.elapse(const Duration(seconds: 2));
-        expect(attempts, ['cam1', 'cam2']);
+        // Order-insensitive on purpose. Which camera's timer fires first is
+        // decided by which drew the smaller jitter — an implementation detail,
+        // not behaviour this test is about. Asserting ['cam1', 'cam2'] made
+        // this a coin flip; it is the precondition "both cameras attempted
+        // once" that matters before cancelling one of them below.
+        expect(attempts, unorderedEquals(<String>['cam1', 'cam2']));
 
         // Cancel only cam1. cam2 should still attempt again.
         sup.cancel('cam1');
@@ -39,6 +50,7 @@ void main() {
           onAttempt: (_) async => throw StateError('fail'),
           onStatusChange: (_, _) {},
           onEvent: (_, _, _) {},
+          random: Random(42),
         );
         sup.requestReconnect('cam1', cause: 'test');
         async.elapse(const Duration(seconds: 10));

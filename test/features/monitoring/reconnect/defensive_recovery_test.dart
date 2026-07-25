@@ -1,3 +1,5 @@
+import 'dart:math';
+
 import 'package:fake_async/fake_async.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rtsp_mixer/features/monitoring/services/reconnect_supervisor.dart';
@@ -14,6 +16,7 @@ void main() {
           },
           onStatusChange: (_, _) {},
           onEvent: (_, _, _) {},
+          random: Random(42),
         );
         sup.requestReconnect('cam1', cause: 'player_error');
         // Cumulative elapsed well past the sum of first 5 backoffs
@@ -35,6 +38,7 @@ void main() {
           },
           onStatusChange: (_, _) {},
           onEvent: (_, _, _) {},
+          random: Random(42),
         );
         sup.requestReconnect('cam1', cause: 'player_error');
         async.elapse(const Duration(seconds: 10));
