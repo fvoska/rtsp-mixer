@@ -64,9 +64,19 @@ Future<void> _pumpBar(
   await tester.pump(const Duration(milliseconds: 50));
 }
 
+/// A session that renders as "7m" of uptime.
+///
+/// ActiveSessionBar reads `DateTime.now()` when it builds and again on every
+/// 1s tick, so the age of this fixture is real elapsed time, not a fixed
+/// value. Anchoring it 7m30s back rather than exactly 7m puts it in the middle
+/// of the minute bucket: `Duration.inMinutes` floors, so any drift within ±30s
+/// between constructing the fixture and rendering it still formats as "7m".
+/// At exactly 7m the fixture sat on the bucket edge with zero slack.
 Session _liveSession() => Session(
       id: 'sess-1',
-      startedAt: DateTime.now().subtract(const Duration(minutes: 7)),
+      startedAt: DateTime.now().subtract(
+        const Duration(minutes: 7, seconds: 30),
+      ),
       endedAt: null,
       events: const [],
       cameras: const [(id: 'cam1', name: 'Nursery')],
