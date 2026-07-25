@@ -37,15 +37,24 @@ except ImportError:  # pragma: no cover
 CANVAS = 100.0
 CENTER = 50.0
 
-BAR_COUNT = 22
+BAR_COUNT = 15
 ARC_START_DEG = -118.0  # 0 deg = 12 o'clock, positive clockwise
 ARC_END_DEG = 118.0
-ARC_RADIUS = 40.0  # the bars' OUTER edge, so the crescent's outer rim is a
-# clean arc and nothing spills past the 100x100 canvas
-BAR_LEN_MIN = 7.0
-BAR_LEN_MAX = 24.0
-STROKE_WIDTH = 5.4
-DOT_RADIUS = 6.5
+ARC_RADIUS = 33.0  # the arc the bars are CENTRED on, so length variation shows
+# on both the inner and outer rim and the inner ends stay spread apart
+BAR_LEN_MIN = 9.0
+BAR_LEN_MAX = 21.0
+STROKE_WIDTH = 4.2
+DOT_RADIUS = 6.0
+
+# Density check (why the constants above are what they are): the bars crowd
+# together at their INNER ends, and the worst case is the longest bar in the
+# middle of the sweep. Angular pitch is (ARC_END-ARC_START)/(BAR_COUNT-1) =
+# 16.86 deg = 0.2942 rad; the longest bar's inner end sits at
+# ARC_RADIUS - BAR_LEN_MAX/2 = 22.5, so neighbouring centres are 0.2942*22.5 =
+# 6.62 apart and the ink gap is 6.62 - 4.2 = 2.4 units. Anything at or below
+# zero fuses the crescent into a solid fan, which is what 22 bars of stroke 5.4
+# on a radius-40 arc did. Keep this margin if you retune.
 
 # ---------------------------------------------------------------------------
 # PALETTE (Roomtone)
@@ -74,8 +83,8 @@ def bars() -> list[tuple[float, float, float, float]]:
         # tips and peaks in the middle.
         length = BAR_LEN_MIN + (BAR_LEN_MAX - BAR_LEN_MIN) * math.sin(t * math.pi)
         sin_a, cos_a = math.sin(angle), math.cos(angle)
-        outer = ARC_RADIUS
-        inner = ARC_RADIUS - length
+        outer = ARC_RADIUS + length / 2.0
+        inner = ARC_RADIUS - length / 2.0
         segments.append(
             (
                 CENTER + outer * sin_a,
