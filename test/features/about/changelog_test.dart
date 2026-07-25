@@ -144,4 +144,75 @@ Just text, no version headers here.
       expect(releases.single.sections.single.entries.length, 2);
     });
   });
+
+  group('parseInlineMarkdown', () {
+    test('plain text yields a single text run', () {
+      final parts = parseInlineMarkdown('just some text');
+      expect(parts.length, 1);
+      expect(parts.single.text, 'just some text');
+      expect(parts.single.isBold, isFalse);
+      expect(parts.single.isLink, isFalse);
+    });
+
+    test('empty input yields no runs', () {
+      expect(parseInlineMarkdown(''), isEmpty);
+    });
+
+    test('bold marks the run bold without the asterisks', () {
+      final parts = parseInlineMarkdown('**monitoring:** absolute SPL bar');
+      expect(parts.length, 2);
+      expect(parts[0].text, 'monitoring:');
+      expect(parts[0].isBold, isTrue);
+      expect(parts[1].text, ' absolute SPL bar');
+      expect(parts[1].isBold, isFalse);
+    });
+
+    test('link captures label and target separately', () {
+      final parts = parseInlineMarkdown('see [#35](https://example.com/35)');
+      expect(parts.length, 2);
+      expect(parts[0].text, 'see ');
+      expect(parts[1].isLink, isTrue);
+      expect(parts[1].text, '#35');
+      expect(parts[1].url, 'https://example.com/35');
+    });
+
+    test('parses a real release-please bullet end to end', () {
+      final parts = parseInlineMarkdown(
+        '**readme:** rewrite README '
+        '([#35](https://github.com/fvoska/rtsp-mixer/issues/35)) '
+        '([12fb9ed](https://github.com/fvoska/rtsp-mixer/commit/12fb9ed))',
+      );
+
+      // Bold scope, then two links, with plain text between/around them.
+      expect(parts.first.isBold, isTrue);
+      expect(parts.first.text, 'readme:');
+
+      final links = parts.where((p) => p.isLink).toList();
+      expect(links.length, 2);
+      expect(links[0].text, '#35');
+      expect(links[0].url, 'https://github.com/fvoska/rtsp-mixer/issues/35');
+      expect(links[1].text, '12fb9ed');
+      expect(links[1].url, 'https://github.com/fvoska/rtsp-mixer/commit/12fb9ed');
+
+      // Nothing is lost: concatenating the runs rebuilds the visible text.
+      expect(
+        parts.map((p) => p.text).join(),
+        'readme: rewrite README (#35) (12fb9ed)',
+      );
+    });
+
+    test('link with an empty target still parses, with an empty url', () {
+      final parts = parseInlineMarkdown('[label]()');
+      expect(parts.single.isLink, isTrue);
+      expect(parts.single.text, 'label');
+      expect(parts.single.url, '');
+    });
+
+    test('unbalanced markers pass through as literal text', () {
+      final parts = parseInlineMarkdown('**not closed and [not a link');
+      expect(parts.single.isBold, isFalse);
+      expect(parts.single.isLink, isFalse);
+      expect(parts.single.text, '**not closed and [not a link');
+    });
+  });
 }
