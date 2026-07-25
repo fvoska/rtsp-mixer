@@ -31,7 +31,11 @@ void main() {
     ),
   };
 
-  for (final theme in {'light': AppTheme.light, 'dark': AppTheme.dark}.entries) {
+  for (final theme in {
+    'light': AppTheme.light,
+    'dark': AppTheme.dark,
+    'darkOled': AppTheme.darkOled,
+  }.entries) {
     for (final state in states.entries) {
       testWidgets('${state.key} card builds cleanly under ${theme.key}',
           (tester) async {
