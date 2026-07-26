@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.12.1](https://github.com/fvoska/rtsp-mixer/compare/v1.12.0...v1.12.1) (2026-07-26)
+
+
+### Bug Fixes
+
+* **about:** link releases instead of diffs, make contact email a mailto link ([#47](https://github.com/fvoska/rtsp-mixer/issues/47)) ([498bf42](https://github.com/fvoska/rtsp-mixer/commit/498bf42c8a5cb511849f15448d567a921e3d45f5))
+
 ## [1.12.0](https://github.com/fvoska/rtsp-mixer/compare/v1.11.0...v1.12.0) (2026-07-25)
 
 
