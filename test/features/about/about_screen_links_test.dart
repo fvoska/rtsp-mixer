@@ -105,19 +105,17 @@ void main() {
       ]);
     });
 
-    testWidgets('the compare URL from the release header is a link', (
+    testWidgets('the release header links to the GitHub release page', (
       tester,
     ) async {
       await pumpExpandedAbout(tester);
 
-      expect(find.text('View changes on GitHub'), findsOneWidget);
-      await tester.tap(find.text('View changes on GitHub'));
+      expect(find.text('View release on GitHub'), findsOneWidget);
+      await tester.tap(find.text('View release on GitHub'));
       await tester.pumpAndSettle();
 
       expect(launched, [
-        Uri.parse(
-          'https://github.com/fvoska/rtsp-mixer/compare/v1.9.1...v1.9.2',
-        ),
+        Uri.parse('https://github.com/fvoska/rtsp-mixer/releases/tag/v1.9.2'),
       ]);
     });
 
@@ -152,6 +150,23 @@ void main() {
       // Regression guard: the raw markdown must not leak into the UI.
       expect(find.textContaining('](https://'), findsNothing);
       expect(find.textContaining('**readme:**'), findsNothing);
+    });
+  });
+
+  group('AboutScreen contact email', () {
+    testWidgets('tapping the email opens the mail client', (tester) async {
+      await tester.pumpWidget(
+        DefaultAssetBundle(
+          bundle: _StubAssetBundle(),
+          child: const MaterialApp(home: AboutScreen()),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.text('filip@voska.tech'));
+      await tester.pumpAndSettle();
+
+      expect(launched, [Uri.parse('mailto:filip@voska.tech')]);
     });
   });
 
