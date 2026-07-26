@@ -54,6 +54,28 @@ Future<bool> openExternalLink(Uri url) async {
 bool isLaunchableLink(Uri url) =>
     (url.scheme == 'http' || url.scheme == 'https') && url.host.isNotEmpty;
 
+/// Opens the device's mail client to compose a message to [email].
+///
+/// Unlike [openExternalLink], this is not restricted to http(s): the address
+/// is a fixed, developer-supplied contact detail rather than text parsed from
+/// the changelog, so the scheme guard that keeps untrusted markdown from
+/// reaching `tel:`/`intent:`/etc. doesn't apply here.
+///
+/// Defensive per CLAUDE.md: called from a tap handler on a screen that can be
+/// open while audio is streaming, so no failure mode escapes — a missing mail
+/// app or a platform channel error logs and resolves to `false`.
+Future<bool> openMailtoLink(String email) async {
+  try {
+    final uri = Uri(scheme: 'mailto', path: email);
+    final launched = await externalLinkOpener(uri);
+    if (!launched) appLog(_tag, 'Launcher declined to open $uri');
+    return launched;
+  } catch (e) {
+    appLog(_tag, 'Failed to open mailto for $email: $e');
+    return false;
+  }
+}
+
 /// Parses [raw] into a launchable [Uri], or null when it is not one.
 ///
 /// Used by the renderer to decide whether a markdown link becomes a tappable

@@ -3,7 +3,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart' show rootBundle;
 import 'package:package_info_plus/package_info_plus.dart';
 
-import '../../../core/services/external_link_launcher.dart';
+import '../../../core/services/external_link_launcher.dart'
+    show openExternalLink, openMailtoLink, tryParseLaunchableLink;
 import '../../../core/theme/spacing.dart';
 import '../changelog.dart';
 
@@ -102,7 +103,13 @@ class AboutScreen extends StatelessWidget {
                         _contactEmail,
                         style: theme.textTheme.bodyMedium?.copyWith(
                           color: theme.colorScheme.primary,
+                          decoration: TextDecoration.underline,
                         ),
+                        onTap: () {
+                          // Fire-and-forget: openMailtoLink never throws and
+                          // never rejects, so there is nothing to await here.
+                          openMailtoLink(_contactEmail);
+                        },
                       ),
                     ],
                   ),
@@ -251,9 +258,9 @@ class _ReleaseTile extends StatelessWidget {
     final theme = Theme.of(context);
     final date = release.date;
     final compareUrl = release.compareUrl;
-    final compareUri = compareUrl == null
+    final releaseUri = compareUrl == null
         ? null
-        : tryParseLaunchableLink(compareUrl);
+        : _releasePageUri(compareUrl, release.version);
     return ExpansionTile(
       // Align the header with the card's own padding instead of the default
       // ExpansionTile inset, since this tile lives inside a padded Card.
@@ -290,26 +297,46 @@ class _ReleaseTile extends StatelessWidget {
         else
           for (final section in release.sections)
             _ReleaseSection(section: section),
-        // The compare URL parsed off the release header, as a real link. Kept
-        // out of the ExpansionTile header on purpose — a tappable span up there
-        // would compete with the tile's own expand/collapse tap target.
-        if (compareUri != null) _CompareLink(url: compareUri),
+        // The release page derived from the compare URL in the release
+        // header, as a real link. Kept out of the ExpansionTile header on
+        // purpose — a tappable span up there would compete with the tile's
+        // own expand/collapse tap target.
+        if (releaseUri != null) _ReleaseLink(url: releaseUri),
       ],
     );
   }
 }
 
-/// "View changes on GitHub" row linking a release to its compare URL.
-class _CompareLink extends StatelessWidget {
-  const _CompareLink({required this.url});
+/// Derives the GitHub release page URL from a release-please compare URL and
+/// version, e.g. `.../compare/v1.9.1...v1.9.2` + `1.9.2` becomes
+/// `.../releases/tag/v1.9.2`.
+///
+/// Falls back to null when [rawCompareUrl] isn't a launchable link or doesn't
+/// have the expected `owner/repo/compare/...` shape, so the row is simply
+/// omitted rather than linking somewhere wrong.
+Uri? _releasePageUri(String rawCompareUrl, String version) {
+  final compareUri = tryParseLaunchableLink(rawCompareUrl);
+  if (compareUri == null) return null;
+  final segments = compareUri.pathSegments;
+  final compareIndex = segments.indexOf('compare');
+  if (compareIndex < 2) return null;
+  final repoSegments = segments.sublist(0, compareIndex);
+  return compareUri.replace(
+    pathSegments: [...repoSegments, 'releases', 'tag', 'v$version'],
+  );
+}
+
+/// "View release on GitHub" row linking a release to its GitHub release page.
+class _ReleaseLink extends StatelessWidget {
+  const _ReleaseLink({required this.url});
 
   final Uri url;
 
   @override
   Widget build(BuildContext context) {
     final label = url.host.endsWith('github.com')
-        ? 'View changes on GitHub'
-        : 'View changes';
+        ? 'View release on GitHub'
+        : 'View release';
     return Align(
       alignment: Alignment.centerLeft,
       child: TextButton.icon(
