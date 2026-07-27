@@ -1,0 +1,112 @@
+name: Branch Build
+
+# Installable Android APK from ANY branch — no release, no merge required.
+#
+# Two ways to get a build:
+#   1. Manual dispatch (primary):
+#        gh workflow run branch-build.yml --ref <branch>
+#      or Actions tab → "Branch Build" → "Run workflow" → pick the branch.
+#      (The workflow appears in the Actions tab once this file is on main;
+#      the gh/API form works as soon as the file exists on the target branch.)
+#   2. Push a branch named build/**: every push builds automatically.
+#      Handy for iterating: `git push origin mybranch:build/mybranch`.
+#
+# The APK lands as a workflow artifact named roomtone-<branch>-<sha>-android.
+#
+# Signing: uses the same release keystore secrets as release.yml when they
+# are configured, so a branch build installs OVER an existing release install.
+# Without the secrets it falls back to debug signing (build.gradle.kts falls
+# back automatically when key.properties is absent) — that APK only installs
+# alongside/over other debug-signed builds.
+#
+# versionCode is epoch-minutes, which is always higher than release builds'
+# run-number versionCode: a branch build upgrades over a release install
+# without uninstalling. Going BACK to a release build afterwards requires a
+# one-time uninstall (Android blocks versionCode downgrades).
+
+on:
+  workflow_dispatch:
+  push:
+    branches: ['build/**']
+
+permissions:
+  contents: read
+
+concurrency:
+  group: branch-build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-apk:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - run: flutter pub get
+
+      - name: Resolve build version
+        run: |
+          # Sanitize the branch name into an Android-versionName-safe suffix.
+          SAFE_BRANCH=$(echo "${GITHUB_REF_NAME}" | tr -c 'A-Za-z0-9.-' '-' | sed 's/-*$//')
+          SHORT_SHA="${GITHUB_SHA::7}"
+          echo "APP_VERSION=0.0.0-${SAFE_BRANCH}.${SHORT_SHA}" >> "$GITHUB_ENV"
+          # Epoch minutes: monotonic, fits Android's 2.1e9 versionCode cap.
+          echo "BUILD_NUMBER=$(( $(date +%s) / 60 ))" >> "$GITHUB_ENV"
+
+      - name: Prepare signing (release keystore when available)
+        env:
+          KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          KS_PASS: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          KEY_PASS: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          if [ -z "${KEYSTORE_B64:-}" ]; then
+            echo "::notice::No keystore secret — building with debug signing."
+            exit 0
+          fi
+          printf '%s' "$KEYSTORE_B64" | base64 --decode > android/app/release.jks
+          # Same fail-fast keystore sanity check as release.yml.
+          if ! keytool -list \
+                 -keystore android/app/release.jks \
+                 -storepass "$KS_PASS" >/dev/null 2>&1; then
+            echo "::warning::release.jks is not a readable keystore — falling back to debug signing."
+            rm -f android/app/release.jks
+            exit 0
+          fi
+          cat > android/key.properties <<EOF
+          storeFile=release.jks
+          storePassword=${KS_PASS}
+          keyAlias=${KEY_ALIAS}
+          keyPassword=${KEY_PASS}
+          EOF
+          echo "Keystore decoded and verified."
+
+      - name: Build APK
+        run: |
+          flutter build apk --release \
+            --build-name="$APP_VERSION" \
+            --build-number="$BUILD_NUMBER"
+
+      - name: Rename artifact
+        run: |
+          mv build/app/outputs/flutter-apk/app-release.apk \
+             "roomtone-$APP_VERSION-android.apk"
+
+      - name: Upload APK as workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: roomtone-${{ env.APP_VERSION }}-android
+          path: roomtone-${{ env.APP_VERSION }}-android.apk
+          if-no-files-found: error
+          retention-days: 30
