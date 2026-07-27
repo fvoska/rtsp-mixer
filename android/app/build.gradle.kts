@@ -64,6 +64,12 @@ android {
 dependencies {
     // Required by flutter_local_notifications for core library desugaring.
     coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.4")
+
+    // Level-meter sidecar: per-camera audio-only RTSP session decoded natively
+    // so real PCM levels can be tapped (the mpv playback path exposes no PCM,
+    // and its stripped FFmpeg has no analysis filters). See levelmeter/.
+    implementation("androidx.media3:media3-exoplayer:1.10.1")
+    implementation("androidx.media3:media3-exoplayer-rtsp:1.10.1")
 }
 
 flutter {
