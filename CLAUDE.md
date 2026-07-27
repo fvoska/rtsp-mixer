@@ -62,7 +62,8 @@ A baby monitor app that connects to Unifi Protect cameras, extracts audio from R
 ### Audio Level Metering
 | Technology | Version | Purpose | Why |
 |------------|---------|---------|-----|
-| Bitrate-based activity detection | -- | Visual audio activity indicator | The prebuilt media_kit FFmpeg does NOT include audio analysis filters (`ebur128`, `astats`, `aformat`, `stereotools` all missing). Audio activity is estimated by polling `audio-bitrate` changes via mpv properties. `audio-pts` tracks stream flow (silence detection). |
+| Native analyzer sidecar (Android) | media3 1.10.1 | Real PCM level metering + activity detection | libmpv exposes no PCM tap and the prebuilt media_kit FFmpeg has NO analysis filters (`ebur128`, `astats`, `aformat` all missing) — and encoded AAC bitrate barely tracks loudness (encoders allocate bits by spectral complexity, not energy). Instead, a second audio-only RTSP session per camera (media3 ExoPlayer RTSP, forced TCP, low quality, plain `rtsp://:7447` for Unifi) is decoded natively and tapped via `TeeAudioProcessor` → windowed RMS/peak dBFS → EventChannel (`android/.../levelmeter/`, `services/native_level_meter.dart`). Fully independent of playback: analyzer failures only log/backoff/retry. Activity = smoothed dB of excess over an adaptive noise floor (`helpers/level_dynamics.dart`). |
+| Bitrate proxy fallback | -- | Meter fallback (desktop / sidecar down) | When native levels are absent or stale (>3 s), the poll falls back to the `audio-bitrate` log-mapping (`helpers/audio_level_meter.dart`). `audio-pts` keeps its stream-flow role (silence + zombie detection) on all platforms. |
 ### Supporting Libraries
 | Library | Version | Purpose | When to Use |
 |---------|---------|---------|-------------|
