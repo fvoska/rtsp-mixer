@@ -14,6 +14,14 @@ class StreamInfo {
   final int? height;
   final double? fps;
 
+  /// Latest RMS level in dBFS from the native level-meter sidecar. Null when
+  /// the sidecar isn't feeding this camera (non-Android, or reconnecting).
+  final double? audioDbfs;
+
+  /// Which signal currently drives the meter: `native` (sidecar PCM) or
+  /// `bitrate` (the encoded-bitrate proxy fallback). Debug-panel truth.
+  final String? meterSource;
+
   const StreamInfo({
     this.audioCodec,
     this.audioFormat,
@@ -25,6 +33,8 @@ class StreamInfo {
     this.width,
     this.height,
     this.fps,
+    this.audioDbfs,
+    this.meterSource,
   });
 
   /// Update with new values. Pass explicit null to clear a field;
@@ -40,6 +50,8 @@ class StreamInfo {
     Object? width = _sentinel,
     Object? height = _sentinel,
     Object? fps = _sentinel,
+    Object? audioDbfs = _sentinel,
+    Object? meterSource = _sentinel,
   }) =>
       StreamInfo(
         audioCodec: audioCodec == _sentinel ? this.audioCodec : audioCodec as String?,
@@ -52,6 +64,8 @@ class StreamInfo {
         width: width == _sentinel ? this.width : width as int?,
         height: height == _sentinel ? this.height : height as int?,
         fps: fps == _sentinel ? this.fps : fps as double?,
+        audioDbfs: audioDbfs == _sentinel ? this.audioDbfs : audioDbfs as double?,
+        meterSource: meterSource == _sentinel ? this.meterSource : meterSource as String?,
       );
 
   static const Object _sentinel = Object();
@@ -84,8 +98,8 @@ class CameraAudioState {
   /// Unifi cameras and manual cameras without a remote URL.
   final Map<String, String> overrideQualities;
   final StreamInfo streamInfo;
-  final double audioLevel; // 0.0..1.0 absolute pseudo-SPL, log-mapped from AAC encoded bitrate
-  final double audioActivity; // 0.0..1.0 recent variation — peak-to-trough of levelHistory over ~5 s
+  final double audioLevel; // 0.0..1.0 — native PCM dBFS when the sidecar feeds this camera, else the encoded-bitrate proxy
+  final double audioActivity; // 0.0..1.0 — smoothed excess over adaptive noise floor (native), else peak-to-trough of levelHistory
   final double silenceDuration; // seconds of continuous silence
 
   /// Rolling pseudo-SPL samples, oldest first, capacity

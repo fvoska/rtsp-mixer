@@ -13,6 +13,8 @@ import '../../auth/providers/auth_provider.dart';
 import '../../cameras/models/protect_camera.dart';
 import '../../cameras/providers/camera_provider.dart';
 import '../helpers/audio_level_meter.dart';
+import '../helpers/level_dynamics.dart';
+import '../helpers/meter_urls.dart';
 import '../helpers/rtsp_url.dart';
 import '../helpers/session_status.dart';
 import '../helpers/stream_candidates.dart';
@@ -21,6 +23,7 @@ import '../models/health_event.dart';
 import '../models/player_state.dart';
 import '../services/alert_policy.dart';
 import '../services/audio_handler.dart';
+import '../services/native_level_meter.dart';
 import '../services/connectivity_listener.dart';
 import '../services/drift_watchdog.dart';
 import '../services/reconnect_supervisor.dart';
@@ -40,6 +43,15 @@ class AudioPlayerNotifier extends AsyncNotifier<MonitoringState> {
   final Map<String, double> _lastAudioPts = {};
   String _lastNotificationText = '';
   String _lastNotificationTitle = '';
+
+  /// Native level-meter sidecar (Android only): a second audio-only RTSP
+  /// session per camera decoded natively, streaming real PCM levels in dBFS.
+  /// Entirely best-effort — when it's absent or stale the poll falls back to
+  /// the encoded-bitrate proxy, and no failure here may ever touch playback.
+  final NativeLevelMeter _levelMeter = NativeLevelMeter();
+  StreamSubscription<NativeLevelEvent>? _levelMeterSub;
+  final Map<String, ActivityDetector> _activityDetectors = {};
+  final Map<String, ({double rmsDb, DateTime at})> _nativeLevels = {};
 
   /// Serializes lifecycle operations (start / stop / settings-driven restart)
   /// so they can never interleave. Concurrent invocations chain on this
@@ -147,6 +159,9 @@ class AudioPlayerNotifier extends AsyncNotifier<MonitoringState> {
       try { _alertPolicy.cancelAll(); } catch (_) {}
       try { _connectivityListener.cancel(); } catch (_) {}
       _levelPollTimer?.cancel();
+      _stopNativeMetering();
+      try { _levelMeterSub?.cancel(); } catch (_) {}
+      _levelMeterSub = null;
       for (final sub in _subscriptions) {
         sub.cancel();
       }
@@ -888,6 +903,10 @@ class AudioPlayerNotifier extends AsyncNotifier<MonitoringState> {
     // Start polling audio-pts to detect silence / estimate activity.
     _startLevelPolling();
 
+    // Best-effort native PCM metering sidecar (Android). Failures degrade
+    // to the bitrate proxy — must never affect the playback start sequence.
+    unawaited(_startNativeMetering());
+
     // RELY-01 D-03 trigger c: subscribe to connectivity events for WiFi reconnect.
     try {
       _connectivityListener.start();
@@ -901,6 +920,101 @@ class AudioPlayerNotifier extends AsyncNotifier<MonitoringState> {
   void _startLevelPolling() {
     _levelPollTimer?.cancel();
     _levelPollTimer = Timer.periodic(_pollInterval, (_) => _pollAudioLevels());
+  }
+
+  /// Subscribe to sidecar events exactly once per notifier lifetime.
+  void _ensureLevelMeterSubscription() {
+    _levelMeterSub ??= _levelMeter.events().listen(
+          _onNativeLevelEvent,
+          onError: (Object e) =>
+              appLog('METER', 'level event stream error (ignored): $e'),
+        );
+  }
+
+  /// Start the native level-meter sidecar for every camera in the session.
+  /// Android-only; entirely best-effort (CLAUDE.md degraded-functionality
+  /// rule): any failure logs and leaves the meter on the bitrate proxy.
+  Future<void> _startNativeMetering() async {
+    if (!NativeLevelMeter.isSupported) return;
+    try {
+      _ensureLevelMeterSubscription();
+      final cams = state.value?.cameras ?? const <CameraAudioState>[];
+      final entries = <({String id, List<String> urls})>[];
+      for (final cam in cams) {
+        final urls = meterStreamUrls(
+          local: cam.availableQualities,
+          remote: cam.remoteQualities,
+          cameraRemote: cam.overrideQualities,
+          isManual: cam.isManual,
+        );
+        if (urls.isNotEmpty) entries.add((id: cam.cameraId, urls: urls));
+      }
+      if (entries.isEmpty) {
+        appLog('METER', 'no analyzer URLs — staying on bitrate proxy');
+        return;
+      }
+      final ok = await _levelMeter.start(entries);
+      appLog(
+          'METER',
+          ok
+              ? 'native metering started for ${entries.length} camera(s)'
+              : 'native metering unavailable — bitrate fallback');
+    } catch (e) {
+      appLog('METER', 'native metering setup failed (bitrate fallback): $e');
+    }
+  }
+
+  /// Start (or replace) the sidecar for one camera added to a live mix.
+  Future<void> _startNativeMeteringForCamera(CameraAudioState cam) async {
+    if (!NativeLevelMeter.isSupported) return;
+    try {
+      _ensureLevelMeterSubscription();
+      final urls = meterStreamUrls(
+        local: cam.availableQualities,
+        remote: cam.remoteQualities,
+        cameraRemote: cam.overrideQualities,
+        isManual: cam.isManual,
+      );
+      if (urls.isEmpty) return;
+      await _levelMeter.startCamera(cam.cameraId, urls);
+    } catch (e) {
+      appLog('METER',
+          'native metering for ${cam.cameraName} failed (bitrate fallback): $e');
+    }
+  }
+
+  /// Handle one event from the sidecar. Level events refresh the per-camera
+  /// latest-dBFS cache (consumed by the 500 ms poll) and feed the activity
+  /// detector at native cadence (~10 Hz) so attack timing stays sharp.
+  void _onNativeLevelEvent(NativeLevelEvent event) {
+    try {
+      final rmsDb = event.rmsDb;
+      if (event.isLevel && rmsDb != null) {
+        final now = DateTime.now();
+        _nativeLevels[event.cameraId] = (rmsDb: rmsDb, at: now);
+        (_activityDetectors[event.cameraId] ??= ActivityDetector())
+            .feed(rmsDb, now.millisecondsSinceEpoch);
+      } else if (event.type == 'status') {
+        appLog(
+            'METER',
+            '${event.cameraId}: sidecar ${event.state}'
+            '${event.detail == null ? '' : ' (${event.detail})'}');
+      }
+    } catch (e) {
+      appLog('METER', 'level event handling failed (ignored): $e');
+    }
+  }
+
+  /// Stop all sidecar analyzers and clear cached native state. Keeps the
+  /// event subscription — it is cheap and reused across sessions.
+  void _stopNativeMetering() {
+    try {
+      unawaited(_levelMeter.stopAll());
+    } catch (e) {
+      appLog('METER', 'stopAll failed (ignored): $e');
+    }
+    _nativeLevels.clear();
+    _activityDetectors.clear();
   }
 
   Future<void> _pollAudioLevels() async {
@@ -954,25 +1068,42 @@ class AudioPlayerNotifier extends AsyncNotifier<MonitoringState> {
           appLog('ZOMBIE', 'bitrate feed error (non-fatal): $e');
         }
 
-        // Level: absolute pseudo-SPL on a fixed log scale. PTS flow keeps
-        // its silence/zombie role unchanged — no flow means level 0. When
-        // the stream flows but mpv hasn't published a bitrate yet (~1 s
-        // after open), carry the previous level so a live stream doesn't
-        // flash as silent.
+        // Level source, in preference order:
+        //  1. native sidecar PCM (real dBFS) when fresh — the honest signal
+        //  2. encoded-bitrate proxy — fallback for desktop/dev or a sidecar
+        //     that is reconnecting (stale > kNativeLevelFreshness)
+        //  3. carry the previous level while mpv hasn't published a bitrate
+        // PTS flow keeps its silence/zombie role unchanged: a stalled
+        // playback stream reads 0 even if the sidecar still hears the room —
+        // the meter must show what the parent can actually hear.
+        final native = _nativeLevels[cam.cameraId];
+        final nativeRmsDb = (native != null &&
+                DateTime.now().difference(native.at) < kNativeLevelFreshness)
+            ? native.rmsDb
+            : null;
         final double level;
         if (!flowing) {
           level = 0.0;
+        } else if (nativeRmsDb != null) {
+          level = dbfsToLevel(nativeRmsDb);
         } else if (audioBitrate != null && audioBitrate > 0) {
           level = bitrateToLevel(audioBitrate);
         } else {
           level = cam.audioLevel;
         }
 
-        // Activity: peak-to-trough variation of the rolling history (~5 s).
-        // No peak-hold decay — the sliding window IS the decay (a spike
-        // ages out of the border after ~5 s).
+        // Activity: with native levels, smoothed excess over the camera's
+        // adaptive noise floor (ActivityDetector, fed at ~10 Hz by the event
+        // handler). Fallback: legacy peak-to-trough variation of the rolling
+        // history — same 0..1 scale, so the sensitivity slider keeps working.
         final newHistory = appendLevel(cam.levelHistory, level);
-        final activity = recentVariation(newHistory);
+        final double activity;
+        if (nativeRmsDb != null) {
+          activity = _activityDetectors[cam.cameraId]?.activity ??
+              recentVariation(newHistory);
+        } else {
+          activity = recentVariation(newHistory);
+        }
 
         final newSilence = !flowing
             ? cam.silenceDuration + _pollInterval.inMilliseconds / 1000.0
@@ -1002,6 +1133,11 @@ class AudioPlayerNotifier extends AsyncNotifier<MonitoringState> {
           height: height,
           fps: fps,
           audioFormat: audioFormat,
+          // Meter diagnostics for the debug panel: which signal drives the
+          // bar right now, and the raw native dBFS when available (an
+          // explicit null clears a stale reading via the merge sentinel).
+          audioDbfs: nativeRmsDb,
+          meterSource: nativeRmsDb != null ? 'native' : 'bitrate',
         );
 
         // Always emit for a live camera: appending a history sample makes
@@ -1596,6 +1732,7 @@ class AudioPlayerNotifier extends AsyncNotifier<MonitoringState> {
   Future<void> stopMonitoring() async {
     appLog('AUDIO', 'Stopping monitoring');
     _levelPollTimer?.cancel();
+    _stopNativeMetering();
     // RELY-01 D-04: tear down alerts BEFORE the supervisor so a pending
     // status flap can't re-arm a timer mid-teardown.
     final knownCameraIds =
@@ -1734,6 +1871,14 @@ class AudioPlayerNotifier extends AsyncNotifier<MonitoringState> {
     final player = _players.remove(cameraId);
     _videoControllers.remove(cameraId);
     _lastAudioPts.remove(cameraId);
+    // Tear down this camera's analyzer sidecar (best-effort).
+    try {
+      unawaited(_levelMeter.stopCamera(cameraId));
+    } catch (e) {
+      appLog('METER', 'stopCamera($cameraId) failed (ignored): $e');
+    }
+    _nativeLevels.remove(cameraId);
+    _activityDetectors.remove(cameraId);
     if (player != null) {
       try {
         await player.stop();
@@ -1856,6 +2001,9 @@ class AudioPlayerNotifier extends AsyncNotifier<MonitoringState> {
       state = AsyncData(
         latest.copyWith(cameras: [...latest.cameras, camState]),
       );
+
+      // Best-effort analyzer sidecar for the newly added camera.
+      unawaited(_startNativeMeteringForCamera(camState));
 
       // Persist selection so the camera survives a restart. toggleCamera
       // toggles, so only call it when the camera isn't already selected

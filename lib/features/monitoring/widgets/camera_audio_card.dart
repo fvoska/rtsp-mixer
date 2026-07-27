@@ -16,7 +16,8 @@ import '../providers/audio_player_provider.dart';
 /// Normalised, sanitised activity intensity in `[0.15, 0.9]`, or null when the
 /// input cannot be trusted.
 ///
-/// `audioActivity` is written by a twice-a-second poll of mpv properties. A
+/// `audioActivity` is written by a twice-a-second poll (native PCM sidecar
+/// levels on Android, mpv bitrate proxy elsewhere). A
 /// NaN, an infinity, or a threshold of exactly 1.0 would produce an invalid
 /// `BoxShadow` and throw out of `build` — during an overnight session, with
 /// audio playing. Per CLAUDE.md a silently haloless card is the correct
@@ -952,6 +953,15 @@ class _StreamInfoPanel extends StatelessWidget {
     if (si.channels != null) audioParts.add(si.channels!);
     audioParts.add(_formatBitrate(si.audioBitrate));
     rows.add(_row('Audio', audioParts.join(' · '), labelStyle, dimStyle));
+
+    // Meter provenance: which signal drives the level bar right now —
+    // 'native' (sidecar PCM, with the raw dBFS) or 'bitrate' (proxy).
+    if (si.meterSource != null) {
+      final meterParts = <String>[si.meterSource!];
+      final dbfs = si.audioDbfs;
+      if (dbfs != null) meterParts.add('${dbfs.toStringAsFixed(1)} dBFS');
+      rows.add(_row('Meter', meterParts.join(' · '), labelStyle, dimStyle));
+    }
 
     // Video section (only when video preview is active)
     if (showVideoInfo) {

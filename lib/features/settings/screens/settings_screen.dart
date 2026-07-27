@@ -269,9 +269,11 @@ class SettingsScreen extends ConsumerWidget {
     return '$base. Applies once dark mode is active.';
   }
 
-  // The threshold gates the card-border highlight on recent VARIATION in
-  // sound level (how much the level swung over the last few seconds), not
-  // on absolute loudness.
+  // The threshold gates the card-border highlight on sound rising above the
+  // room's own quiet baseline: with native metering (Android) that is
+  // smoothed dB of excess over an adaptive noise floor; on other platforms
+  // it falls back to recent variation in the level history. Same 0..1 scale
+  // either way, so one slider serves both.
   String _activityLabel(double v) {
     if (v < 0.05) return 'High sensitivity — highlight even small changes in sound level';
     if (v < 0.15) return 'Medium sensitivity — highlight moderate changes in sound level';
