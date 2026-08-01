@@ -919,9 +919,13 @@ class AudioPlayerNotifier extends AsyncNotifier<MonitoringState> {
 
       try {
         final np = player.platform as NativePlayer;
+        final batterySaver = ref.read(settingsProvider).batterySaverMode;
 
         // Audio PTS: tracks whether audio data is flowing per-player.
         // Not a loudness measurement, but reliably detects silence vs activity.
+        // Kept unconditionally — battery saver only cuts the SPL/activity and
+        // metadata work below, never the silence/zombie/reconnect signals
+        // this app's reliability promise depends on.
         final ptsStr = await np.getProperty('audio-pts');
         final pts = double.tryParse(ptsStr) ?? 0.0;
         final lastPts = _lastAudioPts[cam.cameraId] ?? 0.0;
@@ -938,71 +942,79 @@ class AudioPlayerNotifier extends AsyncNotifier<MonitoringState> {
           appLog('ZOMBIE', 'pts feed error (non-fatal): $e');
         }
 
-        // Loudness proxy: encoded VBR AAC bitrate (bits/sec). Read here —
-        // not in the metadata block below — because it now drives the level
-        // rather than just debug info. This FFmpeg build has no audio
-        // analysis filters, so encoded bitrate is the only loudness signal
-        // available without touching lavfi (CLAUDE.md hard rule).
-        final audioBitrate =
-            double.tryParse(await _tryGetProperty(np, 'audio-bitrate') ?? '');
-        // RELY-03: feed watchdog with bitrate>0 positive signal.
-        try {
-          if (audioBitrate != null && audioBitrate > 0) {
-            _zombieWatchdog.recordBitrateNonZero(cam.cameraId);
-          }
-        } catch (e) {
-          appLog('ZOMBIE', 'bitrate feed error (non-fatal): $e');
-        }
-
-        // Level: absolute pseudo-SPL on a fixed log scale. PTS flow keeps
-        // its silence/zombie role unchanged — no flow means level 0. When
-        // the stream flows but mpv hasn't published a bitrate yet (~1 s
-        // after open), carry the previous level so a live stream doesn't
-        // flash as silent.
-        final double level;
-        if (!flowing) {
-          level = 0.0;
-        } else if (audioBitrate != null && audioBitrate > 0) {
-          level = bitrateToLevel(audioBitrate);
-        } else {
-          level = cam.audioLevel;
-        }
-
-        // Activity: peak-to-trough variation of the rolling history (~5 s).
-        // No peak-hold decay — the sliding window IS the decay (a spike
-        // ages out of the border after ~5 s).
-        final newHistory = appendLevel(cam.levelHistory, level);
-        final activity = recentVariation(newHistory);
-
         final newSilence = !flowing
             ? cam.silenceDuration + _pollInterval.inMilliseconds / 1000.0
             : 0.0;
 
-        // Poll mpv properties for stream metadata (track events are sparse for RTSP).
-        final audioCodec = await _tryGetProperty(np, 'audio-codec-name');
-        final videoCodec = await _tryGetProperty(np, 'video-codec-name');
-        final audioFormat = await _tryGetProperty(np, 'audio-params/format');
-        final audioSampleRate = int.tryParse(await _tryGetProperty(np, 'audio-params/samplerate') ?? '');
-        final audioChannelCount = int.tryParse(await _tryGetProperty(np, 'audio-params/channel-count') ?? '');
-        final audioChannels = await _tryGetProperty(np, 'audio-params/hr-channels');
-        final width = int.tryParse(await _tryGetProperty(np, 'video-params/w') ?? '');
-        final height = int.tryParse(await _tryGetProperty(np, 'video-params/h') ?? '');
-        final fps = double.tryParse(await _tryGetProperty(np, 'container-fps') ?? '');
-        // audio-bitrate is read above (it drives the level now).
-        final videoBitrate = double.tryParse(await _tryGetProperty(np, 'video-bitrate') ?? '');
+        double level = 0.0;
+        double activity = 0.0;
+        var newHistory = cam.levelHistory;
+        var newInfo = cam.streamInfo;
 
-        final newInfo = cam.streamInfo.merge(
-          audioCodec: audioCodec,
-          videoCodec: videoCodec,
-          sampleRate: audioSampleRate,
-          channels: audioChannels ?? (audioChannelCount != null ? '${audioChannelCount}ch' : null),
-          audioBitrate: audioBitrate?.round(),
-          videoBitrate: videoBitrate?.round(),
-          width: width,
-          height: height,
-          fps: fps,
-          audioFormat: audioFormat,
-        );
+        if (!batterySaver) {
+          // Loudness proxy: encoded VBR AAC bitrate (bits/sec). Read here —
+          // not in the metadata block below — because it now drives the level
+          // rather than just debug info. This FFmpeg build has no audio
+          // analysis filters, so encoded bitrate is the only loudness signal
+          // available without touching lavfi (CLAUDE.md hard rule).
+          final audioBitrate =
+              double.tryParse(await _tryGetProperty(np, 'audio-bitrate') ?? '');
+          // RELY-03: feed watchdog with bitrate>0 positive signal. Purely
+          // corroborating (PTS-stall alone already meets the fire threshold),
+          // so skipping this in battery saver mode doesn't weaken detection.
+          try {
+            if (audioBitrate != null && audioBitrate > 0) {
+              _zombieWatchdog.recordBitrateNonZero(cam.cameraId);
+            }
+          } catch (e) {
+            appLog('ZOMBIE', 'bitrate feed error (non-fatal): $e');
+          }
+
+          // Level: absolute pseudo-SPL on a fixed log scale. PTS flow keeps
+          // its silence/zombie role unchanged — no flow means level 0. When
+          // the stream flows but mpv hasn't published a bitrate yet (~1 s
+          // after open), carry the previous level so a live stream doesn't
+          // flash as silent.
+          if (!flowing) {
+            level = 0.0;
+          } else if (audioBitrate != null && audioBitrate > 0) {
+            level = bitrateToLevel(audioBitrate);
+          } else {
+            level = cam.audioLevel;
+          }
+
+          // Activity: peak-to-trough variation of the rolling history (~5 s).
+          // No peak-hold decay — the sliding window IS the decay (a spike
+          // ages out of the border after ~5 s).
+          newHistory = appendLevel(cam.levelHistory, level);
+          activity = recentVariation(newHistory);
+
+          // Poll mpv properties for stream metadata (track events are sparse for RTSP).
+          final audioCodec = await _tryGetProperty(np, 'audio-codec-name');
+          final videoCodec = await _tryGetProperty(np, 'video-codec-name');
+          final audioFormat = await _tryGetProperty(np, 'audio-params/format');
+          final audioSampleRate = int.tryParse(await _tryGetProperty(np, 'audio-params/samplerate') ?? '');
+          final audioChannelCount = int.tryParse(await _tryGetProperty(np, 'audio-params/channel-count') ?? '');
+          final audioChannels = await _tryGetProperty(np, 'audio-params/hr-channels');
+          final width = int.tryParse(await _tryGetProperty(np, 'video-params/w') ?? '');
+          final height = int.tryParse(await _tryGetProperty(np, 'video-params/h') ?? '');
+          final fps = double.tryParse(await _tryGetProperty(np, 'container-fps') ?? '');
+          // audio-bitrate is read above (it drives the level now).
+          final videoBitrate = double.tryParse(await _tryGetProperty(np, 'video-bitrate') ?? '');
+
+          newInfo = cam.streamInfo.merge(
+            audioCodec: audioCodec,
+            videoCodec: videoCodec,
+            sampleRate: audioSampleRate,
+            channels: audioChannels ?? (audioChannelCount != null ? '${audioChannelCount}ch' : null),
+            audioBitrate: audioBitrate?.round(),
+            videoBitrate: videoBitrate?.round(),
+            width: width,
+            height: height,
+            fps: fps,
+            audioFormat: audioFormat,
+          );
+        }
 
         // Always emit for a live camera: appending a history sample makes
         // the state unequal every tick anyway, so the old change-gating on
@@ -1034,6 +1046,8 @@ class AudioPlayerNotifier extends AsyncNotifier<MonitoringState> {
         // demuxer-cache-duration is the seconds of decoded+demuxed audio
         // sitting ahead of the playhead. If it exceeds the user buffer plus
         // tolerance for the confirm window, the watchdog fires a stop+open.
+        // Kept unconditionally in battery saver — this guards against audio
+        // drift over an 8+ hour session, which is reliability, not metering.
         try {
           final cacheStr = await _tryGetProperty(np, 'demuxer-cache-duration');
           final cache = double.tryParse(cacheStr ?? '');

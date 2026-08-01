@@ -359,6 +359,8 @@ class _LiveMonitoringView extends ConsumerWidget {
       data: (state) {
         final activityThreshold =
             ref.watch(settingsProvider).activityThreshold;
+        final batterySaverMode =
+            ref.watch(settingsProvider).batterySaverMode;
         if (state.cameras.isEmpty) {
           // Resuming or just-finished-stop transient — keep the chrome stable
           // while the new state lands.
@@ -431,6 +433,7 @@ class _LiveMonitoringView extends ConsumerWidget {
                                 isVideoOn(state.cameras[i].cameraId),
                             showDebugInfo: showDetails,
                             activityThreshold: activityThreshold,
+                            batterySaverMode: batterySaverMode,
                             showSourceBadge: showSourceBadge,
                             onToggleVideo: () => onToggleCameraVideo(
                                 state.cameras[i].cameraId),

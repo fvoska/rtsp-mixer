@@ -56,6 +56,7 @@ class CameraAudioCard extends ConsumerStatefulWidget {
   final bool showVideoPreview;
   final bool showDebugInfo;
   final double activityThreshold;
+  final bool batterySaverMode;
   final bool showSourceBadge;
   final VoidCallback? onToggleVideo;
   final VoidCallback? onRemove;
@@ -67,6 +68,7 @@ class CameraAudioCard extends ConsumerStatefulWidget {
     this.showVideoPreview = false,
     this.showDebugInfo = false,
     this.activityThreshold = 0.05,
+    this.batterySaverMode = false,
     this.showSourceBadge = false,
     this.onToggleVideo,
     this.onRemove,
@@ -348,16 +350,26 @@ class _CameraAudioCardState extends ConsumerState<CameraAudioCard> {
               child: _StatusLine(status: cs.connectionStatus),
             ),
 
-            // Audio level indicator + rolling waveform
+            // Audio level indicator + rolling waveform — replaced by a
+            // lightweight notice in battery saver mode, since the poll no
+            // longer updates level/history/activity and a frozen meter would
+            // read as broken rather than intentionally paused.
             if (cs.isLive) ...[
               const SizedBox(height: Spacing.sm),
-              _AudioLevelIndicator(
-                level: cs.audioLevel,
-                isSuspiciouslySilent: cs.isSuspiciouslySilent,
-                silenceDuration: cs.silenceDuration,
-              ),
-              const SizedBox(height: Spacing.sm),
-              _WaveformChart(history: cs.levelHistory),
+              if (widget.batterySaverMode)
+                _BatterySaverNotice(
+                  isSuspiciouslySilent: cs.isSuspiciouslySilent,
+                  silenceDuration: cs.silenceDuration,
+                )
+              else ...[
+                _AudioLevelIndicator(
+                  level: cs.audioLevel,
+                  isSuspiciouslySilent: cs.isSuspiciouslySilent,
+                  silenceDuration: cs.silenceDuration,
+                ),
+                const SizedBox(height: Spacing.sm),
+                _WaveformChart(history: cs.levelHistory),
+              ],
             ],
 
             // Quality selector + stream URL debug info
@@ -802,6 +814,55 @@ class _AudioLevelIndicator extends StatelessWidget {
             ),
           ),
         ],
+      ],
+    );
+  }
+}
+
+/// Battery saver stand-in for [_AudioLevelIndicator] + the waveform. The
+/// level/activity poll is skipped in this mode, so no meter is drawn — but
+/// the silence warning is still real (silence detection stays on regardless
+/// of battery saver) and worth surfacing here rather than dropping silently.
+class _BatterySaverNotice extends StatelessWidget {
+  final bool isSuspiciouslySilent;
+  final double silenceDuration;
+
+  const _BatterySaverNotice({
+    required this.isSuspiciouslySilent,
+    required this.silenceDuration,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final statusColors = context.statusColors;
+
+    if (isSuspiciouslySilent) {
+      return Text(
+        'No audio for ${silenceDuration.toStringAsFixed(0)}s — stream may be broken',
+        style: theme.textTheme.bodySmall?.copyWith(
+          color: statusColors.offline,
+          fontSize: 11,
+        ),
+      );
+    }
+
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Icon(
+          Icons.battery_saver_outlined,
+          size: 14,
+          color: theme.colorScheme.onSurfaceVariant,
+        ),
+        const SizedBox(width: Spacing.xs),
+        Text(
+          'Battery saver — level meter off, streaming as normal',
+          style: theme.textTheme.bodySmall?.copyWith(
+            color: theme.colorScheme.onSurfaceVariant,
+            fontSize: 11,
+          ),
+        ),
       ],
     );
   }

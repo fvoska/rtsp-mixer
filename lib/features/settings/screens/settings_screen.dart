@@ -95,6 +95,19 @@ class SettingsScreen extends ConsumerWidget {
             onChanged: notifier.setUseRtsp,
           ),
           const Divider(height: 1),
+          SwitchListTile(
+            title: const Text('Battery saver'),
+            subtitle: Text(
+              settings.batterySaverMode
+                  ? 'Level meter, activity highlight, and stream-info detail off — audio streaming and auto-reconnect keep running'
+                  : 'Skip loudness/activity analysis to cut CPU wake-ups overnight',
+              style: theme.textTheme.bodySmall,
+            ),
+            value: settings.batterySaverMode,
+            onChanged: notifier.setBatterySaverMode,
+            secondary: const Icon(Icons.battery_saver_outlined),
+          ),
+          const Divider(height: 1),
           ListTile(
             title: const Text('Audio buffer'),
             subtitle: Text(
