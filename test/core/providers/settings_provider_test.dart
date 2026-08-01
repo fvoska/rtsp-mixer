@@ -190,4 +190,69 @@ void main() {
       });
     });
   });
+
+  group('AppSettings.batterySaverMode', () {
+    test('defaults to off', () {
+      expect(const AppSettings().batterySaverMode, isFalse);
+    });
+
+    test('copyWith updates batterySaverMode without touching other fields', () {
+      const s = AppSettings(
+        useRtsp: true,
+        audioBufferSeconds: 0.3,
+        activityThreshold: 0.2,
+        themeMode: ThemeMode.dark,
+      );
+      final next = s.copyWith(batterySaverMode: true);
+      expect(next.batterySaverMode, isTrue);
+      expect(next.useRtsp, true);
+      expect(next.audioBufferSeconds, 0.3);
+      expect(next.activityThreshold, 0.2);
+      expect(next.themeMode, ThemeMode.dark);
+    });
+
+    test('copyWith without batterySaverMode preserves it', () {
+      const s = AppSettings(batterySaverMode: true);
+      expect(s.copyWith(useRtsp: true).batterySaverMode, isTrue);
+    });
+
+    test('round-trips through toJson/fromJson', () {
+      final round = AppSettings.fromJson(
+        const AppSettings(batterySaverMode: true).toJson(),
+      );
+      expect(round.batterySaverMode, isTrue);
+    });
+
+    test('equality and hashCode cover batterySaverMode', () {
+      const a = AppSettings(batterySaverMode: true);
+      const b = AppSettings(batterySaverMode: true);
+      const c = AppSettings(batterySaverMode: false);
+      expect(a, b);
+      expect(a.hashCode, b.hashCode);
+      expect(a, isNot(c));
+      expect(a.hashCode, isNot(c.hashCode));
+    });
+
+    group('malformed persisted payloads degrade to off', () {
+      test('absent key (settings written before the field existed)', () {
+        final s = AppSettings.fromJson({'themeMode': 'dark'});
+        expect(s.batterySaverMode, isFalse);
+        expect(s.themeMode, ThemeMode.dark);
+      });
+
+      test('explicit null', () {
+        expect(
+          AppSettings.fromJson({'batterySaverMode': null}).batterySaverMode,
+          isFalse,
+        );
+      });
+
+      test('wrong type', () {
+        expect(
+          AppSettings.fromJson({'batterySaverMode': 'yes'}).batterySaverMode,
+          isFalse,
+        );
+      });
+    });
+  });
 }

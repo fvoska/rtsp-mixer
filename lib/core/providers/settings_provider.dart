@@ -52,12 +52,20 @@ class AppSettings {
   /// that case so switching back to dark restores the user's choice.
   final bool oledDark;
 
+  /// Skip non-essential per-tick processing (loudness/activity estimation,
+  /// stream metadata polling) to reduce CPU wake-ups overnight. Stream
+  /// health monitoring (silence detection, zombie/drift watchdogs, and
+  /// auto-reconnect) keeps running unchanged — only the SPL/activity and
+  /// metadata work that feeds the on-screen meter and debug panel is cut.
+  final bool batterySaverMode;
+
   const AppSettings({
     this.useRtsp = false,
     this.audioBufferSeconds = 0.5,
     this.activityThreshold = 0.05,
     this.themeMode = ThemeMode.system,
     this.oledDark = false,
+    this.batterySaverMode = false,
   });
 
   AppSettings copyWith({
@@ -66,6 +74,7 @@ class AppSettings {
     double? activityThreshold,
     ThemeMode? themeMode,
     bool? oledDark,
+    bool? batterySaverMode,
   }) =>
       AppSettings(
         useRtsp: useRtsp ?? this.useRtsp,
@@ -73,6 +82,7 @@ class AppSettings {
         activityThreshold: activityThreshold ?? this.activityThreshold,
         themeMode: themeMode ?? this.themeMode,
         oledDark: oledDark ?? this.oledDark,
+        batterySaverMode: batterySaverMode ?? this.batterySaverMode,
       );
 
   @override
@@ -83,7 +93,8 @@ class AppSettings {
           audioBufferSeconds == other.audioBufferSeconds &&
           activityThreshold == other.activityThreshold &&
           themeMode == other.themeMode &&
-          oledDark == other.oledDark;
+          oledDark == other.oledDark &&
+          batterySaverMode == other.batterySaverMode;
 
   @override
   int get hashCode => Object.hash(
@@ -92,6 +103,7 @@ class AppSettings {
         activityThreshold,
         themeMode,
         oledDark,
+        batterySaverMode,
       );
 
   Map<String, dynamic> toJson() => {
@@ -100,6 +112,7 @@ class AppSettings {
         'activityThreshold': activityThreshold,
         'themeMode': _themeModeToName(themeMode),
         'oledDark': oledDark,
+        'batterySaverMode': batterySaverMode,
       };
 
   factory AppSettings.fromJson(Map<String, dynamic> json) => AppSettings(
@@ -113,6 +126,7 @@ class AppSettings {
         // would throw out of the whole decode, and _loadFromStorage swallows
         // that — so one wrong-typed field would silently reset every setting.
         oledDark: _boolOrFalse(json['oledDark']),
+        batterySaverMode: _boolOrFalse(json['batterySaverMode']),
       );
 }
 
@@ -172,6 +186,12 @@ class SettingsNotifier extends Notifier<AppSettings> {
   void setActivityThreshold(double value) {
     state = state.copyWith(activityThreshold: value);
     appLog('SETTINGS', 'Activity threshold: $value');
+    _save();
+  }
+
+  void setBatterySaverMode(bool value) {
+    state = state.copyWith(batterySaverMode: value);
+    appLog('SETTINGS', 'Battery saver mode: $value');
     _save();
   }
 }
