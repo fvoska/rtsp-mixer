@@ -1,3 +1,4 @@
+import 'dart:collection';
 import 'dart:math' as math;
 
 /// Pure-Dart audio level metering from encoded bitrate.
@@ -7,44 +8,88 @@ import 'dart:math' as math;
 /// `setProperty` kills the stream asynchronously (CLAUDE.md hard rule). The
 /// loudness proxy is instead the mpv `audio-bitrate` property, which the poll
 /// loop already reads: Unifi cameras stream VBR AAC, so encoded bitrate
-/// correlates with signal energy — near-silence encodes to a very low bitrate,
-/// a crying baby to a high one.
+/// correlates with signal energy — near-silence encodes to a low bitrate, a
+/// crying baby to a high one.
 ///
-/// Everything in this file is pure math over plain Dart values (the only
-/// import is `dart:math`), so it is unit-testable without native libs and can
-/// never throw out of the poll loop's per-camera try/catch.
-
-/// Bitrate mapped to level 0.0 — quieter than this reads as silence.
-/// mpv's `audio-bitrate` is in bits/sec (the debug panel's `_formatBitrate`
-/// treats it the same way).
-const kBitrateFloorBps = 2000.0;
-
-/// Bitrate mapped to level 1.0 — VBR AAC near its loud-signal ceiling.
-const kBitrateCeilingBps = 96000.0;
-
-/// Rolling history capacity: 20 samples at the 500 ms poll cadence = 10 s.
-const kLevelHistoryCapacity = 20;
-
-/// Variation window: the last 10 samples (~5 s) feed the activity statistic.
-const kVariationWindow = 10;
-
-/// Map an encoded audio bitrate (bits/sec) to an absolute pseudo-SPL level
-/// in 0.0..1.0 using a fixed log scale between [kBitrateFloorBps] and
-/// [kBitrateCeilingBps]:
+/// What the bitrate does NOT give us is an absolute scale. Every camera, every
+/// firmware and every room sits at a different "quiet" bitrate, and the
+/// dynamic range between quiet and loud is a handful of dB, not the 30 dB of
+/// a real SPL meter. So [AudioLevelTracker] measures loudness RELATIVE to the
+/// room: it tracks the quietest the stream has been over the last few minutes
+/// (the noise floor) and reports how far above that floor the signal is right
+/// now, on a scale that self-calibrates to the range the stream actually
+/// spans. The output is one number in 0..1 that both the card border and the
+/// waveform history consume, so what the border shows IS what the chart shows.
 ///
-///   level = (ln(bps) − ln(floor)) / (ln(ceiling) − ln(floor)), clamped 0..1
+/// Everything in this file is pure math over plain Dart values (only
+/// `dart:math` and `dart:collection` are imported), so it is unit-testable
+/// without native libs and can never throw out of the poll loop's per-camera
+/// try/catch.
+
+/// Poll cadence of the level meter. 4 samples/s is fast enough that a
+/// 300 ms border tween between samples reads as continuous, and cheap enough
+/// (two synchronous mpv property reads per camera) to run all night.
+const kLevelPollInterval = Duration(milliseconds: 250);
+
+/// Rolling history span shown by the waveform chart.
+const kLevelHistorySeconds = 60;
+
+/// Rolling history capacity: 60 s at the 250 ms poll cadence.
+const kLevelHistoryCapacity = 240;
+
+/// Noise-floor calibration window. The floor is the quietest one-second
+/// minimum seen within this window, so a cry that lasts longer than this
+/// will eventually be absorbed into the floor — an acceptable trade against
+/// a floor that never recovers after a stream started during a loud moment.
+const kCalibrationWindowSeconds = 300.0;
+
+/// Calibration samples are pushed once per second (the minimum of the
+/// smoothed level within that second), so a 1 s dip lowers the floor but a
+/// single jittery packet cannot.
+const kCalibrationStrideSeconds = 1.0;
+
+/// mpv's first bitrate readings after `open` are unreliable (it reports the
+/// first packet or two before it has a real timestamp distance). Nothing in
+/// the first two seconds of flow feeds the calibration ring.
+const kWarmupSeconds = 2.0;
+
+/// Smallest range the meter will spread over 0..1. A room whose bitrate only
+/// jitters by a dB keeps its level near zero instead of being auto-gained up
+/// to a full-scale display of nothing.
+const kMinSpanDb = 6.0;
+
+/// Largest range the meter will spread over 0..1. Beyond this a louder sound
+/// just pins the meter — nobody needs to distinguish "very loud" from
+/// "extremely loud" on a baby monitor.
+const kMaxSpanDb = 24.0;
+
+/// Time constant of the short EMA applied to the dB signal before anything
+/// else looks at it. Per-packet bitrate is jittery; a 0.4 s smoothing tames
+/// it without making a cry onset lag noticeably.
+const kAttackSeconds = 0.4;
+
+/// Time constant of the slower EMA that feeds noise-floor calibration. A
+/// single tiny packet moves the fast display signal by several dB, and
+/// baking that into the floor would pin the meter high for the whole
+/// calibration window; through a 2 s smoothing one outlier shifts the floor
+/// by well under 3 dB, while a genuinely quiet room still registers within
+/// a few seconds.
+const kCalibrationSmoothingSeconds = 2.0;
+
+/// Time constant of the display envelope's release. The level rises
+/// immediately with the smoothed signal and decays with this time constant,
+/// like a VU meter, so the border fades out rather than blinking off.
+const kReleaseSeconds = 0.8;
+
+/// Encoded bitrate (bits/sec) to decibels: `10·log10(bps)`.
 ///
-/// The mapping is deterministic — identical bounds on every camera, no
-/// adaptive baseline — so the bar means the same thing on every card.
-/// Null, non-positive, NaN, and infinite inputs return 0.0 (never NaN,
-/// never throws): `audio-bitrate` strings originate from the camera's
-/// stream via mpv and may be empty or garbage.
-double bitrateToLevel(double? bps) {
-  if (bps == null || !bps.isFinite || bps <= 0) return 0.0;
-  final level = (math.log(bps) - math.log(kBitrateFloorBps)) /
-      (math.log(kBitrateCeilingBps) - math.log(kBitrateFloorBps));
-  if (level.isNaN) return 0.0;
-  return level.clamp(0.0, 1.0);
+/// Returns null for anything that is not a positive finite number — the
+/// `audio-bitrate` string originates from the camera's stream via mpv and may
+/// be empty or garbage. Never throws, never returns NaN.
+double? bitrateToDb(double? bps) {
+  if (bps == null || !bps.isFinite || bps <= 0) return null;
+  final db = 10.0 * math.log(bps) / math.ln10;
+  return db.isFinite ? db : null;
 }
 
 /// Append [sample] to [history], keeping only the last [capacity] samples
@@ -65,26 +110,168 @@ List<double> appendLevel(
   return List.unmodifiable([...history.sublist(start), sample]);
 }
 
-/// Peak-to-trough variation (max − min, clamped 0..1) over the last [window]
-/// samples of [history]. Returns 0.0 for fewer than 2 samples (never throws).
+/// Per-camera loudness tracker: turns a stream of raw bitrate readings into
+/// a smoothed, noise-floor-relative level in 0..1.
 ///
-/// Peak-to-trough was chosen over standard deviation because: (a) with only
-/// ~10 samples, std dev underestimates short cry bursts — a single loud spike
-/// SHOULD light the border on a baby monitor; (b) levels are already 0..1 so
-/// max − min is naturally normalized with no extra scaling constant; (c) it
-/// is trivially explainable in the settings copy ("how much the level swung
-/// recently"). No peak-hold decay is needed — the sliding window IS the
-/// decay: a spike ages out after ~window samples.
-double recentVariation(List<double> history, {int window = kVariationWindow}) {
-  if (history.length < 2) return 0.0;
-  final start = history.length > window ? history.length - window : 0;
-  var min = double.infinity;
-  var max = double.negativeInfinity;
-  for (var i = start; i < history.length; i++) {
-    final v = history[i];
-    if (v < min) min = v;
-    if (v > max) max = v;
+/// One instance per live stream, fed once per poll tick via [update]. Create
+/// a fresh instance whenever a stream is (re)opened so the previous stream's
+/// calibration cannot misrepresent the new one.
+class AudioLevelTracker {
+  AudioLevelTracker({
+    this.calibrationWindowSeconds = kCalibrationWindowSeconds,
+    this.calibrationStrideSeconds = kCalibrationStrideSeconds,
+    this.warmupSeconds = kWarmupSeconds,
+    this.minSpanDb = kMinSpanDb,
+    this.maxSpanDb = kMaxSpanDb,
+    this.attackSeconds = kAttackSeconds,
+    this.calibrationSmoothingSeconds = kCalibrationSmoothingSeconds,
+    this.releaseSeconds = kReleaseSeconds,
+  });
+
+  final double calibrationWindowSeconds;
+  final double calibrationStrideSeconds;
+  final double warmupSeconds;
+  final double minSpanDb;
+  final double maxSpanDb;
+  final double attackSeconds;
+  final double calibrationSmoothingSeconds;
+  final double releaseSeconds;
+
+  /// Seconds of *flowing* audio seen so far (drives warm-up and the
+  /// calibration stride).
+  double _flowSeconds = 0.0;
+
+  /// Short-EMA-smoothed dB signal, null until the first valid reading.
+  double? _smoothedDb;
+
+  /// Slow-EMA-smoothed dB signal that feeds calibration only.
+  double? _calibrationDb;
+
+  /// Extremes of the calibration-smoothed dB within the current stride.
+  double _strideMin = double.infinity;
+  double _strideMax = double.negativeInfinity;
+  double _strideElapsed = 0.0;
+
+  /// One entry per completed stride: flow-time at push plus that stride's
+  /// minimum (feeds the floor) and maximum (feeds the ceiling).
+  final Queue<_CalibrationSample> _ring = Queue<_CalibrationSample>();
+
+  double _level = 0.0;
+
+  /// The current display level, 0..1. What the border and the waveform show.
+  double get level => _level;
+
+  /// Current smoothed signal in dB, or null before the first valid reading.
+  double? get smoothedDb => _smoothedDb;
+
+  /// The room's quiet level in dB, or null until calibration has a sample.
+  double? get floorDb =>
+      _ring.isEmpty ? null : _ring.map((s) => s.min).reduce(math.min);
+
+  /// The loudest calibration sample in dB, or null until calibration has one.
+  double? get ceilingDb =>
+      _ring.isEmpty ? null : _ring.map((s) => s.max).reduce(math.max);
+
+  /// dB range currently mapped onto 0..1 (clamped to [minSpanDb, maxSpanDb]).
+  double get spanDb {
+    final floor = floorDb;
+    final ceiling = ceilingDb;
+    if (floor == null || ceiling == null) return minSpanDb;
+    return (ceiling - floor).clamp(minSpanDb, maxSpanDb);
   }
-  if (min > max) return 0.0; // window somehow empty — defensive
-  return (max - min).clamp(0.0, 1.0);
+
+  /// Feed one poll tick and return the new display level.
+  ///
+  /// [bps] is the raw `audio-bitrate` reading (null when mpv has not
+  /// published one — normal for ~1 s after open). [flowing] is the poll
+  /// loop's PTS-advance verdict: false means no audio is arriving, so the
+  /// level decays to zero regardless of any stale bitrate value.
+  /// [dtSeconds] is the time since the previous call.
+  ///
+  /// Never throws and never returns NaN: every arithmetic step is guarded
+  /// so a garbage reading degrades to "hold the previous level".
+  double update({
+    required double? bps,
+    required bool flowing,
+    required double dtSeconds,
+  }) {
+    final dt = (dtSeconds.isFinite && dtSeconds > 0) ? dtSeconds : 0.0;
+
+    double target;
+    if (!flowing) {
+      // No audio arriving: the meter falls to zero. The floor is left alone —
+      // a stalled stream says nothing about how quiet the room is.
+      target = 0.0;
+    } else {
+      final db = bitrateToDb(bps);
+      if (db == null) {
+        // Flowing but no bitrate yet (fresh open) — hold the current level so
+        // a live stream never flashes as silent for a second.
+        target = _level;
+      } else {
+        _flowSeconds += dt;
+        _smoothedDb = _ema(_smoothedDb, db, dt, attackSeconds);
+        _calibrationDb =
+            _ema(_calibrationDb, db, dt, calibrationSmoothingSeconds);
+        _calibrate(_calibrationDb!, dt);
+        target = _normalise(_smoothedDb!);
+      }
+    }
+
+    _level = _release(_level, target, dt);
+    if (!_level.isFinite) _level = 0.0;
+    return _level;
+  }
+
+  double _ema(double? previous, double sample, double dt, double tau) {
+    if (previous == null) return sample;
+    if (tau <= 0) return sample;
+    final alpha = 1.0 - math.exp(-dt / tau);
+    final next = previous + (sample - previous) * alpha;
+    return next.isFinite ? next : previous;
+  }
+
+  /// Push each one-second stride's extremes into the calibration ring and
+  /// evict entries older than the window. Nothing is recorded during
+  /// warm-up.
+  void _calibrate(double calibrationDb, double dt) {
+    if (_flowSeconds < warmupSeconds) return;
+    _strideMin = math.min(_strideMin, calibrationDb);
+    _strideMax = math.max(_strideMax, calibrationDb);
+    _strideElapsed += dt;
+    if (_strideElapsed < calibrationStrideSeconds && _ring.isNotEmpty) return;
+    // First sample after warm-up is pushed immediately so the floor exists
+    // as soon as possible; later ones once per stride.
+    _ring.addLast(_CalibrationSample(_flowSeconds, _strideMin, _strideMax));
+    _strideMin = double.infinity;
+    _strideMax = double.negativeInfinity;
+    _strideElapsed = 0.0;
+    while (_ring.isNotEmpty &&
+        _flowSeconds - _ring.first.at > calibrationWindowSeconds) {
+      _ring.removeFirst();
+    }
+  }
+
+  double _normalise(double smoothedDb) {
+    final floor = floorDb;
+    if (floor == null) return 0.0; // still warming up: nothing to compare to
+    final raw = (smoothedDb - floor) / spanDb;
+    if (!raw.isFinite) return 0.0;
+    return raw.clamp(0.0, 1.0);
+  }
+
+  /// VU-style envelope: instant attack, exponential release.
+  double _release(double current, double target, double dt) {
+    if (target >= current) return target;
+    if (releaseSeconds <= 0) return target;
+    final alpha = 1.0 - math.exp(-dt / releaseSeconds);
+    return current + (target - current) * alpha;
+  }
+}
+
+class _CalibrationSample {
+  const _CalibrationSample(this.at, this.min, this.max);
+  final double at;
+  final double min;
+  final double max;
 }
