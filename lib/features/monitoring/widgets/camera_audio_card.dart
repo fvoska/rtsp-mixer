@@ -1010,6 +1010,19 @@ class _StreamInfoPanel extends StatelessWidget {
     return '${(bps / 1000).toStringAsFixed(0)} kbps';
   }
 
+  static String _describeMeter(CameraAudioState cs) {
+    final db = cs.levelDb;
+    final reading = db == null || !db.isFinite ? null : db.toStringAsFixed(1);
+    switch (cs.levelSource) {
+      case LevelSource.pcm:
+        return 'PCM tap${reading == null ? '' : ' · $reading dBFS'}';
+      case LevelSource.bitrate:
+        return 'bitrate proxy${reading == null ? '' : ' · $reading dB'}';
+      case LevelSource.none:
+        return 'no reading';
+    }
+  }
+
   String? _extractHost(String? url) {
     if (url == null) return null;
     final uri = Uri.tryParse(url);
@@ -1053,6 +1066,9 @@ class _StreamInfoPanel extends StatelessWidget {
     if (si.channels != null) audioParts.add(si.channels!);
     audioParts.add(_formatBitrate(si.audioBitrate));
     rows.add(_row('Audio', audioParts.join(' · '), labelStyle, dimStyle));
+
+    // Level meter provenance: which signal the glow is built on right now.
+    rows.add(_row('Meter', _describeMeter(cameraState), labelStyle, dimStyle));
 
     // Video section (only when video preview is active)
     if (showVideoInfo) {

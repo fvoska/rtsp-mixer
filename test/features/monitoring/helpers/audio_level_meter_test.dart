@@ -4,8 +4,9 @@ import 'package:rtsp_mixer/features/monitoring/helpers/audio_level_meter.dart';
 /// Poll cadence used throughout: 250 ms, matching [kLevelPollInterval].
 const _dt = 0.25;
 
-/// Feed [seconds] of a constant [bps] into [tracker] and return the last
-/// level. `flowing` defaults to true.
+/// Feed [seconds] of a constant [bps] into [tracker] (through the bitrate
+/// preset's dB mapping) and return the last level. `flowing` defaults to
+/// true.
 double _feed(
   AudioLevelTracker tracker,
   double? bps,
@@ -15,10 +16,13 @@ double _feed(
   var level = tracker.level;
   final ticks = (seconds / _dt).round();
   for (var i = 0; i < ticks; i++) {
-    level = tracker.update(bps: bps, flowing: flowing, dtSeconds: _dt);
+    level = _tick(tracker, bps, flowing: flowing);
   }
   return level;
 }
+
+double _tick(AudioLevelTracker tracker, double? bps, {bool flowing = true}) =>
+    tracker.update(db: bitrateToDb(bps), flowing: flowing, dtSeconds: _dt);
 
 /// A quiet-room baseline: 16 kbps AAC.
 const _quietBps = 16000.0;
@@ -96,6 +100,37 @@ void main() {
       expect(t.spanDb, kMinSpanDb);
     });
 
+    test('presets carry the right span clamps for their signal', () {
+      expect(AudioLevelTracker.pcm().minSpanDb, kPcmMinSpanDb);
+      expect(AudioLevelTracker.pcm().maxSpanDb, kPcmMaxSpanDb);
+      expect(AudioLevelTracker.bitrate().minSpanDb, kBitrateMinSpanDb);
+      expect(AudioLevelTracker.bitrate().maxSpanDb, kBitrateMaxSpanDb);
+    });
+
+    test('PCM preset: a quiet room at -55 dBFS, speech at -30, a cry at -12',
+        () {
+      final t = AudioLevelTracker.pcm();
+      double feedDb(double db, double seconds) {
+        var level = t.level;
+        for (var i = 0; i < (seconds / _dt).round(); i++) {
+          level = t.update(db: db, flowing: true, dtSeconds: _dt);
+        }
+        return level;
+      }
+
+      expect(feedDb(-55, 30), closeTo(0.0, 1e-6), reason: 'floor');
+      // Mic self-noise wandering ±3 dB stays under a 0.25 trigger.
+      expect(feedDb(-52, 3), lessThan(0.25));
+      feedDb(-55, 5);
+      // Speech: +25 dB over the room, above the trigger but not pinned.
+      final speech = feedDb(-30, 3);
+      expect(speech, greaterThan(0.5));
+      expect(speech, lessThan(1.0));
+      feedDb(-55, 5);
+      // A cry: +43 dB, full scale.
+      expect(feedDb(-12, 3), closeTo(1.0, 1e-6));
+    });
+
     test('nothing is calibrated during warm-up', () {
       final t = AudioLevelTracker();
       _feed(t, _quietBps, kWarmupSeconds - _dt);
@@ -161,16 +196,16 @@ void main() {
       final t = AudioLevelTracker();
       _feed(t, _quietBps, 30);
       // Attack: within two ticks of a burst the meter is most of the way up.
-      t.update(bps: _loudBps, flowing: true, dtSeconds: _dt);
+      _tick(t, _loudBps);
       final afterOneTick =
-          t.update(bps: _loudBps, flowing: true, dtSeconds: _dt);
+          _tick(t, _loudBps);
       expect(afterOneTick, greaterThan(0.8));
       _feed(t, _loudBps, 3);
       expect(t.level, closeTo(1.0, 1e-6));
 
       // Release: back to quiet, the level falls but does not snap to zero.
       final oneTickLater =
-          t.update(bps: _quietBps, flowing: true, dtSeconds: _dt);
+          _tick(t, _quietBps);
       expect(oneTickLater, lessThan(1.0));
       expect(oneTickLater, greaterThan(0.3));
       // After a few seconds it has decayed away.
@@ -184,7 +219,7 @@ void main() {
       _feed(t, _loudBps, 3);
       var prev = t.level;
       for (var i = 0; i < 16; i++) {
-        final next = t.update(bps: _quietBps, flowing: true, dtSeconds: _dt);
+        final next = _tick(t, _quietBps);
         expect(next, lessThanOrEqualTo(prev));
         prev = next;
       }
@@ -214,12 +249,17 @@ void main() {
       final t = AudioLevelTracker();
       _feed(t, _quietBps, 30);
       for (final bad in [double.nan, double.infinity, -1.0, 0.0]) {
-        final level = t.update(bps: bad, flowing: true, dtSeconds: _dt);
+        final level = _tick(t, bad);
         expect(level.isFinite, isTrue);
         expect(level, inInclusiveRange(0.0, 1.0));
       }
-      final level =
-          t.update(bps: _quietBps, flowing: true, dtSeconds: double.nan);
+      for (final badDb in [double.nan, double.infinity, double.negativeInfinity]) {
+        final level = t.update(db: badDb, flowing: true, dtSeconds: _dt);
+        expect(level.isFinite, isTrue);
+        expect(level, inInclusiveRange(0.0, 1.0));
+      }
+      final level = t.update(
+          db: bitrateToDb(_quietBps), flowing: true, dtSeconds: double.nan);
       expect(level.isFinite, isTrue);
     });
 
@@ -237,7 +277,7 @@ void main() {
       final t = AudioLevelTracker();
       _feed(t, _quietBps, 30);
       final floorBefore = t.floorDb!;
-      t.update(bps: _quietBps / 100, flowing: true, dtSeconds: _dt);
+      _tick(t, _quietBps / 100);
       _feed(t, _quietBps, 5);
       // The 2 s calibration smoothing keeps one -20 dB outlier from
       // dragging the floor down with it.

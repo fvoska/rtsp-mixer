@@ -43,6 +43,8 @@ dependencies:
   media_kit_video: ^2.0.1
   media_kit_libs_video: ^1.0.6
   media_kit_native_event_loop: ^1.0.9
+  # Named-pipe reader for the PCM level tap (mkfifo/open/read via libc).
+  ffi: ^2.2.0
   flutter_foreground_task: ^9.2.2
   audio_service: ^0.18.18
   connectivity_plus: ^7.1.1
