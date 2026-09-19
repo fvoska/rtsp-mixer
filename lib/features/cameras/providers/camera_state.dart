@@ -15,10 +15,14 @@ class CameraState {
   bool get hasManualCameras =>
       cameras.any((c) => c.source == CameraSource.manual);
 
-  /// Both Unifi and manual cameras are present — only then does the UI need to
-  /// label each camera's source (per requirement: no distinction when there is
-  /// only one type).
-  bool get hasMixedSources => hasUnifiCameras && hasManualCameras;
+  bool get hasPeerCameras =>
+      cameras.any((c) => c.source == CameraSource.peer);
+
+  /// More than one source type is present (Unifi, manual, paired phone) —
+  /// only then does the UI need to label each camera's source (per
+  /// requirement: no distinction when there is only one type).
+  bool get hasMixedSources =>
+      cameras.map((c) => c.source).toSet().length > 1;
 
   List<ProtectCamera> get selectedCameras =>
       cameras.where((c) => selectedIds.contains(c.id)).toList();

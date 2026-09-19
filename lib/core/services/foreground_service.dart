@@ -20,6 +20,36 @@ void startCallback() {
 class ForegroundServiceManager {
   static bool _initialized = false;
 
+  /// Which of the two long-running features currently need the service.
+  /// One Android service carries both: monitoring (media playback) and
+  /// host mode (microphone). The service type is fixed at start, so when
+  /// the second feature joins and needs a type the running service lacks,
+  /// the service is restarted with the union — a brief notification
+  /// flicker, versus Android 14+ denying microphone access to a service
+  /// that was started as media-playback only.
+  static bool _monitorActive = false;
+  static bool _hostActive = false;
+  static Set<ForegroundServiceTypes> _runningTypes = {};
+  static String _monitorTitle = 'Listening';
+  static String _monitorText = 'Monitoring';
+  static String _hostName = 'Phone camera';
+
+  /// Buttons for the monitor's notification (pause toggles mute-all).
+  static const _monitorButtons = [
+    NotificationButton(id: 'pause', text: 'Pause'),
+    NotificationButton(id: 'stop', text: 'Stop'),
+  ];
+
+  /// Buttons for the host-only notification.
+  static const _hostButtons = [
+    NotificationButton(id: 'stop_host', text: 'Stop sharing'),
+  ];
+
+  static Set<ForegroundServiceTypes> get _neededTypes => {
+        if (_monitorActive || !_hostActive) ForegroundServiceTypes.mediaPlayback,
+        if (_hostActive) ForegroundServiceTypes.microphone,
+      };
+
   /// Initialize FlutterForegroundTask options. Call once during app startup
   /// or before first use. Safe to call multiple times (idempotent).
   ///
@@ -82,20 +112,101 @@ class ForegroundServiceManager {
     }
     init();
     final notificationText = 'Monitoring: ${cameraNames.join(", ")}';
-    await FlutterForegroundTask.startService(
-      serviceId: 256,
-      notificationTitle: title,
-      notificationText: notificationText,
-      notificationIcon: _notificationIcon,
-      notificationButtons: const [
-        // 'pause' toggles mute-all (label flips Pause <-> Resume).
-        // 'stop' ends monitoring entirely.
-        NotificationButton(id: 'pause', text: 'Pause'),
-        NotificationButton(id: 'stop', text: 'Stop'),
-      ],
-      callback: startCallback,
+    _monitorActive = true;
+    _monitorTitle = title;
+    _monitorText = notificationText;
+    await _ensureRunning(
+      title: title,
+      text: notificationText,
+      buttons: _monitorButtons,
     );
     appLog('FGS', 'Foreground service started: $notificationText');
+  }
+
+  /// Start (or fold into the running service) the host-mode notification.
+  /// Host mode captures the microphone, so the service must carry the
+  /// `microphone` type — Android 14+ blocks background mic access
+  /// otherwise. The manifest declares `mediaPlayback|microphone`; the
+  /// actual types requested here are always a subset of that.
+  static Future<void> startHost(String hostName) async {
+    if (kIsWeb || !Platform.isAndroid) {
+      appLog('FGS', 'Foreground service unsupported on this platform — host '
+          'mode runs without it');
+      return;
+    }
+    init();
+    _hostActive = true;
+    _hostName = hostName;
+    if (_monitorActive) {
+      // Monitoring owns the notification copy; only the type may change.
+      await _ensureRunning(
+        title: _monitorTitle,
+        text: _monitorText,
+        buttons: _monitorButtons,
+      );
+    } else {
+      await _ensureRunning(
+        title: _hostTitle,
+        text: _hostText,
+        buttons: _hostButtons,
+      );
+    }
+    appLog('FGS', 'Host mode foreground service active');
+  }
+
+  static String get _hostTitle => 'Sharing microphone';
+  static String get _hostText => 'This phone is a camera: "$_hostName"';
+
+  /// Host mode ended. Keeps the service when monitoring still needs it.
+  static Future<void> stopHost() async {
+    if (kIsWeb || !Platform.isAndroid) return;
+    _hostActive = false;
+    if (_monitorActive) {
+      appLog('FGS', 'Host stopped — monitoring keeps the service');
+      return;
+    }
+    await FlutterForegroundTask.stopService();
+    _runningTypes = {};
+    appLog('FGS', 'Foreground service stopped (host)');
+  }
+
+  /// Start the service with the currently needed types, restarting it when
+  /// the running instance lacks one of them. Idempotent for the same set.
+  static Future<void> _ensureRunning({
+    required String title,
+    required String text,
+    required List<NotificationButton> buttons,
+  }) async {
+    final needed = _neededTypes;
+    final running = await FlutterForegroundTask.isRunningService;
+    if (running && _runningTypes.containsAll(needed)) {
+      await FlutterForegroundTask.updateService(
+        notificationTitle: title,
+        notificationText: text,
+        notificationIcon: _notificationIcon,
+        notificationButtons: buttons,
+      );
+      return;
+    }
+    if (running) {
+      appLog('FGS',
+          'Restarting service to add types ${needed.difference(_runningTypes).map((t) => t.rawValue)}');
+      try {
+        await FlutterForegroundTask.stopService();
+      } catch (e) {
+        appLog('FGS', 'stopService before restart failed (continuing): $e');
+      }
+    }
+    await FlutterForegroundTask.startService(
+      serviceId: 256,
+      serviceTypes: needed.toList(),
+      notificationTitle: title,
+      notificationText: text,
+      notificationIcon: _notificationIcon,
+      notificationButtons: buttons,
+      callback: startCallback,
+    );
+    _runningTypes = needed;
   }
 
   /// Update the notification text and title, e.g. when connection status
@@ -122,9 +233,29 @@ class ForegroundServiceManager {
   }
 
   /// Stop the foreground service. Releases wake lock and WiFi lock.
+  ///
+  /// When host mode is still sharing the microphone the service is kept and
+  /// its notification flips to the host copy instead — stopping it would
+  /// silently kill the nursery phone's stream.
   static Future<void> stop() async {
     if (kIsWeb || !Platform.isAndroid) return;
+    _monitorActive = false;
+    if (_hostActive) {
+      appLog('FGS', 'Monitoring stopped — host mode keeps the service');
+      try {
+        await FlutterForegroundTask.updateService(
+          notificationTitle: _hostTitle,
+          notificationText: _hostText,
+          notificationIcon: _notificationIcon,
+          notificationButtons: _hostButtons,
+        );
+      } catch (e) {
+        appLog('FGS', 'host notification handover failed (continuing): $e');
+      }
+      return;
+    }
     await FlutterForegroundTask.stopService();
+    _runningTypes = {};
     appLog('FGS', 'Foreground service stopped');
   }
 
@@ -158,7 +289,7 @@ class MonitoringTaskHandler extends TaskHandler {
   @override
   void onNotificationButtonPressed(String id) {
     print('[FGS] Notification button pressed: $id');
-    if (id == 'pause' || id == 'stop') {
+    if (id == 'pause' || id == 'stop' || id == 'stop_host') {
       FlutterForegroundTask.sendDataToMain(id);
     }
   }

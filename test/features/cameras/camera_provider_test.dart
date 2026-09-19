@@ -279,4 +279,102 @@ void main() {
       expect(state.hasMixedSources, true);
     });
   });
+  peerCameraProviderTests();
+}
+
+void peerCameraProviderTests() {
+  late StorageService storage;
+  late FakeApiClient api;
+
+  setUp(() {
+    storage = StorageService();
+    api = FakeApiClient();
+  });
+
+  group('CameraNotifier peer cameras', () {
+    test('addPeerCamera appends, selects and persists a phone camera', () async {
+      final c = createContainer(storage: storage, api: api);
+      addTearDown(c.dispose);
+      await waitForCameras(c);
+      await c.read(cameraNotifierProvider.notifier).loadCameras();
+
+      final n = c.read(cameraNotifierProvider.notifier);
+      final id = await n.addPeerCamera(
+        hostId: 'host-1',
+        url: 'http://10.0.0.5:47831/roomtone/v1/audio.wav?token=abc',
+        name: 'Nursery phone',
+      );
+      final state = c.read(cameraNotifierProvider).value!;
+      expect(state.cameras.single.id, id);
+      expect(state.cameras.single.isPeer, true);
+      expect(state.cameras.single.name, 'Nursery phone');
+      expect(state.selectedIds, contains(id));
+      expect(state.hasPeerCameras, true);
+      expect(state.hasMixedSources, false);
+      expect(await storage.loadPeerCameras(), hasLength(1));
+      expect(n.peerCameraForHost('host-1')?.id, id);
+    });
+
+    test('re-pairing the same host replaces the entry and keeps its id',
+        () async {
+      final c = createContainer(storage: storage, api: api);
+      addTearDown(c.dispose);
+      await waitForCameras(c);
+      await c.read(cameraNotifierProvider.notifier).loadCameras();
+      final n = c.read(cameraNotifierProvider.notifier);
+      final first = await n.addPeerCamera(
+          hostId: 'host-1', url: 'http://10.0.0.5:1/roomtone/v1/audio.wav?token=a');
+      final second = await n.addPeerCamera(
+          hostId: 'host-1', url: 'http://10.0.0.5:1/roomtone/v1/audio.wav?token=b');
+      expect(second, first);
+      final state = c.read(cameraNotifierProvider).value!;
+      expect(state.cameras, hasLength(1));
+      expect(state.cameras.single.defaultStreamUrl, endsWith('token=b'));
+    });
+
+    test('updatePeerCameraUrl re-points and persists; removePeerCamera clears',
+        () async {
+      final c = createContainer(storage: storage, api: api);
+      addTearDown(c.dispose);
+      await waitForCameras(c);
+      await c.read(cameraNotifierProvider.notifier).loadCameras();
+      final n = c.read(cameraNotifierProvider.notifier);
+      final id = await n.addPeerCamera(
+          hostId: 'h', url: 'http://10.0.0.5:1/roomtone/v1/audio.wav?token=a');
+      await n.updatePeerCameraUrl(
+          id, 'http://10.0.0.9:1/roomtone/v1/audio.wav?token=a');
+      expect(c.read(cameraNotifierProvider).value!.cameras.single.defaultStreamUrl,
+          startsWith('http://10.0.0.9'));
+      expect((await storage.loadPeerCameras()).single['rtspsStreamUrls']['stream'],
+          startsWith('http://10.0.0.9'));
+
+      await n.removeLocalCamera(id);
+      final state = c.read(cameraNotifierProvider).value!;
+      expect(state.cameras, isEmpty);
+      expect(state.selectedIds, isNot(contains(id)));
+      expect(await storage.loadPeerCameras(), isEmpty);
+    });
+
+    test('peer cameras load alongside Unifi and manual cameras', () async {
+      await storage.savePeerCameras([
+        ProtectCamera.peer(
+                id: 'peer-1', url: 'http://p/roomtone/v1/audio.wav?token=t', hostId: 'h')
+            .toJson(),
+      ]);
+      await storage.saveManualCameras([
+        ProtectCamera.manual(id: 'manual-1', url: 'rtsp://x/y').toJson(),
+      ]);
+      final c = createContainer(storage: storage, api: api);
+      addTearDown(c.dispose);
+      await waitForCameras(c);
+      await c.read(cameraNotifierProvider.notifier).loadCameras('h');
+      await waitFor(
+        () => c.read(cameraNotifierProvider).value?.cameras.length == 5,
+        reason: '3 Unifi + 1 manual + 1 peer cameras to merge',
+      );
+      final state = c.read(cameraNotifierProvider).value!;
+      expect(state.cameras.last.isPeer, true);
+      expect(state.hasMixedSources, true);
+    });
+  });
 }

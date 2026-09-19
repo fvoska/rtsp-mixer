@@ -17,6 +17,9 @@ class CameraNotifier extends AsyncNotifier<CameraState> {
   /// Manually-entered RTSP cameras, persisted locally.
   List<ProtectCamera> _manualCameras = [];
 
+  /// Paired phones running Roomtone host mode, persisted locally.
+  List<ProtectCamera> _peerCameras = [];
+
   /// Authoritative selection set, kept in sync with storage. Composed state's
   /// selectedIds is always this filtered down to cameras that still exist.
   Set<String> _selectedIds = {};
@@ -24,9 +27,10 @@ class CameraNotifier extends AsyncNotifier<CameraState> {
   @override
   Future<CameraState> build() async => const CameraState();
 
-  /// The full camera list = Unifi cameras first, then manual cameras appended.
+  /// The full camera list = Unifi cameras first, then manual cameras, then
+  /// paired phones.
   CameraState _compose() {
-    final all = [..._unifiCameras, ..._manualCameras];
+    final all = [..._unifiCameras, ..._manualCameras, ..._peerCameras];
     final validIds =
         _selectedIds.where((id) => all.any((c) => c.id == id)).toSet();
     return CameraState(cameras: all, selectedIds: validIds);
@@ -53,6 +57,8 @@ class CameraNotifier extends AsyncNotifier<CameraState> {
       _selectedIds = (await storage.loadSelectedCameraIds()).toSet();
       _manualCameras = await _loadManualCameras(storage);
       appLog('CAM', 'Loaded ${_manualCameras.length} manual cameras');
+      _peerCameras = await _loadPeerCameras(storage);
+      appLog('CAM', 'Loaded ${_peerCameras.length} paired phone cameras');
 
       if (host == null) {
         // Manual-only mode — no Unifi console configured.
@@ -69,8 +75,8 @@ class CameraNotifier extends AsyncNotifier<CameraState> {
         _publish();
         final withUrls = cached.where((c) => c.rtspsStreamUrls.isNotEmpty).length;
         appLog('CAM', 'Loaded ${cached.length} Unifi cameras from cache ($withUrls with RTSPS URLs)');
-      } else if (_manualCameras.isNotEmpty) {
-        // No Unifi cache yet but we have manual cameras — show them immediately
+      } else if (_manualCameras.isNotEmpty || _peerCameras.isNotEmpty) {
+        // No Unifi cache yet but we have local cameras — show them immediately
         // instead of a blank loading spinner.
         _unifiCameras = [];
         _publish();
@@ -143,7 +149,9 @@ class CameraNotifier extends AsyncNotifier<CameraState> {
       _publish();
     } catch (e) {
       appLog('CAM', 'Error refreshing cameras from API: $e');
-      if (_unifiCameras.isNotEmpty || _manualCameras.isNotEmpty) {
+      if (_unifiCameras.isNotEmpty ||
+          _manualCameras.isNotEmpty ||
+          _peerCameras.isNotEmpty) {
         appLog('CAM', 'Keeping cached camera list');
       }
     } finally {
@@ -258,6 +266,109 @@ class CameraNotifier extends AsyncNotifier<CameraState> {
     await _saveManualCameras();
     await ref.read(storageProvider).saveSelectedCameraIds(_selectedIds.toList());
     _publish();
+  }
+
+  /// Add (or re-pair) a phone camera. Pairing with a host that is already in
+  /// the list REPLACES that entry — the host issued a fresh token and the
+  /// old one may have been revoked — keeping the camera id so the saved
+  /// selection and mix state carry over. Returns the camera id. The camera
+  /// is auto-selected like a manual camera.
+  Future<String> addPeerCamera({
+    required String hostId,
+    required String url,
+    String? name,
+  }) async {
+    final trimmedName = name?.trim();
+    final displayName =
+        (trimmedName == null || trimmedName.isEmpty) ? 'Phone camera' : trimmedName;
+    final existingIdx = _peerCameras.indexWhere((c) => c.peerHostId == hostId);
+    final id = existingIdx >= 0
+        ? _peerCameras[existingIdx].id
+        : 'peer-${DateTime.now().microsecondsSinceEpoch}';
+    final camera = ProtectCamera.peer(
+      id: id,
+      url: url.trim(),
+      hostId: hostId,
+      name: displayName,
+    );
+    if (existingIdx >= 0) {
+      _peerCameras = [..._peerCameras];
+      _peerCameras[existingIdx] = camera;
+      appLog('CAM', 'Re-paired phone camera "$displayName" ($hostId)');
+    } else {
+      _peerCameras = [..._peerCameras, camera];
+      appLog('CAM', 'Added phone camera "$displayName" ($hostId)');
+    }
+    _selectedIds = {..._selectedIds, id};
+    await _savePeerCameras();
+    await ref.read(storageProvider).saveSelectedCameraIds(_selectedIds.toList());
+    _publish();
+    return id;
+  }
+
+  /// Re-point a paired phone camera at a new stream URL (the host's LAN
+  /// address changed). No-op for unknown ids or an unchanged URL.
+  Future<void> updatePeerCameraUrl(String id, String url) async {
+    final idx = _peerCameras.indexWhere((c) => c.id == id);
+    if (idx < 0) return;
+    final existing = _peerCameras[idx];
+    if (existing.rtspsStreamUrls['stream'] == url) return;
+    _peerCameras = [..._peerCameras];
+    _peerCameras[idx] = existing.copyWith(rtspsStreamUrls: {'stream': url});
+    appLog('CAM', 'Phone camera $id re-pointed at a new address');
+    await _savePeerCameras();
+    _publish();
+  }
+
+  /// The paired phone camera for [hostId], if any.
+  ProtectCamera? peerCameraForHost(String hostId) {
+    for (final c in _peerCameras) {
+      if (c.peerHostId == hostId) return c;
+    }
+    return null;
+  }
+
+  /// Remove a paired phone camera. No-op for other sources.
+  Future<void> removePeerCamera(String cameraId) async {
+    if (!_peerCameras.any((c) => c.id == cameraId)) return;
+    _peerCameras = _peerCameras.where((c) => c.id != cameraId).toList();
+    _selectedIds = {..._selectedIds}..remove(cameraId);
+    appLog('CAM', 'Removed phone camera $cameraId');
+    await _savePeerCameras();
+    await ref.read(storageProvider).saveSelectedCameraIds(_selectedIds.toList());
+    _publish();
+  }
+
+  /// Remove any locally-managed camera (manual URL or paired phone). Unifi
+  /// cameras are owned by the console and cannot be removed here.
+  Future<void> removeLocalCamera(String cameraId) async {
+    if (_peerCameras.any((c) => c.id == cameraId)) {
+      return removePeerCamera(cameraId);
+    }
+    return removeManualCamera(cameraId);
+  }
+
+  Future<List<ProtectCamera>> _loadPeerCameras(dynamic storage) async {
+    try {
+      final list = await storage.loadPeerCameras() as List<Map<String, dynamic>>;
+      return list
+          .map(ProtectCamera.fromJson)
+          .where((c) => c.isPeer && c.peerHostId != null)
+          .toList();
+    } catch (e) {
+      appLog('CAM', 'Failed to load phone cameras: $e');
+      return [];
+    }
+  }
+
+  Future<void> _savePeerCameras() async {
+    try {
+      await ref
+          .read(storageProvider)
+          .savePeerCameras(_peerCameras.map((c) => c.toJson()).toList());
+    } catch (e) {
+      appLog('CAM', 'Failed to save phone cameras: $e');
+    }
   }
 
   Future<List<ProtectCamera>?> _loadCachedCameras(dynamic storage) async {

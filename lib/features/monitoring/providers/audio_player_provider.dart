@@ -12,6 +12,9 @@ import '../../../core/services/local_notifications.dart';
 import '../../auth/providers/auth_provider.dart';
 import '../../cameras/models/protect_camera.dart';
 import '../../cameras/providers/camera_provider.dart';
+import '../../peer/helpers/peer_urls.dart';
+import '../../peer/services/peer_address_resolver.dart';
+import '../../peer/services/peer_level_poller.dart';
 import '../helpers/audio_level_meter.dart';
 import '../services/pcm_fifo.dart';
 import '../services/pcm_level_tap.dart';
@@ -86,6 +89,13 @@ class AudioPlayerNotifier extends AsyncNotifier<MonitoringState> {
   bool _polling = false;
   String _lastNotificationText = '';
   String _lastNotificationTitle = '';
+
+  /// Level side-channel for paired phone cameras. The PCM tap is the
+  /// primary meter for them as for every camera; when it is not delivering
+  /// (unsupported platform, tap failed) the bitrate proxy is blind on their
+  /// constant-bitrate PCM stream, so the phone's own dBFS reading, polled
+  /// from its status endpoint, is the fallback. See [PeerLevelPoller].
+  final PeerLevelPoller _peerLevels = PeerLevelPoller();
 
   /// Serializes lifecycle operations (start / stop / settings-driven restart)
   /// so they can never interleave. Concurrent invocations chain on this
@@ -192,6 +202,7 @@ class AudioPlayerNotifier extends AsyncNotifier<MonitoringState> {
       try { _driftWatchdog.resetAll(); } catch (_) {}
       try { _alertPolicy.cancelAll(); } catch (_) {}
       try { _connectivityListener.cancel(); } catch (_) {}
+      try { _peerLevels.stopAll(); } catch (_) {}
       _levelPollTimer?.cancel();
       for (final sub in _subscriptions) {
         sub.cancel();
@@ -669,10 +680,15 @@ class AudioPlayerNotifier extends AsyncNotifier<MonitoringState> {
     final cameraName = camera.name ?? 'Camera';
     appLog('AUDIO', 'Connecting to $cameraName (${camera.id})');
 
-    // Manual cameras use their URL verbatim — the RTSPS→RTSP port/scheme
-    // rewrite in resolveStreamUrl is Unifi-specific and would corrupt an
-    // arbitrary user-entered stream URL.
-    String resolveFor(String raw) => camera.isManual
+    // A paired phone may have picked up a new DHCP lease since we last saw
+    // it: ask the LAN where it is now (bounded, never throws) so the local
+    // candidate below points at a live address.
+    if (camera.isPeer) camera = await _refreshPeerCamera(camera);
+
+    // Manual and phone cameras use their URL verbatim — the RTSPS→RTSP
+    // port/scheme rewrite in resolveStreamUrl is Unifi-specific and would
+    // corrupt an arbitrary user-entered (or HTTP) stream URL.
+    String resolveFor(String raw) => camera.isLocallyManaged
         ? raw
         : resolveStreamUrl(raw, useRtsp: settings.useRtsp);
 
@@ -684,7 +700,7 @@ class AudioPlayerNotifier extends AsyncNotifier<MonitoringState> {
     // Manual cameras keep their user-entered URL verbatim. Defensive:
     // rewriteStreamUrlHosts never throws and degrades to the API URLs.
     var localUrls = camera.rtspsStreamUrls;
-    if (!camera.isManual) {
+    if (camera.isUnifi) {
       localUrls = rewriteStreamUrlHosts(
           localUrls, ref.read(authNotifierProvider).value?.host);
     }
@@ -709,7 +725,9 @@ class AudioPlayerNotifier extends AsyncNotifier<MonitoringState> {
     var overrideQualities = const <String, String>{};
     try {
       final remoteHost = ref.read(authNotifierProvider).value?.remoteHost;
-      if (remoteHost != null && remoteHost.isNotEmpty) {
+      // A phone camera lives on this LAN only; re-hosting its URL at a VPN
+      // address would just be a slow failing candidate.
+      if (remoteHost != null && remoteHost.isNotEmpty && !camera.isPeer) {
         remoteQualities = camera.rtspsStreamUrls.map(
           (k, v) => MapEntry(k, resolveFor(replaceUrlHost(v, remoteHost))),
         );
@@ -741,7 +759,7 @@ class AudioPlayerNotifier extends AsyncNotifier<MonitoringState> {
       mac: camera.mac,
       modelKey: camera.modelKey,
       micVolume: camera.micVolume,
-      isManual: camera.isManual,
+      source: camera.source,
     );
 
     if (!camera.isMicEnabled) {
@@ -802,6 +820,13 @@ class AudioPlayerNotifier extends AsyncNotifier<MonitoringState> {
         activeStreamUrl: winner.url,
       );
       appLog('AUDIO', '$cameraName is now playing');
+      if (camera.isPeer) {
+        try {
+          _peerLevels.start(camera.id, peerStatusUrlFromStream(winner.url));
+        } catch (e) {
+          appLog('AUDIO', '$cameraName: level poller start failed (no meter): $e');
+        }
+      }
 
       // D-15: record per-camera streamStarted event for health summary.
       try {
@@ -1034,26 +1059,39 @@ class AudioPlayerNotifier extends AsyncNotifier<MonitoringState> {
 
         // Level: how far above the room's quiet floor the stream is right
         // now, smoothed (see AudioLevelTracker). The reading comes from the
-        // PCM tap when it is delivering (real dBFS) and from the bitrate
-        // proxy otherwise. PTS flow keeps its silence/zombie role — no
-        // flow decays the level to 0; flowing without a reading this tick
-        // holds the previous level so a live stream doesn't flash as
-        // silent. None of this can throw, but it sits inside this try
-        // anyway.
+        // PCM tap when it is delivering (real dBFS); otherwise, for a paired
+        // phone, from the dBFS the phone measures on its own microphone
+        // (its PCM stream has a constant bitrate, so the proxy would read
+        // flat); otherwise from the bitrate proxy. PTS flow keeps its
+        // silence/zombie role — no flow decays the level to 0; flowing
+        // without a reading this tick holds the previous level so a live
+        // stream doesn't flash as silent. None of this can throw, but it
+        // sits inside this try anyway.
         final tapDb = _sampleTap(cam);
         final tap = _levelTaps[cam.cameraId];
         final tapFresh = tap != null &&
             tap.hasDelivered &&
             tap.sinceData <= _tapFreshWithin;
-        final source = tapFresh ? LevelSource.pcm : LevelSource.bitrate;
-        final double? db =
-            source == LevelSource.pcm ? tapDb : bitrateToDb(audioBitrate);
+        final peerDb = cam.isPeer ? _peerLevels.dbFor(cam.cameraId) : null;
+        final LevelSource source;
+        final double? db;
+        if (tapFresh) {
+          source = LevelSource.pcm;
+          db = tapDb;
+        } else if (peerDb != null) {
+          source = LevelSource.host;
+          db = peerDb;
+        } else {
+          source = LevelSource.bitrate;
+          db = bitrateToDb(audioBitrate);
+        }
         if (_levelSources[cam.cameraId] != source) {
           // Different signal, different scale: start calibration afresh.
+          // The host's reading is dBFS too, so it shares the PCM preset.
           _levelSources[cam.cameraId] = source;
-          _levelTrackers[cam.cameraId] = source == LevelSource.pcm
-              ? AudioLevelTracker.pcm()
-              : AudioLevelTracker.bitrate();
+          _levelTrackers[cam.cameraId] = source == LevelSource.bitrate
+              ? AudioLevelTracker.bitrate()
+              : AudioLevelTracker.pcm();
           appLog('LEVEL', '${cam.cameraName}: level source → ${source.name}');
         }
         final tracker = _levelTrackers[cam.cameraId]!;
@@ -1111,7 +1149,7 @@ class AudioPlayerNotifier extends AsyncNotifier<MonitoringState> {
           i,
           cam.copyWith(
             audioLevel: level,
-            levelSource: db == null && !tapFresh ? LevelSource.none : source,
+            levelSource: db == null ? LevelSource.none : source,
             levelDb: db,
             silenceDuration: newSilence,
             streamInfo: newInfo,
@@ -1329,7 +1367,10 @@ class AudioPlayerNotifier extends AsyncNotifier<MonitoringState> {
     if (current == null || idx < 0) {
       throw StateError('No camera state for $cameraId');
     }
-    final cam = current.cameras[idx];
+    var cam = current.cameras[idx];
+    // A paired phone that dropped may have come back on a new address —
+    // re-resolve it before rebuilding candidates (bounded, never throws).
+    if (cam.isPeer) cam = await _refreshPeerCandidates(cameraId, cam);
     // Rebuild the ordered [local, remote] candidate list for the current
     // quality instead of blindly retrying activeStreamUrl. Local comes first
     // so recovery re-prefers the LAN stream when the parent is back home,
@@ -1392,6 +1433,15 @@ class AudioPlayerNotifier extends AsyncNotifier<MonitoringState> {
     final winner = await _openFirstCandidate(
         player, cameraId, candidates, _reconnectOpenTimeout);
 
+    // A phone camera's status endpoint follows its stream URL.
+    if (isPeerStreamUrl(winner.url)) {
+      try {
+        _peerLevels.start(cameraId, peerStatusUrlFromStream(winner.url));
+      } catch (e) {
+        appLog('RECONNECT', '$cameraId: level poller restart failed: $e');
+      }
+    }
+
     // Record which URL actually connected so the UI and the next reconnect
     // cycle see the truth. Defensive: a state hiccup here must not fail an
     // otherwise-successful reconnect.
@@ -1419,6 +1469,61 @@ class AudioPlayerNotifier extends AsyncNotifier<MonitoringState> {
     } catch (e) {
       appLog('RECONNECT',
           '$cameraId: vid=$restoreVid restore failed (non-fatal): $e');
+    }
+  }
+
+  /// Re-resolve a paired phone's address via LAN discovery. Returns the
+  /// camera with its stream URL updated (and persists the new URL) when the
+  /// host moved; the unchanged camera otherwise. Never throws.
+  Future<ProtectCamera> _refreshPeerCamera(ProtectCamera camera) async {
+    try {
+      final url = await ref.read(peerAddressResolverProvider)(camera);
+      if (url == null || url.isEmpty) return camera;
+      try {
+        await ref
+            .read(cameraNotifierProvider.notifier)
+            .updatePeerCameraUrl(camera.id, url);
+      } catch (e) {
+        appLog('PEER', 'persisting new address for ${camera.id} failed: $e');
+      }
+      return camera.copyWith(rtspsStreamUrls: {'stream': url});
+    } catch (e) {
+      appLog('PEER', 'address refresh for ${camera.id} failed (keeping): $e');
+      return camera;
+    }
+  }
+
+  /// Reconnect-time variant of [_refreshPeerCamera]: resolves via the
+  /// camera list and writes the new URL into the live [CameraAudioState]
+  /// so the candidate builder sees it. Never throws.
+  Future<CameraAudioState> _refreshPeerCandidates(
+      String cameraId, CameraAudioState cam) async {
+    try {
+      ProtectCamera? source;
+      for (final c in ref.read(cameraNotifierProvider).value?.cameras ??
+          const <ProtectCamera>[]) {
+        if (c.id == cameraId) {
+          source = c;
+          break;
+        }
+      }
+      if (source == null) return cam;
+      final refreshed = await _refreshPeerCamera(source);
+      final url = refreshed.rtspsStreamUrls['stream'];
+      if (url == null || url == cam.availableQualities['stream']) return cam;
+      final updated = cam.copyWith(
+        availableQualities: {'stream': url},
+        activeStreamUrl: url,
+      );
+      final current = state.value;
+      final idx = _cameraIndex(cameraId);
+      if (current != null && idx >= 0) {
+        state = AsyncData(current.copyWithCamera(idx, updated));
+      }
+      return updated;
+    } catch (e) {
+      appLog('PEER', '$cameraId: candidate refresh failed (keeping): $e');
+      return cam;
     }
   }
 
@@ -1790,6 +1895,9 @@ class AudioPlayerNotifier extends AsyncNotifier<MonitoringState> {
     try { _connectivityListener.cancel(); } catch (e) {
       appLog('CONN', 'connectivity cancel threw during stopMonitoring: $e');
     }
+    try { _peerLevels.stopAll(); } catch (e) {
+      appLog('PEER', 'level poller stopAll threw during stopMonitoring: $e');
+    }
     // Cancel supervisor BEFORE disposing players (T-04-08 ordering).
     try { _reconnectSupervisor.cancelAll(); } catch (e) {
       appLog('RECONNECT', 'cancelAll threw during stopMonitoring: $e');
@@ -1913,6 +2021,7 @@ class AudioPlayerNotifier extends AsyncNotifier<MonitoringState> {
     try { _zombieWatchdog.reset(cameraId); } catch (_) {}
     try { _driftWatchdog.reset(cameraId); } catch (_) {}
     try { _alertPolicy.clear(cameraId); } catch (_) {}
+    try { _peerLevels.stop(cameraId); } catch (_) {}
     LocalNotificationsManager.cancelAlert(cameraId);
 
     final player = _players.remove(cameraId);

@@ -3,7 +3,9 @@
 /// [unifi] cameras are discovered from the Unifi Protect integration API.
 /// [manual] cameras are RTSP/RTSPS URLs entered by the user and persisted
 /// locally — they work with or without a Unifi console.
-enum CameraSource { unifi, manual }
+/// [peer] cameras are other phones running Roomtone in host mode, paired
+/// over the LAN; their stream URL is the host's HTTP WAV endpoint.
+enum CameraSource { unifi, manual, peer }
 
 /// A camera the app can monitor. Historically only Unifi Protect cameras
 /// (integration/v1/cameras), now also user-entered manual RTSP streams —
@@ -17,8 +19,14 @@ class ProtectCamera {
   final String? modelKey;
   final int? micVolume;
 
-  /// Where this camera came from (Unifi API vs manually entered URL).
+  /// Where this camera came from (Unifi API, manually entered URL, or a
+  /// paired phone).
   final CameraSource source;
+
+  /// Stable id of the paired phone (peer cameras only). Lets the monitor
+  /// re-resolve the host's current LAN address via discovery when its DHCP
+  /// lease changes, and de-duplicates re-pairing with the same phone.
+  final String? peerHostId;
 
   /// Available RTSPS stream URLs keyed by quality (high, medium, low).
   /// Manual cameras store their single URL under the `stream` key.
@@ -43,6 +51,7 @@ class ProtectCamera {
     this.rtspsStreamUrls = const {},
     this.source = CameraSource.unifi,
     this.remoteUrl,
+    this.peerHostId,
   });
 
   /// Build a manually-entered camera from a raw RTSP/RTSPS URL. The URL is
@@ -68,9 +77,38 @@ class ProtectCamera {
         remoteUrl: remoteUrl,
       );
 
+  /// A paired phone running Roomtone in host mode. [url] is the host's
+  /// stream URL (address, port and bearer token); it is rebuilt by the
+  /// monitor whenever discovery reports the host at a new address.
+  factory ProtectCamera.peer({
+    required String id,
+    required String url,
+    required String hostId,
+    String? name,
+  }) =>
+      ProtectCamera(
+        id: id,
+        name: name,
+        // Reachability is only known at connect time, like manual cameras.
+        state: 'CONNECTED',
+        isMicEnabled: true,
+        rtspsStreamUrls: {'stream': url},
+        source: CameraSource.peer,
+        peerHostId: hostId,
+      );
+
   bool get isConnected => state == 'CONNECTED';
 
   bool get isManual => source == CameraSource.manual;
+
+  bool get isPeer => source == CameraSource.peer;
+
+  bool get isUnifi => source == CameraSource.unifi;
+
+  /// True for cameras the user added on this device (manual URLs and paired
+  /// phones) — the ones that can be deleted from the picker and whose URLs
+  /// are played verbatim (no Unifi RTSPS↔RTSP rewriting).
+  bool get isLocallyManaged => source != CameraSource.unifi;
 
   /// The default stream URL: prefer lowest quality since audio is identical
   /// across all qualities — no point decoding a larger video mux. Falls back
@@ -109,6 +147,7 @@ class ProtectCamera {
         source: source,
         remoteUrl:
             identical(remoteUrl, _unset) ? this.remoteUrl : remoteUrl as String?,
+        peerHostId: peerHostId,
       );
 
   Map<String, dynamic> toJson() => {
@@ -122,6 +161,7 @@ class ProtectCamera {
         'rtspsStreamUrls': rtspsStreamUrls,
         'source': source.name,
         'remoteUrl': remoteUrl,
+        'peerHostId': peerHostId,
       };
 
   factory ProtectCamera.fromJson(Map<String, dynamic> json) => ProtectCamera(
@@ -135,11 +175,19 @@ class ProtectCamera {
         rtspsStreamUrls: (json['rtspsStreamUrls'] as Map<String, dynamic>?)
                 ?.map((k, v) => MapEntry(k, v as String)) ??
             const {},
-        // Absent `source` (legacy cache from before manual cameras) → unifi.
-        source: (json['source'] as String?) == 'manual'
-            ? CameraSource.manual
-            : CameraSource.unifi,
+        // Absent or unknown `source` (legacy cache, or a newer build's
+        // value) → unifi rather than a throw out of the whole decode.
+        source: _sourceFromName(json['source']),
         // Absent key (legacy JSON from before remote URLs) → null.
         remoteUrl: json['remoteUrl'] as String?,
+        peerHostId: json['peerHostId'] as String?,
       );
+
+  static CameraSource _sourceFromName(Object? raw) {
+    if (raw is! String) return CameraSource.unifi;
+    for (final s in CameraSource.values) {
+      if (s.name == raw) return s;
+    }
+    return CameraSource.unifi;
+  }
 }

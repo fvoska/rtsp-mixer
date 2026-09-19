@@ -57,4 +57,28 @@ void main() {
       });
     });
   });
+  peerStorageTests();
+}
+
+void peerStorageTests() {
+  late StorageService storage;
+  setUp(() => storage = StorageService());
+
+  group('peer storage', () {
+    test('peer cameras round-trip and tolerate garbage', () async {
+      expect(await storage.loadPeerCameras(), isEmpty);
+      await storage.savePeerCameras([{'id': 'peer-1', 'source': 'peer'}]);
+      expect((await storage.loadPeerCameras()).single['id'], 'peer-1');
+      await storage.write('peer_cameras', 'not json');
+      expect(await storage.loadPeerCameras(), isEmpty);
+    });
+
+    test('peer host config round-trips and tolerates garbage', () async {
+      expect(await storage.loadPeerHostConfig(), isNull);
+      await storage.savePeerHostConfig({'hostId': 'h', 'name': 'Nursery'});
+      expect((await storage.loadPeerHostConfig())!['name'], 'Nursery');
+      await storage.write('peer_host_config', '[1,2');
+      expect(await storage.loadPeerHostConfig(), isNull);
+    });
+  });
 }

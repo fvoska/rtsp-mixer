@@ -1,18 +1,28 @@
 import 'package:flutter/material.dart';
 
-/// Small chip labelling a camera's source (UniFi vs manual RTSP). Callers only
-/// show it when both source types are present — a single-source list needs no
-/// distinction.
-class CameraSourceBadge extends StatelessWidget {
-  const CameraSourceBadge({super.key, required this.isManual});
+import '../models/protect_camera.dart';
 
-  final bool isManual;
+/// Small chip labelling a camera's source (UniFi, manual RTSP, or a paired
+/// phone). Callers only show it when more than one source type is present —
+/// a single-source list needs no distinction.
+class CameraSourceBadge extends StatelessWidget {
+  const CameraSourceBadge({super.key, required this.source});
+
+  final CameraSource source;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final label = isManual ? 'Manual' : 'UniFi';
-    final icon = isManual ? Icons.link : Icons.videocam_outlined;
+    final label = switch (source) {
+      CameraSource.unifi => 'UniFi',
+      CameraSource.manual => 'Manual',
+      CameraSource.peer => 'Phone',
+    };
+    final icon = switch (source) {
+      CameraSource.unifi => Icons.videocam_outlined,
+      CameraSource.manual => Icons.link,
+      CameraSource.peer => Icons.phone_android,
+    };
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
       decoration: BoxDecoration(
