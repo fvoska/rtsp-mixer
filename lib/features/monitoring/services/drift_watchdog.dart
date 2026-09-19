@@ -1,66 +1,109 @@
 import '../../../core/logging/app_logger.dart';
 
-/// Watches each player's demuxer cache depth and fires a silent resync when
-/// the live edge drifts further behind than the user-configured buffer.
+/// Keeps each player at the live edge of its stream.
 ///
-/// Background: media_kit's prebuilt FFmpeg keeps RTSP packets in the demuxer
-/// cache. With `demuxer-max-back-bytes=0` the already-played portion is
-/// dropped, but the *forward* cache (`demuxer-cache-duration`) can still grow
-/// past the playback buffer when the decoder briefly stalls. Over multi-hour
-/// overnight sessions those small stalls compound into minutes of delay.
+/// Background: the demuxer packet cache of a *live* RTSP stream can only
+/// grow. mpv reads packets as fast as the network delivers them (with
+/// `cache=yes` the `demuxer-readahead-secs` limit is ignored — `cache-secs`,
+/// default ~1000 s, wins — so only `demuxer-max-bytes` bounds it), and
+/// playback consumes them at exactly 1x. Every stall (Doze, an audio-focus
+/// duck, a WiFi hiccup, the NVR's start-up burst) therefore leaves a residue
+/// of delay that nothing drains. Over an 8+ hour night those residues add up
+/// to seconds or minutes of lag.
 ///
-/// Strategy: poll `demuxer-cache-duration` each tick. When it exceeds the
-/// allowed threshold (`bufferSeconds + tolerance`) consistently for the
-/// confirm window, fire `onFire(cameraId, detail)`. The caller typically
-/// performs a stop+open reconnect — that is the only reliable way to skip
-/// buffered packets on this FFmpeg build (lavfi seek-to-live is not available
-/// per the project's known-missing filters list).
+/// Two tiers, in order:
 ///
-/// Per CLAUDE.md ("no exception may kill a running audio stream"): all reads
-/// are wrapped by the caller; the watchdog never throws.
+/// 1. **Catch-up** — when the cache holds more than `target + engageMargin`
+///    seconds, ask the caller to play slightly faster (`onSetSpeed`, mpv
+///    `speed` with its built-in `scaletempo2` pitch correction) until the
+///    cache is back at `target`, then return to 1.0. Silent, gapless, and it
+///    is what mpv's own manual suggests for live sources. Transitions only:
+///    the callback is never invoked on every tick.
+/// 2. **Resync** — when the backlog exceeds `target + hardLimitSeconds` for
+///    [confirmWindow] (catching up at 1.1x would take minutes, or the speed
+///    path is not working on this build), fire `onFire` so the caller
+///    performs a stop+open. Rate-limited by [cooldown].
+///
+/// Per CLAUDE.md ("no exception may kill a running audio stream"): every
+/// callback is wrapped; the watchdog never throws.
 class DriftWatchdog {
   DriftWatchdog({
+    required this.onSetSpeed,
     required this.onFire,
+    this.hardLimitSeconds = 10.0,
     this.confirmWindow = const Duration(seconds: 4),
     this.cooldown = const Duration(seconds: 30),
   });
 
-  /// Called when a camera has been over-threshold for [confirmWindow] and is
-  /// not in cooldown. `detail` describes the observed cache depth and limit.
+  /// Called on catch-up transitions with the playback speed to apply:
+  /// `catchUpSpeed` when engaging, `1.0` when the target is reached.
+  final void Function(String cameraId, double speed) onSetSpeed;
+
+  /// Called when a camera's backlog has exceeded the hard limit for
+  /// [confirmWindow] and is not in cooldown. `detail` describes the observed
+  /// cache depth and limit.
   final void Function(String cameraId, String detail) onFire;
 
-  /// How long the cache must remain over-threshold before firing. Smooths over
-  /// momentary spikes that resolve themselves.
+  /// Seconds of backlog beyond the target past which catch-up is abandoned
+  /// in favour of a full resync.
+  final double hardLimitSeconds;
+
+  /// How long the backlog must stay over the hard limit before a resync
+  /// fires. Smooths over momentary spikes that resolve themselves.
   final Duration confirmWindow;
 
-  /// Minimum time between fires for the same camera. Prevents resync storms
-  /// when a camera is genuinely struggling to keep up.
+  /// Minimum time between resyncs for the same camera. Prevents resync
+  /// storms when a camera is genuinely struggling to keep up.
   final Duration cooldown;
 
-  // Per-camera accumulators in milliseconds.
+  // Per-camera over-hard-limit accumulators in milliseconds.
   final Map<String, int> _overMs = {};
-  // Wall-clock of last fire per camera, for cooldown gating.
+  // Wall-clock of last resync per camera, for cooldown gating.
   final Map<String, DateTime> _lastFire = {};
+  // Cameras currently playing at catch-up speed.
+  final Set<String> _catchingUp = {};
 
-  /// Feed one observation. Increments the over-threshold counter when the
-  /// observed cache duration exceeds [thresholdSeconds]; resets it otherwise.
+  /// Whether [cameraId] is currently being played faster than realtime.
+  bool isCatchingUp(String cameraId) => _catchingUp.contains(cameraId);
+
+  /// Feed one observation of the demuxer's forward cache.
   ///
-  /// When the counter exceeds [confirmWindow] and the camera is not in
-  /// cooldown, calls [onFire] and resets the counter.
+  /// [targetSeconds] is the backlog the mode wants to keep (near zero for
+  /// realtime, the user's delay for buffered). Catch-up engages above
+  /// `target + engageMarginSeconds` and disengages at or below `target`;
+  /// the gap is the hysteresis that stops the speed from flapping.
   void recordCacheDuration({
     required String cameraId,
     required double cacheSeconds,
-    required double thresholdSeconds,
+    required double targetSeconds,
     required int pollIntervalMs,
+    double engageMarginSeconds = 0.5,
+    double catchUpSpeed = 1.1,
   }) {
-    if (cacheSeconds <= thresholdSeconds) {
+    if (!cacheSeconds.isFinite || cacheSeconds < 0) return;
+    final over = cacheSeconds - targetSeconds;
+
+    // Tier 1: gentle catch-up with hysteresis.
+    if (!_catchingUp.contains(cameraId) && over > engageMarginSeconds) {
+      _catchingUp.add(cameraId);
+      appLog('DRIFT',
+          '$cameraId: catch-up ${catchUpSpeed}x (cache=${cacheSeconds.toStringAsFixed(2)}s, '
+          'target=${targetSeconds.toStringAsFixed(2)}s)');
+      _setSpeed(cameraId, catchUpSpeed);
+    } else if (_catchingUp.contains(cameraId) && over <= 0) {
+      _catchingUp.remove(cameraId);
+      appLog('DRIFT',
+          '$cameraId: at live edge (cache=${cacheSeconds.toStringAsFixed(2)}s), speed 1.0x');
+      _setSpeed(cameraId, 1.0);
+    }
+
+    // Tier 2: resync when the backlog is beyond what catch-up can fix.
+    if (over <= hardLimitSeconds) {
       _overMs[cameraId] = 0;
       return;
     }
-
     final next = (_overMs[cameraId] ?? 0) + pollIntervalMs;
     _overMs[cameraId] = next;
-
     if (next < confirmWindow.inMilliseconds) return;
 
     final lastFire = _lastFire[cameraId];
@@ -72,9 +115,8 @@ class DriftWatchdog {
 
     _lastFire[cameraId] = now;
     _overMs[cameraId] = 0;
-
     final detail =
-        'cache=${cacheSeconds.toStringAsFixed(2)}s > ${thresholdSeconds.toStringAsFixed(2)}s';
+        'cache=${cacheSeconds.toStringAsFixed(2)}s > ${(targetSeconds + hardLimitSeconds).toStringAsFixed(2)}s';
     appLog('DRIFT', '$cameraId: fire -> resync ($detail)');
     try {
       onFire(cameraId, detail);
@@ -83,16 +125,27 @@ class DriftWatchdog {
     }
   }
 
-  /// Reset accumulators for a camera. Called after a successful reconnect so
-  /// the next drift event can fire cleanly. Does not reset the cooldown — the
-  /// cooldown is a wall-clock gate that protects against rapid retries.
+  void _setSpeed(String cameraId, double speed) {
+    try {
+      onSetSpeed(cameraId, speed);
+    } catch (e) {
+      appLog('DRIFT', '$cameraId: onSetSpeed($speed) threw: $e');
+    }
+  }
+
+  /// Forget a camera's accumulators and catch-up state. Called after a
+  /// (re)open — the freshly tuned player is back at speed 1.0 — so the next
+  /// event can fire cleanly. Does not reset the cooldown: that is a
+  /// wall-clock gate against rapid resync retries.
   void reset(String cameraId) {
     _overMs[cameraId] = 0;
+    _catchingUp.remove(cameraId);
   }
 
   /// Clear all per-camera state. Call on stopMonitoring + onDispose.
   void resetAll() {
     _overMs.clear();
     _lastFire.clear();
+    _catchingUp.clear();
   }
 }

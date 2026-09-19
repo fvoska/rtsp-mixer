@@ -151,6 +151,16 @@ Anything that needs decoded audio (metering, analysis) goes through a separate, 
 
 Paired phone cameras (`CameraSource.peer`, `lib/features/peer/`) stream constant-bitrate PCM16 WAV over HTTP, so the bitrate proxy is blind for them: the tap is their primary meter as well, and the fallback is the dBFS the host phone measures on its own microphone (`/roomtone/v1/status` → `LevelSource.host`), never the bitrate.
 
+### Live edge, latency and stream modes
+
+A live stream's demuxer packet cache can only grow: mpv reads as fast as the network delivers and plays at exactly 1x, so every stall (Doze, audio-focus duck, WiFi hiccup, the NVR's start-up burst) leaves a backlog that nothing drains. Facts verified against the mpv manual, do not re-derive them:
+
+- With `cache=yes`, `demuxer-readahead-secs` is **ignored** (`cache-secs`, default ~1000 s, wins); only `demuxer-max-bytes` bounds the cache. Keep that cap generous so a backlog stays *visible* in `demuxer-cache-duration` instead of backing up into the TCP socket.
+- media_kit sets `cache-on-disk=yes` on every player; `_applyPlaybackTuning` pins it to `no`.
+- Catch-up is a `speed` nudge (`DriftWatchdog`, `lib/features/monitoring/services/drift_watchdog.dart`): `audio-pitch-correction` auto-inserts mpv's **built-in** `scaletempo2` (mpv C code, not an FFmpeg lavfi filter, so the stripped FFmpeg build is irrelevant). stop+open is the last resort, only past a 10 s hard limit — never the first response to lag.
+- `StreamMode.realtime`: `cache-pause=no` (a dropout beats a pause), lavf `fflags=+nobuffer`, trim to ~0.2 s. `StreamMode.buffered`: mpv's native jitter buffer, `cache-pause=yes` + `cache-pause-initial=yes` + `cache-pause-wait=<bufferedDelaySeconds>`, trim back to that depth.
+- `audio-buffer` (the "Audio buffer" slider) is the decoded-sample buffer in front of the device. It is unrelated to the packet cache; never compare the two.
+
 ### Authentication
 
 Uses the official Protect integration API with `X-API-Key` header (not cookie/CSRF login). The bootstrap API (`/proxy/protect/api/bootstrap`) does NOT accept API key auth — returns 500.

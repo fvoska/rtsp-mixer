@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart' show ThemeMode;
 import 'package:flutter_test/flutter_test.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:rtsp_mixer/core/providers/settings_provider.dart';
 
 void main() {
@@ -270,6 +271,92 @@ void main() {
           isFalse,
         );
       });
+    });
+  });
+
+  group('AppSettings stream mode', () {
+    test('defaults to realtime with a 2 s buffered delay', () {
+      const s = AppSettings();
+      expect(s.streamMode, StreamMode.realtime);
+      expect(s.bufferedDelaySeconds, kDefaultBufferedDelaySeconds);
+    });
+
+    test('JSON round-trip preserves streamMode and bufferedDelaySeconds', () {
+      const s = AppSettings(
+        streamMode: StreamMode.buffered,
+        bufferedDelaySeconds: 3.5,
+      );
+      final json = s.toJson();
+      expect(json['streamMode'], 'buffered');
+      expect(json['bufferedDelaySeconds'], 3.5);
+      final back = AppSettings.fromJson(json);
+      expect(back.streamMode, StreamMode.buffered);
+      expect(back.bufferedDelaySeconds, 3.5);
+      expect(back, s);
+    });
+
+    test('fromJson without the new keys keeps realtime defaults', () {
+      // Simulates settings files written before the stream mode existed.
+      final s = AppSettings.fromJson({
+        'useRtsp': false,
+        'audioBufferSeconds': 0.5,
+      });
+      expect(s.streamMode, StreamMode.realtime);
+      expect(s.bufferedDelaySeconds, kDefaultBufferedDelaySeconds);
+    });
+
+    test('unknown or wrong-typed streamMode decodes to realtime', () {
+      expect(
+        AppSettings.fromJson({'streamMode': 'turbo'}).streamMode,
+        StreamMode.realtime,
+      );
+      expect(
+        AppSettings.fromJson({'streamMode': 1}).streamMode,
+        StreamMode.realtime,
+      );
+    });
+
+    test('bufferedDelaySeconds is clamped and tolerant on decode', () {
+      expect(
+        AppSettings.fromJson({'bufferedDelaySeconds': 60}).bufferedDelaySeconds,
+        kMaxBufferedDelaySeconds,
+      );
+      expect(
+        AppSettings.fromJson({'bufferedDelaySeconds': 0}).bufferedDelaySeconds,
+        kMinBufferedDelaySeconds,
+      );
+      expect(
+        AppSettings.fromJson({'bufferedDelaySeconds': 'lots'})
+            .bufferedDelaySeconds,
+        kDefaultBufferedDelaySeconds,
+      );
+      expect(
+        AppSettings.fromJson({'bufferedDelaySeconds': double.nan})
+            .bufferedDelaySeconds,
+        kDefaultBufferedDelaySeconds,
+      );
+    });
+
+    test('copyWith updates streamMode without touching other fields', () {
+      const s = AppSettings(audioBufferSeconds: 0.3, levelThreshold: 0.2);
+      final next = s.copyWith(streamMode: StreamMode.buffered);
+      expect(next.streamMode, StreamMode.buffered);
+      expect(next.audioBufferSeconds, 0.3);
+      expect(next.levelThreshold, 0.2);
+      expect(next.bufferedDelaySeconds, kDefaultBufferedDelaySeconds);
+    });
+
+    test('notifier setter clamps the buffered delay', () {
+      final container = ProviderContainer();
+      addTearDown(container.dispose);
+      final notifier = container.read(settingsProvider.notifier);
+      notifier.setBufferedDelaySeconds(99);
+      expect(
+        container.read(settingsProvider).bufferedDelaySeconds,
+        kMaxBufferedDelaySeconds,
+      );
+      notifier.setStreamMode(StreamMode.buffered);
+      expect(container.read(settingsProvider).streamMode, StreamMode.buffered);
     });
   });
 }

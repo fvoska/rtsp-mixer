@@ -42,7 +42,8 @@ The whole point: you fall asleep trusting it's still listening.
 
 - **Auto-reconnect** with exponential backoff and retry-forever — a dropped stream comes back on its own.
 - **Zombie-stream detection** catches connections that are TCP-open but silently dead and forces a real reconnect.
-- **Silent live-edge drift resync** keeps you at the live edge instead of slowly falling behind.
+- **Live-edge catch-up** — every stall leaves a little backlog; the player quietly speeds up (pitch-corrected) until it's back at the live edge, and only rebuilds the connection if the backlog is too big to trim.
+- **Realtime or Buffered** — lowest delay that plays straight through jitter, or a jitter buffer of your chosen depth that never interrupts on a flaky WiFi.
 - **WiFi-drop detection** and **stream liveness verification** so a flaky network doesn't leave you listening to nothing.
 
 ## Android background operation
