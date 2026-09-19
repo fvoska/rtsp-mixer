@@ -93,7 +93,8 @@ A baby monitor app that connects to Unifi Protect cameras, extracts audio from R
 | Flutter >= 3.22.0 | Required by flutter_foreground_task 9.x |
 | Dart >= 3.4.0 | Required by flutter_foreground_task 9.x |
 | Kotlin >= 1.9.10 | Required by flutter_foreground_task 9.x |
-| Gradle >= 8.6.0 | Required by flutter_foreground_task 9.x |
+| Gradle >= 8.14.0 | Required by the Flutter 3.47+ Gradle plugin (the release runner tracks Flutter `stable`; 8.13 broke the v1.13.0 APK build). Wrapper pinned in `android/gradle/wrapper/gradle-wrapper.properties`. |
+| AGP >= 8.11.1, Kotlin Gradle plugin >= 2.2.20 | Hard minimums of the Flutter 3.47+ Gradle plugin; also needed by the `record` and `mobile_scanner` plugins. Set in `android/settings.gradle.kts`. |
 | Android minSdk >= 21 | Required by media_kit |
 | Android targetSdk >= 34 | Required for foreground service type declarations |
 ## Sources
