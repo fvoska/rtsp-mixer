@@ -141,10 +141,12 @@ class AudioPlayerNotifier extends AsyncNotifier<MonitoringState> {
     },
   );
 
-  /// Drift watchdog: silent force-forward when demuxer cache grows past the
-  /// configured buffer + tolerance. The only reliable resync on this FFmpeg
-  /// build is stop+open — supervisor handles that via 'drift' cause.
+  /// Live-edge guard. Tier 1 nudges `speed` (mpv's built-in scaletempo2
+  /// keeps the pitch) until the demuxer backlog is back at the mode's
+  /// target; tier 2 — a backlog too large to trim — is the only path that
+  /// still stop+opens, via the supervisor's 'drift' cause.
   late final DriftWatchdog _driftWatchdog = DriftWatchdog(
+    onSetSpeed: _setPlaybackSpeed,
     onFire: (cameraId, detail) {
       try {
         ref.read(healthEventsProvider.notifier).record(HealthEvent(
@@ -161,9 +163,37 @@ class AudioPlayerNotifier extends AsyncNotifier<MonitoringState> {
     },
   );
 
-  /// Tolerance added on top of the user-configured audio buffer before a drift
-  /// resync fires. Keeps small jitter from triggering needless reconnects.
-  static const _driftToleranceSeconds = 1.0;
+  /// Realtime mode keeps this much demuxer backlog as its jitter cushion and
+  /// starts trimming once it has grown by [_realtimeEngageMargin]. Total
+  /// latency ≈ this + `audio-buffer` + network.
+  static const _realtimeTargetSeconds = 0.2;
+  static const _realtimeEngageMargin = 0.4;
+  static const _realtimeCatchUpSpeed = 1.1;
+
+  /// Buffered mode trims back to the user's delay once the backlog has
+  /// grown by this much beyond it. A gentler rate: the user chose smoothness.
+  static const _bufferedEngageMargin = 0.5;
+  static const _bufferedCatchUpSpeed = 1.05;
+
+  /// Tier-1 callback: apply a playback speed to one player. `speed` is a
+  /// core mpv property (no lavfi involved); with `audio-pitch-correction`
+  /// on, mpv inserts its own scaletempo2 so a 1.1x catch-up is inaudible.
+  /// Fire-and-forget and fully guarded: a failure here costs a nudge, never
+  /// the stream — the watchdog will retry on the next transition and the
+  /// hard-limit resync still backstops a backlog that never drains.
+  void _setPlaybackSpeed(String cameraId, double speed) {
+    final player = _players[cameraId];
+    if (player == null) return;
+    // ignore: unawaited_futures
+    () async {
+      try {
+        final np = player.platform as NativePlayer;
+        await np.setProperty('speed', speed.toStringAsFixed(3));
+      } catch (e) {
+        appLog('DRIFT', '$cameraId: speed=$speed failed (non-fatal): $e');
+      }
+    }();
+  }
 
   // RELY-01 D-04: 5-min one-shot per-camera alert policy.
   late final AlertPolicy _alertPolicy = AlertPolicy(
@@ -219,12 +249,16 @@ class AudioPlayerNotifier extends AsyncNotifier<MonitoringState> {
       _disposeAllTaps('provider disposed');
     });
 
-    // Auto-restart streams when RTSP or audio buffer settings change.
+    // Auto-restart streams when RTSP, stream mode or buffer settings change
+    // (they are all applied as mpv properties before open()).
     // Debounced so a slider drag doesn't enqueue one restart per snap.
     ref.listen(settingsProvider, (prev, next) {
       if (prev == null) return;
       if (prev.useRtsp != next.useRtsp ||
-          prev.audioBufferSeconds != next.audioBufferSeconds) {
+          prev.audioBufferSeconds != next.audioBufferSeconds ||
+          prev.streamMode != next.streamMode ||
+          (next.streamMode == StreamMode.buffered &&
+              prev.bufferedDelaySeconds != next.bufferedDelaySeconds)) {
         _settingsRestartDebounce?.cancel();
         _settingsRestartDebounce = Timer(
           const Duration(milliseconds: 400),
@@ -898,7 +932,11 @@ class AudioPlayerNotifier extends AsyncNotifier<MonitoringState> {
 
     state = const AsyncLoading();
     final settings = ref.read(settingsProvider);
-    appLog('AUDIO', 'Starting monitoring for ${selectedCameras.length} cameras (video=$videoPreview, rtsp=${settings.useRtsp}, buffer=${settings.audioBufferSeconds}s)');
+    appLog('AUDIO',
+        'Starting monitoring for ${selectedCameras.length} cameras '
+        '(video=$videoPreview, rtsp=${settings.useRtsp}, '
+        'mode=${streamModeToName(settings.streamMode)}, '
+        'delay=${settings.bufferedDelaySeconds}s, buffer=${settings.audioBufferSeconds}s)');
 
     // 260514-siv: begin a new persisted session BEFORE recording the first
     // event, so the monitoringStarted event lands in the new session rather
@@ -1190,22 +1228,30 @@ class AudioPlayerNotifier extends AsyncNotifier<MonitoringState> {
           appLog('ZOMBIE', 'tick error (non-fatal): $e');
         }
 
-        // Drift detection: feed the watchdog the demuxer's forward cache.
-        // demuxer-cache-duration is the seconds of decoded+demuxed audio
-        // sitting ahead of the playhead. If it exceeds the user buffer plus
-        // tolerance for the confirm window, the watchdog fires a stop+open.
-        // Kept unconditionally in battery saver — this guards against audio
-        // drift over an 8+ hour session, which is reliability, not metering.
+        // Live-edge guard: feed the watchdog the demuxer's forward cache.
+        // demuxer-cache-duration is the seconds of demuxed audio sitting
+        // ahead of the decoder — how far behind live we are, inside mpv.
+        // The target is the mode's intended backlog; the watchdog trims
+        // anything beyond it with a speed nudge and only stop+opens past a
+        // hard limit. Kept unconditionally in battery saver — this guards
+        // against lag over an 8+ hour session, which is reliability, not
+        // metering.
         try {
           final cacheStr = await _tryGetProperty(np, 'demuxer-cache-duration');
           final cache = double.tryParse(cacheStr ?? '');
           if (cache != null && cache.isFinite && cache >= 0) {
-            final bufferSeconds =
-                ref.read(settingsProvider).audioBufferSeconds;
+            final settings = ref.read(settingsProvider);
+            final buffered = settings.streamMode == StreamMode.buffered;
             _driftWatchdog.recordCacheDuration(
               cameraId: cam.cameraId,
               cacheSeconds: cache,
-              thresholdSeconds: bufferSeconds + _driftToleranceSeconds,
+              targetSeconds: buffered
+                  ? settings.bufferedDelaySeconds
+                  : _realtimeTargetSeconds,
+              engageMarginSeconds:
+                  buffered ? _bufferedEngageMargin : _realtimeEngageMargin,
+              catchUpSpeed:
+                  buffered ? _bufferedCatchUpSpeed : _realtimeCatchUpSpeed,
               pollIntervalMs: _pollInterval.inMilliseconds,
             );
           }
@@ -1356,24 +1402,60 @@ class AudioPlayerNotifier extends AsyncNotifier<MonitoringState> {
   /// Apply all mpv tuning properties. Idempotent; safe to call before every
   /// open() — hedges against Pitfall 3 (RESEARCH §Pitfall 3) where mpv
   /// properties may reset across player.open() on some builds.
+  ///
+  /// Two layers of buffering exist and must not be confused:
+  /// - the demuxer packet cache (`cache=yes`, bounded by `demuxer-max-bytes`;
+  ///   with the cache on, `demuxer-readahead-secs` is ignored per the mpv
+  ///   manual — `cache-secs` wins). For a live stream it holds exactly the
+  ///   backlog between the live edge and the decoder, so it is what the
+  ///   DriftWatchdog measures and trims.
+  /// - the audio output buffer (`audio-buffer`, decoded samples in front of
+  ///   the device). The user's "Audio buffer" slider; 0 crackles.
+  ///
+  /// The stream mode decides what mpv does with the packet cache:
+  /// - realtime: never pause on underrun (`cache-pause=no`, a dropout beats a
+  ///   pause), no start-up prebuffer, lavf `nobuffer` to shrink the probe
+  ///   backlog. The watchdog trims the cache to ~0.2 s.
+  /// - buffered: mpv's native jitter buffer — prebuffer
+  ///   `bufferedDelaySeconds` before the first sample (`cache-pause-initial`)
+  ///   and rebuffer to the same depth after an underrun (`cache-pause-wait`).
+  ///   The watchdog trims anything that grows beyond that depth.
   Future<void> _applyPlaybackTuning(NativePlayer nativePlayer) async {
     final settings = ref.read(settingsProvider);
-    // Use TCP transport for reliable delivery over LAN.
-    await nativePlayer.setProperty('demuxer-lavf-o', 'rtsp_transport=tcp');
-    // Small demuxer cache absorbs network jitter without adding much latency.
-    // The old profile=low-latency + cache=no combination set audio-buffer=0
-    // which caused audible crackling from audio output underruns.
+    final buffered = settings.streamMode == StreamMode.buffered;
+    // TCP transport for reliable delivery over LAN. `nobuffer` (from mpv's
+    // own low-latency profile) stops lavf from holding packets during probe.
+    await nativePlayer.setProperty(
+      'demuxer-lavf-o',
+      buffered ? 'rtsp_transport=tcp' : 'rtsp_transport=tcp,fflags=+nobuffer',
+    );
     await nativePlayer.setProperty('cache', 'yes');
-    await nativePlayer.setProperty('demuxer-max-bytes', '512KiB');
-    // Cap backlog at 0 so the demuxer drops already-played audio rather than
-    // accumulating an unbounded history. Without this, brief decoder stalls
-    // overnight let the live edge drift by minutes (audio plays old samples
-    // forever once jitter pushes packets into the back-buffer).
+    // media_kit turns cache-on-disk on for every player; a live stream must
+    // never be spooled to flash all night.
+    await nativePlayer.setProperty('cache-on-disk', 'no');
+    // Generous byte cap so a backlog stays *visible* in the demuxer cache
+    // (where the watchdog can measure and trim it) instead of backing up
+    // into the TCP socket where nothing can see it. Live data only ever
+    // accumulates as fast as the stream falls behind, so this is a ceiling,
+    // not a target — a few minutes of AAC or a few seconds of peer PCM.
+    await nativePlayer.setProperty('demuxer-max-bytes', '8MiB');
+    // No back-buffer: already-played packets are only useful for seeking
+    // backwards, which a live monitor never does.
     await nativePlayer.setProperty('demuxer-max-back-bytes', '0');
-    // Read-ahead matches the playback buffer goal — 1s is enough to absorb
-    // LAN jitter without giving room for noticeable lag.
-    await nativePlayer.setProperty('demuxer-readahead-secs', '1');
-    await nativePlayer.setProperty('cache-pause', 'no');
+    if (buffered) {
+      final delay = settings.bufferedDelaySeconds.toStringAsFixed(2);
+      await nativePlayer.setProperty('cache-pause', 'yes');
+      await nativePlayer.setProperty('cache-pause-initial', 'yes');
+      await nativePlayer.setProperty('cache-pause-wait', delay);
+    } else {
+      await nativePlayer.setProperty('cache-pause', 'no');
+      await nativePlayer.setProperty('cache-pause-initial', 'no');
+    }
+    // A (re)opened player always starts at 1x; the watchdog owns speed
+    // from here on. Pitch correction on so a catch-up is a tempo change,
+    // not a chipmunk.
+    await nativePlayer.setProperty('audio-pitch-correction', 'yes');
+    await nativePlayer.setProperty('speed', '1.0');
     // Keep audio output buffer small but nonzero for smooth playback.
     await nativePlayer.setProperty(
         'audio-buffer', settings.audioBufferSeconds.toString());
