@@ -18,6 +18,12 @@ files_modified:
   - test/core/theme/light_theme_smoke_test.dart
   - README.md
   - CLAUDE.md
+  - lib/features/monitoring/services/pcm_fifo.dart
+  - lib/features/monitoring/services/pcm_level_tap.dart
+  - lib/features/monitoring/helpers/pcm_level.dart
+  - test/features/monitoring/helpers/pcm_level_test.dart
+  - test/features/monitoring/services/pcm_fifo_test.dart
+  - pubspec.yaml
 autonomous: true
 must_haves:
   truths:
@@ -124,6 +130,34 @@ mirrored 60 s waveform of the same samples with threshold guide lines.
   </action>
   <verify>flutter analyze --fatal-infos && flutter test</verify>
   <done>Full suite green; analyze clean with --fatal-infos.</done>
+</task>
+
+<task type="auto">
+  <name>Task 4: Real loudness from a PCM tap (user feedback: bitrate does not vary enough)</name>
+  <files>lib/features/monitoring/services/pcm_fifo.dart, lib/features/monitoring/services/pcm_level_tap.dart, lib/features/monitoring/helpers/pcm_level.dart, lib/features/monitoring/helpers/audio_level_meter.dart, lib/features/monitoring/providers/audio_player_provider.dart, lib/features/monitoring/models/player_state.dart, lib/features/monitoring/widgets/camera_audio_card.dart, pubspec.yaml, tests</files>
+  <action>
+    Hardware feedback: the AAC bitrate is near-constant, so Tasks 1-3 had a good
+    pipeline on a dead signal. Verified by reading the configure string inside the
+    Android `libmpv.so` (media-kit libmpv-android-video-build v1.1.7) that FFmpeg
+    is built with `--disable-filters` (only overlay/equalizer re-enabled) — no
+    analysis filter will ever exist — but mpv's `ao=pcm` writer is compiled in.
+    - `PcmFifo`: libc FFI (mkfifo/open O_NONBLOCK/read/close/unlink, SIGPIPE
+      ignored) — non-blocking named-pipe reader polled from the level tick.
+    - `PcmLevelMeter`: s16-LE mono → loudest 50 ms RMS window per tick in dBFS,
+      carrying partial windows across calls.
+    - `PcmLevelTap`: a second silent `Player` per camera with `ao=pcm`,
+      `ao-pcm-file=<fifo>`, `ao-pcm-waveheader=no`, `audio-format=s16`,
+      `audio-channels=mono`, `audio-samplerate=8000`, `vid=no`; teardown disposes
+      the writer while draining, then closes the reader (never the reverse).
+    - Tracker takes dB directly; presets `.pcm()` (span 30..50 dB) and
+      `.bitrate()` (6..24 dB). Provider swaps tracker on source change, manages tap
+      lifecycle (start when live, drop on URL change / failure / 25 s no data /
+      10 s stall / not live / reconnect / removal / stop, 20 s retry cooldown),
+      and falls back to bitrate whenever the tap is not delivering.
+    - `CameraAudioState.levelSource` + `levelDb`; details panel shows "Meter".
+  </action>
+  <verify>flutter analyze --fatal-infos && flutter test; plus a scratch e2e against a real `mpv` binary (installed in the session) proving the flags and pipe path</verify>
+  <done>Suite green; e2e produced exactly 9 s × 16 000 B and a 44 dB loud/quiet swing.</done>
 </task>
 
 </tasks>

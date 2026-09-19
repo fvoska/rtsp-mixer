@@ -62,7 +62,7 @@ A baby monitor app that connects to Unifi Protect cameras, extracts audio from R
 ### Audio Level Metering
 | Technology | Version | Purpose | Why |
 |------------|---------|---------|-----|
-| Bitrate-based level metering | -- | Visual audio activity indicator | The prebuilt media_kit FFmpeg does NOT include audio analysis filters (`ebur128`, `astats`, `aformat`, `stereotools` all missing). The loudness proxy is the mpv `audio-bitrate` property (VBR AAC) polled at 250 ms, turned into a noise-floor-relative 0..1 level by `AudioLevelTracker` (`lib/features/monitoring/helpers/audio_level_meter.dart`): dB-domain smoothing, a rolling 5-min floor/ceiling calibration, and a fast-attack/slow-release envelope. That one level drives the card border, the level bar and the 60 s waveform. `audio-pts` tracks stream flow (silence detection). |
+| PCM tap level metering (`ao=pcm` → named pipe) | -- | Visual audio activity indicator | The prebuilt media_kit FFmpeg has NO audio analysis filters on ANY platform: the Android build is configured with `--disable-filters` and re-enables only `overlay`/`equalizer` (verified by reading the `libmpv.so` configure string), and macOS lacks `ebur128`/`astats`/`aformat` too. Encoded AAC bitrate barely tracks loudness (near-CBR). So the meter is a SECOND, silent mpv `Player` per camera (`PcmLevelTap`, `lib/features/monitoring/services/pcm_level_tap.dart`) with `ao=pcm`, `ao-pcm-file=<FIFO>`, `audio-format=s16`, `audio-channels=mono`, `audio-samplerate=8000`; Dart reads the FIFO non-blocking through libc FFI (`PcmFifo`) every 250 ms and `PcmLevelMeter` computes short-term RMS in dBFS. `AudioLevelTracker` turns that into a noise-floor-relative 0..1 level (rolling 5-min floor/ceiling, fast attack / slow release) that drives the card border, level bar and 60 s waveform. If the tap cannot start (no FIFO support, console refuses the extra session) the level falls back to the `audio-bitrate` proxy; the main player is never touched. `audio-pts` tracks stream flow (silence detection). |
 ### Supporting Libraries
 | Library | Version | Purpose | When to Use |
 |---------|---------|---------|-------------|
@@ -146,6 +146,8 @@ The prebuilt `media_kit_libs_video` (macOS) ships a stripped FFmpeg. These are *
 - L/R stereo panning is **not currently implemented** due to the above. Deferred to a future phase (may require custom FFmpeg build).
 
 Do NOT attempt to use lavfi audio filters without first verifying they exist in the build. A failed filter via `setProperty` kills the audio stream asynchronously (mpv error: "Audio filter initialized failed!" → "No video or audio streams selected").
+
+Anything that needs decoded audio (metering, analysis) goes through a separate, disposable `Player` (see `PcmLevelTap`), never the one the parent is listening to — a failure there costs a feature, not the stream.
 
 ### Authentication
 

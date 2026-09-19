@@ -9,7 +9,9 @@ requires:
   - phase: 04-reliability-overnight-monitoring
     provides: ZombieWatchdog / DriftWatchdog fed from the same poll loop
 provides:
-  - AudioLevelTracker: per-camera, noise-floor-relative, smoothed 0..1 level (pure Dart)
+  - PcmLevelTap: second silent mpv Player per camera, ao=pcm into a named pipe — real loudness without filters
+  - PcmFifo: libc-FFI non-blocking FIFO reader; PcmLevelMeter: s16 PCM → short-term RMS dBFS
+  - AudioLevelTracker: per-camera, noise-floor-relative, smoothed 0..1 level from any dB signal (pure Dart)
   - Card border/halo driven directly by that level (smoothstep above the trigger)
   - 60 s waveform of the same level series with threshold guides and 10 s ticks
   - levelThreshold setting (default 0.25, new JSON key), slider 0.05..0.6
@@ -21,8 +23,14 @@ tech-stack:
     - Stateful pure-Dart signal processor (dart:math + dart:collection only) owned by the provider, one per camera, lifecycle mirroring an existing per-camera map
     - Two-Path fill for sub-pixel bar charts (no anti-aliasing seams)
 key-files:
-  created: []
+  created:
+    - lib/features/monitoring/services/pcm_fifo.dart
+    - lib/features/monitoring/services/pcm_level_tap.dart
+    - lib/features/monitoring/helpers/pcm_level.dart
+    - test/features/monitoring/helpers/pcm_level_test.dart
+    - test/features/monitoring/services/pcm_fifo_test.dart
   modified:
+    - pubspec.yaml
     - lib/features/monitoring/helpers/audio_level_meter.dart
     - lib/features/monitoring/models/player_state.dart
     - lib/features/monitoring/providers/audio_player_provider.dart
@@ -37,7 +45,9 @@ key-files:
     - README.md
     - CLAUDE.md
 decisions:
-  - "Loudness stays bitrate-based (no lavfi on this FFmpeg build) but is now RELATIVE to the room: floor = min of per-second minima of a 2 s-smoothed dB signal over a rolling 5 min window, ceiling likewise from maxima; span clamped to 6..24 dB"
+  - "Loudness comes from decoded PCM via a SECOND silent mpv Player per camera (ao=pcm → FIFO); the Android FFmpeg is --disable-filters (read from libmpv.so), so no analysis filter can ever exist, and encoded AAC bitrate is near-constant (hardware feedback). The main player is never touched — a tap failure costs the meter, not the stream"
+  - "FIFO over file (16 KB/s forever), libc FFI over dart:io (mkfifo does not exist there and a blocking open would pin an IO thread); teardown is writer-then-reader to avoid SIGPIPE, and SIGPIPE is additionally ignored"
+  - "Level is RELATIVE to the room on any signal: floor = min of per-second minima of a 2 s-smoothed dB signal over a rolling 5 min window, ceiling likewise from maxima; span clamped to 30..50 dB for PCM (speech ≈ +25 dB stays below full scale), 6..24 dB for the bitrate fallback"
   - "One number drives everything: CameraAudioState.audioLevel is the tracker's display level, levelHistory is that same value appended per tick — border, level bar and waveform can never disagree. audioActivity and recentVariation are gone"
   - "Envelope is VU-style: instant attack, 0.8 s exponential release, so the border fades rather than blinks and a steady cry stays lit"
   - "Poll cadence 250 ms; only audio-pts, audio-bitrate and demuxer-cache-duration every tick, the nine metadata properties every 8th tick; watchdogs receive the real interval so thresholds are unchanged"
@@ -54,7 +64,7 @@ status: complete
 
 # Quick Task 260919-foa: Level-driven activity monitor and 60 s waveform Summary
 
-**The card now glows in proportion to how loud the room is right now, and the waveform is a 60 s record of that same signal.**
+**The card now glows in proportion to how loud the room actually is — measured from decoded audio, not encoded bitrate — and the waveform is a 60 s record of that same signal.**
 
 ## What Was Built
 
@@ -66,10 +76,14 @@ status: complete
 
 4. **Settings**: `levelThreshold` (default 0.25, slider 0.05..0.6 with 11 divisions and a % label, copy in terms of "above the room's quiet level"); `fromJson` ignores the legacy `activityThreshold` key.
 
+5. **PCM tap (after hardware feedback that bitrate barely moves)**: `PcmFifo` (libc FFI, non-blocking), `PcmLevelMeter` (loudest 50 ms RMS window per tick, dBFS), `PcmLevelTap` (second silent `Player` with `ao=pcm`/`ao-pcm-file`/`s16`/mono/8 kHz, safe teardown). Provider starts a tap per live camera, samples it every tick, drops and retries it on failure/stall/URL change (20 s cooldown), and swaps the tracker between `.pcm()` and `.bitrate()` presets as the source changes. `levelSource`/`levelDb` on the state feed a "Meter" row in the details panel.
+
 ## Verification
 
 - `flutter analyze --fatal-infos` — No issues found.
-- `flutter test` — 483 tests passing (22 tracker tests, 2 new widget tests).
+- `flutter test` — 498 tests passing (25 tracker tests, 9 PCM meter tests, 4 FIFO tests through real libc on the Linux host, 2 new widget tests).
+- End-to-end with a real `mpv 0.37` binary (installed in the session): the exact tap flags produced exactly 144 000 bytes for a 9 s WAV (= 8 kHz × 2 B, headerless mono), read through `PcmFifo`; the meter reported −6 dBFS for the −6 dB-peak passage and −50 dBFS for the −50 dB tail (44 dB swing; a fixed ~3 dB offset from mpv's downmix is irrelevant to a floor-relative meter).
+- Inspected `default-arm64-v8a.jar` (libmpv-android-video-build v1.1.7): FFmpeg configure has `--disable-filters` with only `overlay`/`equalizer` re-enabled; `ao_pcm` ("RAW PCM/WAVE file writer") and `ao-pcm`/`waveheader` option strings present.
 - Rendered the card to PNG in a scratch widget test with a synthetic minute (quiet jitter, 10 s cry, short fuss): grey ambient ribbon, full-height green burst with a visible release tail, half-height fuss, halo present only on the loud card; checked in dark and light themes.
 - grep gates: `audioActivity`, `recentVariation`, `bitrateToLevel`, `activityThreshold` → 0 matches in `lib/` and `test/` (the last remains only in the settings migration comment/test).
 
@@ -80,5 +94,7 @@ status: complete
 
 ## Known Limitations
 
-- Not verified against real camera hardware in this session. The mapping is self-calibrating, so it tolerates an unknown bitrate dynamic range, but the constants (6..24 dB span, 5 min window, 0.25 default trigger) are engineering estimates to be tuned on a real nursery.
+- Not verified against real camera hardware in this session: the tap doubles RTSP sessions to the console (one per camera), which is expected to be fine (NVRs serve several viewers) but has not been confirmed on a real Protect console. If the console refuses the extra session, the tap fails, retries every 20 s, and the meter falls back to bitrate.
+- The span/window/trigger constants (30..50 dB, 5 min, 0.25) are engineering estimates to be tuned on a real nursery.
+- Windows has no FIFOs: the meter stays on the bitrate fallback there.
 - A sound sustained for longer than the 5 min window becomes the new floor by design.
