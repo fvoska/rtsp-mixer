@@ -2,7 +2,9 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:rtsp_mixer/features/cameras/models/protect_camera.dart';
 import 'package:rtsp_mixer/features/peer/services/discovery.dart';
+import 'package:rtsp_mixer/features/peer/services/peer_address_resolver.dart';
 
 import '../../support/async.dart';
 
@@ -131,5 +133,56 @@ void main() {
       );
       expect(missing, isNull);
     });
+  });
+  resolverTests();
+}
+
+void resolverTests() {
+  test('resolvePeerStreamUrl re-points the URL when the host moved', () async {
+    final beacon = DiscoveryBeacon(
+      hostId: 'moved-host',
+      hostName: () => 'Nursery',
+      httpPort: () => 45000,
+    );
+    expect(
+        await beacon.start(bindAddress: InternetAddress.loopbackIPv4, port: 0),
+        isTrue);
+    addTearDown(beacon.stop);
+    final cam = ProtectCamera.peer(
+      id: 'p',
+      hostId: 'moved-host',
+      url: 'http://10.9.9.9:47831/roomtone/v1/audio.wav?token=t',
+    );
+    final url = await resolvePeerStreamUrl(
+      cam,
+      targetPort: beacon.port!,
+      targets: () async => [InternetAddress.loopbackIPv4],
+      timeout: const Duration(seconds: 3),
+    );
+    expect(url, 'http://127.0.0.1:45000/roomtone/v1/audio.wav?token=t');
+
+    // Unchanged address → null (nothing to persist).
+    final same = ProtectCamera.peer(
+      id: 'p',
+      hostId: 'moved-host',
+      url: 'http://127.0.0.1:45000/roomtone/v1/audio.wav?token=t',
+    );
+    expect(
+      await resolvePeerStreamUrl(same,
+          targetPort: beacon.port!,
+          targets: () async => [InternetAddress.loopbackIPv4]),
+      isNull,
+    );
+
+    // Unknown host → null within the timeout, never a throw.
+    final other = ProtectCamera.peer(
+        id: 'q', hostId: 'nobody', url: 'http://1.2.3.4:1/roomtone/v1/audio.wav?token=t');
+    expect(
+      await resolvePeerStreamUrl(other,
+          targetPort: beacon.port!,
+          targets: () async => [InternetAddress.loopbackIPv4],
+          timeout: const Duration(milliseconds: 300)),
+      isNull,
+    );
   });
 }
