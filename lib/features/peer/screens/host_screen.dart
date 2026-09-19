@@ -378,15 +378,29 @@ class _LiveCard extends StatelessWidget {
                         ? 'Microphone live'
                         : 'Microphone restarting…',
                     style: theme.textTheme.titleSmall,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
                   ),
                 ),
+              ],
+            ),
+            const SizedBox(height: Spacing.xs),
+            Row(
+              children: [
                 Icon(
                   listeners > 0 ? Icons.hearing : Icons.hearing_disabled,
                   size: 18,
                   color: theme.colorScheme.onSurfaceVariant,
                 ),
                 const SizedBox(width: Spacing.xs),
-                Text(listenerCopy, style: theme.textTheme.bodySmall),
+                Expanded(
+                  child: Text(
+                    listenerCopy,
+                    style: theme.textTheme.bodySmall,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
               ],
             ),
             const SizedBox(height: Spacing.md),

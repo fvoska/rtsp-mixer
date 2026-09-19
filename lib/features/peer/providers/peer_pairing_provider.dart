@@ -202,10 +202,12 @@ class PeerPairingNotifier extends Notifier<PeerPairingState> {
     const key = 'peer_client_id';
     try {
       final storage = ref.read(storageProvider);
-      final existing = await storage.read(key);
+      // Bounded: pairing must never hang on a stalled keystore call.
+      final existing =
+          await storage.read(key).timeout(const Duration(seconds: 2));
       if (existing != null && existing.isNotEmpty) return existing;
       final fresh = generatePeerId();
-      await storage.write(key, fresh);
+      await storage.write(key, fresh).timeout(const Duration(seconds: 2));
       return fresh;
     } catch (e) {
       appLog('PAIR', 'client id storage failed (using ephemeral id): $e');

@@ -93,6 +93,14 @@ class PeerHostNotifier extends Notifier<PeerHostState> {
     return const PeerHostState();
   }
 
+  /// Callbacks from sockets and timers can fire after the container is torn
+  /// down (tests dispose mid-stream; Riverpod forbids touching a disposed
+  /// notifier). Every asynchronous state write goes through here.
+  void _publish(PeerHostState next) {
+    if (!ref.mounted) return;
+    state = next;
+  }
+
   // ---------------------------------------------------------------- config
 
   Future<void> _loadConfig() async {
@@ -196,14 +204,14 @@ class PeerHostNotifier extends Notifier<PeerHostState> {
         audio: audio.stream,
         currentLevel: () => _level,
         onListenersChanged: (n) {
-          if (n != state.listeners) state = state.copyWith(listeners: n);
+          if (n != state.listeners) _publish(state.copyWith(listeners: n));
         },
         onPairingAttempt: (ok, remote) {
-          state = state.copyWith(
+          _publish(state.copyWith(
             lastPairingNote: ok
                 ? 'Paired with a monitor at $remote'
                 : 'Wrong code entered from $remote',
-          );
+          ));
         },
       );
       final port = await server.start(
@@ -251,7 +259,7 @@ class PeerHostNotifier extends Notifier<PeerHostState> {
       _levelTimer = Timer.periodic(const Duration(milliseconds: 150), (_) {
         try {
           if (state.isRunning && (state.level - _level).abs() > 0.005) {
-            state = state.copyWith(level: _level);
+            _publish(state.copyWith(level: _level));
           }
         } catch (_) {}
       });
@@ -351,17 +359,17 @@ class PeerHostNotifier extends Notifier<PeerHostState> {
         _onPcm,
         onError: (Object e) {
           appLog('PEER_HOST', 'mic stream error: $e');
-          _scheduleMicRestart();
+          if (ref.mounted) _scheduleMicRestart();
         },
         onDone: () {
           appLog('PEER_HOST', 'mic stream ended');
-          _scheduleMicRestart();
+          if (ref.mounted) _scheduleMicRestart();
         },
         cancelOnError: true,
       );
       _micRestartAttempt = 0;
       if (state.isRunning && !state.micActive) {
-        state = state.copyWith(micActive: true);
+        _publish(state.copyWith(micActive: true));
       }
       appLog('PEER_HOST', 'Microphone capture started');
     } catch (e) {
@@ -390,8 +398,8 @@ class PeerHostNotifier extends Notifier<PeerHostState> {
   /// exponential backoff (1 s → 30 s). A monitor sees silence, its zombie
   /// watchdog reconnects, and audio resumes on the first successful retry.
   void _scheduleMicRestart() {
-    if (!state.isRunning) return;
-    if (state.micActive) state = state.copyWith(micActive: false);
+    if (!ref.mounted || !state.isRunning) return;
+    if (state.micActive) _publish(state.copyWith(micActive: false));
     if (_micRestartTimer != null) return;
     final delay = Duration(
         seconds: math.min(30, 1 << math.min(5, _micRestartAttempt)));
@@ -400,7 +408,7 @@ class PeerHostNotifier extends Notifier<PeerHostState> {
         'Restarting microphone in ${delay.inSeconds}s (attempt $_micRestartAttempt)');
     _micRestartTimer = Timer(delay, () async {
       _micRestartTimer = null;
-      if (!state.isRunning) return;
+      if (!ref.mounted || !state.isRunning) return;
       try {
         await _mic.stop();
       } catch (_) {}

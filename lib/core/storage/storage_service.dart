@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:flutter/foundation.dart' show visibleForTesting;
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:path_provider/path_provider.dart';
 
@@ -17,6 +18,15 @@ class StorageService {
   static const _installMarkerFilename = '.install_marker';
   final Map<String, String> _fallback = {};
   bool _useFallback = false;
+
+  StorageService();
+
+  /// Test-only: skip the platform keystore entirely. Widget tests have no
+  /// plugin backing the secure-storage channel, and an unanswered channel
+  /// call can hang under the fake-async clock instead of failing fast into
+  /// the in-memory fallback.
+  @visibleForTesting
+  StorageService.inMemory() : _useFallback = true;
 
   /// Single-flight guard for the fresh-install check so concurrent callers
   /// share one wipe attempt and we never re-wipe within a process.

@@ -81,7 +81,12 @@ class _PairScreenState extends ConsumerState<PairScreen> {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('Paired with "$name" — ready to monitor.')),
         );
-        context.pop();
+        // Normally pushed from the picker; a deep link (`go`) has no stack.
+        if (context.canPop()) {
+          context.pop();
+        } else {
+          context.go('/monitoring');
+        }
       }
     });
 
@@ -218,54 +223,71 @@ class _PairScreenState extends ConsumerState<PairScreen> {
 }
 
 /// Ask for the 6-digit code shown on [hostName]. Returns null on cancel.
-Future<String?> _askCode(BuildContext context, String hostName) async {
-  final controller = TextEditingController();
-  final formKey = GlobalKey<FormState>();
-  try {
-    return await showDialog<String>(
+Future<String?> _askCode(BuildContext context, String hostName) =>
+    showDialog<String>(
       context: context,
-      builder: (ctx) {
-        void submit() {
-          if (formKey.currentState!.validate()) {
-            Navigator.of(ctx).pop(normalizePairingCode(controller.text));
-          }
-        }
-
-        return AlertDialog(
-          title: Text('Pair with $hostName'),
-          content: Form(
-            key: formKey,
-            child: TextFormField(
-              controller: controller,
-              autofocus: true,
-              keyboardType: TextInputType.number,
-              textAlign: TextAlign.center,
-              style: const TextStyle(
-                fontFamily: AppTypography.mono,
-                fontSize: 24,
-                letterSpacing: 4,
-              ),
-              decoration: const InputDecoration(
-                hintText: '123 456',
-                helperText: 'The 6-digit code on the host phone\'s screen.',
-                border: OutlineInputBorder(),
-              ),
-              validator: _validateCode,
-              onFieldSubmitted: (_) => submit(),
-            ),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(ctx).pop(),
-              child: const Text('Cancel'),
-            ),
-            FilledButton(onPressed: submit, child: const Text('Pair')),
-          ],
-        );
-      },
+      builder: (_) => _CodeDialog(hostName: hostName),
     );
-  } finally {
-    controller.dispose();
+
+/// Owns its controller so the dialog's exit animation never rebuilds a
+/// text field against a disposed controller.
+class _CodeDialog extends StatefulWidget {
+  const _CodeDialog({required this.hostName});
+  final String hostName;
+
+  @override
+  State<_CodeDialog> createState() => _CodeDialogState();
+}
+
+class _CodeDialogState extends State<_CodeDialog> {
+  final _controller = TextEditingController();
+  final _formKey = GlobalKey<FormState>();
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  void _submit() {
+    if (_formKey.currentState!.validate()) {
+      Navigator.of(context).pop(normalizePairingCode(_controller.text));
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: Text('Pair with ${widget.hostName}'),
+      content: Form(
+        key: _formKey,
+        child: TextFormField(
+          controller: _controller,
+          autofocus: true,
+          keyboardType: TextInputType.number,
+          textAlign: TextAlign.center,
+          style: const TextStyle(
+            fontFamily: AppTypography.mono,
+            fontSize: 24,
+            letterSpacing: 4,
+          ),
+          decoration: const InputDecoration(
+            hintText: '123 456',
+            helperText: 'The 6-digit code on the host phone\'s screen.',
+            border: OutlineInputBorder(),
+          ),
+          validator: _validateCode,
+          onFieldSubmitted: (_) => _submit(),
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: const Text('Cancel'),
+        ),
+        FilledButton(onPressed: _submit, child: const Text('Pair')),
+      ],
+    );
   }
 }
 
