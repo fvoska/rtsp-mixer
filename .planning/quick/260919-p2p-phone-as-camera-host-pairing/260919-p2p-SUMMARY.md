@@ -41,9 +41,15 @@ as a never-ending WAV (`RIFF`/`data` sizes `0xFFFFFFFF`, which FFmpeg's demuxer
 reads as "streaming") at `http://<host>:47831/roomtone/v1/audio.wav?token=…`.
 That URL is handed to the *unchanged* media_kit pipeline on the monitor:
 reconnect supervisor, zombie/drift watchdogs, alert policy, mix persistence and
-session history all apply to a phone camera exactly as to a UniFi one. A
-`/status` side channel carries the host's own RMS level because the monitor's
-bitrate→level proxy is blind on a constant-bitrate PCM stream.
+session history all apply to a phone camera exactly as to a UniFi one —
+including the PCM-tap loudness meter from quick task 260919-foa, which opens a
+second connection to the host and meters the decoded stream like any other
+camera. A `/status` side channel additionally carries the host's own dBFS
+reading (`LevelSource.host`); it is the level *fallback* for phone cameras when
+the tap is not delivering, because the bitrate proxy is blind on a
+constant-bitrate PCM stream. The host counts distinct monitors, not
+connections, so the tap's second connection does not show as a second
+listener.
 
 The audio endpoint writes to a **detached socket** rather than `HttpResponse`:
 `dart:io` defers write errors until `close()`, so a monitor that vanished
@@ -104,6 +110,10 @@ manual camera's URL prints `host:port` for a phone — the URL carries the token
 
 ## Decisions worth remembering
 
+- **Merged with main's PCM-tap meter (260919-foa).** The tap is primary for
+  phone cameras too (same calibration, same 0..1 scale as every other card);
+  the host-reported dBFS is only the fallback. Cost: one extra HTTP
+  connection per monitor to the host phone, ~256 kbit/s on the LAN.
 - **Kotlin Gradle plugin 2.1.0 → 2.2.20.** `record_android` and
   `mobile_scanner` build against Kotlin 2.2+/2.3 toolchains; 2.2.20 is the
   newest KGP officially paired with the project's AGP 8.11.1 / Gradle 8.13.
@@ -117,7 +127,7 @@ manual camera's URL prints `host:port` for a phone — the URL carries the token
 
 ## Verification
 
-`flutter analyze --fatal-infos` clean; 535 tests green (441 → 535), including
+`flutter analyze --fatal-infos` clean; 563 tests green after merging main, including
 loopback tests of the HTTP server (pairing, throttle, auth, streaming header +
 PCM, listener bookkeeping, stop), the UDP beacon/scanner/resolver, the pairing
 client, the host notifier (start/stop, pairing + code rotation + revoke, level

@@ -14,7 +14,7 @@ void main() {
       fetch: (url, _) async {
         calls++;
         if (fail) throw Exception('down');
-        return {'level': level, 'listeners': 2};
+        return {'level': level, 'levelDb': -20.0, 'listeners': 2};
       },
     );
     addTearDown(poller.stopAll);
@@ -22,11 +22,13 @@ void main() {
     poller.start('cam', 'http://h/roomtone/v1/status?token=t');
     await waitFor(() => poller.levelFor('cam') == 0.3, reason: 'first poll lands');
     expect(poller.listenersFor('cam'), 2);
+    expect(poller.dbFor('cam'), -20.0);
     level = 0.9;
     await waitFor(() => poller.levelFor('cam') == 0.9, reason: 'level updates');
     fail = true;
     await waitFor(() => poller.levelFor('cam') == null,
         reason: 'level goes stale when polls fail');
+    expect(poller.dbFor('cam'), isNull);
     expect(calls, greaterThan(2));
     poller.stop('cam');
     final after = calls;

@@ -59,6 +59,15 @@ class PeerLevelPoller {
     return e.level;
   }
 
+  /// Latest host-measured dBFS, or null when unknown/stale (hosts from an
+  /// older build report only the 0..1 level).
+  double? dbFor(String cameraId) {
+    final e = _entries[cameraId];
+    if (e == null || e.lastOk == null || e.levelDb == null) return null;
+    if (DateTime.now().difference(e.lastOk!) > staleAfter) return null;
+    return e.levelDb;
+  }
+
   /// Latest listener count reported by the host, if known.
   int? listenersFor(String cameraId) => _entries[cameraId]?.listeners;
 
@@ -73,6 +82,8 @@ class PeerLevelPoller {
         entry.level = level.toDouble().clamp(0.0, 1.0);
         entry.lastOk = DateTime.now();
       }
+      final db = json['levelDb'];
+      entry.levelDb = db is num && db.isFinite ? db.toDouble() : null;
       final listeners = json['listeners'];
       if (listeners is int) entry.listeners = listeners;
     } catch (e) {
@@ -109,6 +120,7 @@ class _Entry {
   final String url;
   late Timer timer;
   double level = 0.0;
+  double? levelDb;
   int? listeners;
   DateTime? lastOk;
   bool inFlight = false;

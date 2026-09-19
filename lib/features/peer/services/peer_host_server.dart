@@ -29,6 +29,7 @@ class PeerHostServer {
     required this.issueToken,
     required this.audio,
     required this.currentLevel,
+    this.currentLevelDb,
     this.onListenersChanged,
     this.onPairingAttempt,
     PairingGate? gate,
@@ -51,6 +52,12 @@ class PeerHostServer {
   /// Broadcast stream of PCM16 chunks in the [kPeerSampleRate] format.
   final Stream<Uint8List> audio;
   final double Function() currentLevel;
+
+  /// Raw dBFS behind [currentLevel], for monitors that want to run their
+  /// own noise-floor calibration on it. Optional.
+  final double Function()? currentLevelDb;
+
+  /// Reports the number of distinct monitors (see [listenerCount]).
   final void Function(int listeners)? onListenersChanged;
 
   /// `(success, remoteAddress)` — lets the host UI show "wrong code from
@@ -68,7 +75,14 @@ class PeerHostServer {
 
   int? get port => _server?.port;
   bool get isRunning => _server != null;
-  int get listenerCount => _listeners.length;
+
+  /// Distinct monitors connected, not connections: a monitor opens the
+  /// stream twice (once to play it, once for its PCM level tap), and the
+  /// host screen should say "1 monitor listening" for that.
+  int get listenerCount => _listeners.map((l) => l.remote).toSet().length;
+
+  /// Raw open audio connections (tests, diagnostics).
+  int get connectionCount => _listeners.length;
   DateTime? get startedAt => _startedAt;
 
   /// Bind on [bindAddress] (default: all IPv4) trying [preferredPort] first
@@ -120,7 +134,7 @@ class PeerHostServer {
 
   void _notifyListeners() {
     try {
-      onListenersChanged?.call(_listeners.length);
+      onListenersChanged?.call(listenerCount);
     } catch (e) {
       appLog('PEER_HOST', 'onListenersChanged threw (ignored): $e');
     }
@@ -183,10 +197,18 @@ class PeerHostServer {
     } catch (_) {
       level = 0.0;
     }
+    double? levelDb;
+    try {
+      levelDb = currentLevelDb?.call();
+      if (levelDb != null && !levelDb.isFinite) levelDb = null;
+    } catch (_) {
+      levelDb = null;
+    }
     final started = _startedAt;
     return {
       'level': level.clamp(0.0, 1.0),
-      'listeners': _listeners.length,
+      'levelDb': ?levelDb,
+      'listeners': listenerCount,
       'uptimeSeconds':
           started == null ? 0 : DateTime.now().difference(started).inSeconds,
       'name': hostName(),
@@ -289,7 +311,8 @@ class PeerHostServer {
     );
     _listeners.add(listener);
     _notifyListeners();
-    appLog('PEER_HOST', 'listener connected from $remote (${_listeners.length})');
+    appLog('PEER_HOST',
+        'listener connected from $remote (${_listeners.length} connections, $listenerCount monitors)');
     try {
       socket.add(wavStreamHeader());
     } catch (e) {

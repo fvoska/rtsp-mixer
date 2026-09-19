@@ -16,6 +16,8 @@ import '../../peer/helpers/peer_urls.dart';
 import '../../peer/services/peer_address_resolver.dart';
 import '../../peer/services/peer_level_poller.dart';
 import '../helpers/audio_level_meter.dart';
+import '../services/pcm_fifo.dart';
+import '../services/pcm_level_tap.dart';
 import '../helpers/rtsp_url.dart';
 import '../helpers/session_status.dart';
 import '../helpers/stream_candidates.dart';
@@ -41,12 +43,58 @@ class AudioPlayerNotifier extends AsyncNotifier<MonitoringState> {
   final List<StreamSubscription<dynamic>> _subscriptions = [];
   Timer? _levelPollTimer;
   final Map<String, double> _lastAudioPts = {};
+
+  /// Per-camera loudness trackers. Lifecycle mirrors [_lastAudioPts]
+  /// exactly: created lazily on the first poll of a live stream, dropped on
+  /// stop / dispose / camera removal / successful reconnect so a new stream
+  /// always calibrates from scratch.
+  final Map<String, AudioLevelTracker> _levelTrackers = {};
+
+  /// Which signal each camera's tracker is currently fed from. A change of
+  /// source swaps in a fresh tracker with that source's span preset.
+  final Map<String, LevelSource> _levelSources = {};
+
+  /// Per-camera PCM taps (see [PcmLevelTap]) — the real loudness meter —
+  /// and the time of each camera's last tap start, for the retry cooldown.
+  /// Same lifecycle as [_lastAudioPts]. A tap that fails, stalls, or never
+  /// delivers is dropped and recreated after [_tapRetryCooldown]; while no
+  /// tap is delivering, the level falls back to the bitrate proxy.
+  final Map<String, PcmLevelTap> _levelTaps = {};
+  final Map<String, DateTime> _lastTapAttempt = {};
+
+  /// Minimum gap between tap start attempts per camera, so a console that
+  /// refuses the extra session is not hammered all night.
+  static const _tapRetryCooldown = Duration(seconds: 20);
+
+  /// A tap that has produced no PCM this long after start is given up on.
+  static const _tapOpenDeadline = Duration(seconds: 25);
+
+  /// A tap that delivered PCM but has gone quiet this long is restarted.
+  static const _tapStaleAfter = Duration(seconds: 10);
+
+  /// PCM younger than this counts as the live level source; older and the
+  /// tick falls back to bitrate rather than freezing the meter.
+  static const _tapFreshWithin = Duration(seconds: 2);
+
+  /// Poll tick counter; the slow metadata reads run every
+  /// [_metadataEveryNthTick] ticks.
+  int _pollTick = 0;
+
+  /// Re-entrancy guard for [_pollAudioLevels]: the body awaits property
+  /// reads, and the periodic timer does not wait for the previous tick. If
+  /// a tick ever overruns the 250 ms cadence (mpv busy, device throttled),
+  /// the next one is skipped rather than racing it for the state — two
+  /// overlapping ticks would each append a sample to the same history and
+  /// the last writer would drop the other's.
+  bool _polling = false;
   String _lastNotificationText = '';
   String _lastNotificationTitle = '';
 
-  /// Level side-channel for paired phone cameras: their PCM stream has a
-  /// constant bitrate, so the bitrate→level proxy is blind and the host's
-  /// own RMS reading is polled instead. See [PeerLevelPoller].
+  /// Level side-channel for paired phone cameras. The PCM tap is the
+  /// primary meter for them as for every camera; when it is not delivering
+  /// (unsupported platform, tap failed) the bitrate proxy is blind on their
+  /// constant-bitrate PCM stream, so the phone's own dBFS reading, polled
+  /// from its status endpoint, is the fallback. See [PeerLevelPoller].
   final PeerLevelPoller _peerLevels = PeerLevelPoller();
 
   /// Serializes lifecycle operations (start / stop / settings-driven restart)
@@ -166,6 +214,9 @@ class AudioPlayerNotifier extends AsyncNotifier<MonitoringState> {
       }
       _players.clear();
       _lastAudioPts.clear();
+      _levelTrackers.clear();
+      _levelSources.clear();
+      _disposeAllTaps('provider disposed');
     });
 
     // Auto-restart streams when RTSP or audio buffer settings change.
@@ -908,7 +959,8 @@ class AudioPlayerNotifier extends AsyncNotifier<MonitoringState> {
     // Update foreground notification with camera status
     await _refreshNotification();
 
-    // Start polling audio-pts to detect silence / estimate activity.
+    // Start polling audio-pts / audio-bitrate for the level meter, silence
+    // detection and the watchdogs.
     _startLevelPolling();
 
     // RELY-01 D-03 trigger c: subscribe to connectivity events for WiFi reconnect.
@@ -919,23 +971,52 @@ class AudioPlayerNotifier extends AsyncNotifier<MonitoringState> {
     }
   }
 
-  static const _pollInterval = Duration(milliseconds: 500);
+  /// Level meter cadence (4 Hz). Every tick reads `audio-pts`,
+  /// `audio-bitrate` and `demuxer-cache-duration` — three synchronous
+  /// property reads per camera. The nine stream-metadata properties only
+  /// change on (re)open, so they are read every [_metadataEveryNthTick]
+  /// ticks (2 s) to keep the fast path cheap enough to run all night.
+  static const _pollInterval = kLevelPollInterval;
+  static const _metadataEveryNthTick = 8;
 
   void _startLevelPolling() {
     _levelPollTimer?.cancel();
+    _pollTick = 0;
     _levelPollTimer = Timer.periodic(_pollInterval, (_) => _pollAudioLevels());
   }
 
   Future<void> _pollAudioLevels() async {
+    if (_polling) return;
+    _polling = true;
+    try {
+      await _pollAudioLevelsOnce();
+    } catch (e) {
+      // Nothing in here may kill the timer: log and let the next tick run.
+      appLog('AUDIO', 'level poll error (non-fatal): $e');
+    } finally {
+      _polling = false;
+    }
+  }
+
+  Future<void> _pollAudioLevelsOnce() async {
     final current = state.value;
     if (current == null || current.cameras.isEmpty) return;
 
     var changed = false;
     var updated = current;
+    _pollTick++;
+    final readMetadata = _pollTick % _metadataEveryNthTick == 0;
 
     for (int i = 0; i < updated.cameras.length; i++) {
       final cam = updated.cameras[i];
-      if (!cam.isLive) continue;
+      if (!cam.isLive) {
+        // A tap has nothing to meter while its stream is down; drop it so
+        // it does not sit blocked on a full pipe until the reconnect.
+        if (_levelTaps.containsKey(cam.cameraId)) {
+          _disposeTap(cam.cameraId, 'camera not live');
+        }
+        continue;
+      }
 
       final player = _players[cam.cameraId];
       if (player == null) continue;
@@ -961,11 +1042,10 @@ class AudioPlayerNotifier extends AsyncNotifier<MonitoringState> {
           appLog('ZOMBIE', 'pts feed error (non-fatal): $e');
         }
 
-        // Loudness proxy: encoded VBR AAC bitrate (bits/sec). Read here —
-        // not in the metadata block below — because it now drives the level
-        // rather than just debug info. This FFmpeg build has no audio
-        // analysis filters, so encoded bitrate is the only loudness signal
-        // available without touching lavfi (CLAUDE.md hard rule).
+        // Loudness proxy: encoded VBR AAC bitrate (bits/sec). This FFmpeg
+        // build has no audio analysis filters, so encoded bitrate is the
+        // only loudness signal available without touching lavfi (CLAUDE.md
+        // hard rule). The tracker turns it into a noise-floor-relative level.
         final audioBitrate =
             double.tryParse(await _tryGetProperty(np, 'audio-bitrate') ?? '');
         // RELY-03: feed watchdog with bitrate>0 positive signal.
@@ -977,70 +1057,100 @@ class AudioPlayerNotifier extends AsyncNotifier<MonitoringState> {
           appLog('ZOMBIE', 'bitrate feed error (non-fatal): $e');
         }
 
-        // Level: absolute pseudo-SPL on a fixed log scale. PTS flow keeps
-        // its silence/zombie role unchanged — no flow means level 0. When
-        // the stream flows but mpv hasn't published a bitrate yet (~1 s
-        // after open), carry the previous level so a live stream doesn't
-        // flash as silent.
-        final double level;
-        if (!flowing) {
-          level = 0.0;
-        } else if (cam.isPeer) {
-          // Constant-bitrate PCM: the phone reports its own microphone
-          // level. A stale/failed poll keeps the previous reading.
-          level = _peerLevels.levelFor(cam.cameraId) ?? cam.audioLevel;
-        } else if (audioBitrate != null && audioBitrate > 0) {
-          level = bitrateToLevel(audioBitrate);
+        // Level: how far above the room's quiet floor the stream is right
+        // now, smoothed (see AudioLevelTracker). The reading comes from the
+        // PCM tap when it is delivering (real dBFS); otherwise, for a paired
+        // phone, from the dBFS the phone measures on its own microphone
+        // (its PCM stream has a constant bitrate, so the proxy would read
+        // flat); otherwise from the bitrate proxy. PTS flow keeps its
+        // silence/zombie role — no flow decays the level to 0; flowing
+        // without a reading this tick holds the previous level so a live
+        // stream doesn't flash as silent. None of this can throw, but it
+        // sits inside this try anyway.
+        final tapDb = _sampleTap(cam);
+        final tap = _levelTaps[cam.cameraId];
+        final tapFresh = tap != null &&
+            tap.hasDelivered &&
+            tap.sinceData <= _tapFreshWithin;
+        final peerDb = cam.isPeer ? _peerLevels.dbFor(cam.cameraId) : null;
+        final LevelSource source;
+        final double? db;
+        if (tapFresh) {
+          source = LevelSource.pcm;
+          db = tapDb;
+        } else if (peerDb != null) {
+          source = LevelSource.host;
+          db = peerDb;
         } else {
-          level = cam.audioLevel;
+          source = LevelSource.bitrate;
+          db = bitrateToDb(audioBitrate);
         }
+        if (_levelSources[cam.cameraId] != source) {
+          // Different signal, different scale: start calibration afresh.
+          // The host's reading is dBFS too, so it shares the PCM preset.
+          _levelSources[cam.cameraId] = source;
+          _levelTrackers[cam.cameraId] = source == LevelSource.bitrate
+              ? AudioLevelTracker.bitrate()
+              : AudioLevelTracker.pcm();
+          appLog('LEVEL', '${cam.cameraName}: level source → ${source.name}');
+        }
+        final tracker = _levelTrackers[cam.cameraId]!;
+        final level = tracker.update(
+          db: db,
+          flowing: flowing,
+          dtSeconds: _pollInterval.inMilliseconds / 1000.0,
+        );
 
-        // Activity: peak-to-trough variation of the rolling history (~5 s).
-        // No peak-hold decay — the sliding window IS the decay (a spike
-        // ages out of the border after ~5 s).
+        // The waveform history is the SAME series the border shows: one
+        // sample of the display level per tick, 60 s deep.
         final newHistory = appendLevel(cam.levelHistory, level);
-        final activity = recentVariation(newHistory);
 
         final newSilence = !flowing
             ? cam.silenceDuration + _pollInterval.inMilliseconds / 1000.0
             : 0.0;
 
-        // Poll mpv properties for stream metadata (track events are sparse for RTSP).
-        final audioCodec = await _tryGetProperty(np, 'audio-codec-name');
-        final videoCodec = await _tryGetProperty(np, 'video-codec-name');
-        final audioFormat = await _tryGetProperty(np, 'audio-params/format');
-        final audioSampleRate = int.tryParse(await _tryGetProperty(np, 'audio-params/samplerate') ?? '');
-        final audioChannelCount = int.tryParse(await _tryGetProperty(np, 'audio-params/channel-count') ?? '');
-        final audioChannels = await _tryGetProperty(np, 'audio-params/hr-channels');
-        final width = int.tryParse(await _tryGetProperty(np, 'video-params/w') ?? '');
-        final height = int.tryParse(await _tryGetProperty(np, 'video-params/h') ?? '');
-        final fps = double.tryParse(await _tryGetProperty(np, 'container-fps') ?? '');
-        // audio-bitrate is read above (it drives the level now).
-        final videoBitrate = double.tryParse(await _tryGetProperty(np, 'video-bitrate') ?? '');
+        // Stream metadata (track events are sparse for RTSP). Slow path:
+        // only every Nth tick. The audio bitrate is refreshed every tick
+        // since it was read above anyway and the details panel shows it.
+        StreamInfo newInfo;
+        if (readMetadata) {
+          final audioCodec = await _tryGetProperty(np, 'audio-codec-name');
+          final videoCodec = await _tryGetProperty(np, 'video-codec-name');
+          final audioFormat = await _tryGetProperty(np, 'audio-params/format');
+          final audioSampleRate = int.tryParse(await _tryGetProperty(np, 'audio-params/samplerate') ?? '');
+          final audioChannelCount = int.tryParse(await _tryGetProperty(np, 'audio-params/channel-count') ?? '');
+          final audioChannels = await _tryGetProperty(np, 'audio-params/hr-channels');
+          final width = int.tryParse(await _tryGetProperty(np, 'video-params/w') ?? '');
+          final height = int.tryParse(await _tryGetProperty(np, 'video-params/h') ?? '');
+          final fps = double.tryParse(await _tryGetProperty(np, 'container-fps') ?? '');
+          final videoBitrate = double.tryParse(await _tryGetProperty(np, 'video-bitrate') ?? '');
 
-        final newInfo = cam.streamInfo.merge(
-          audioCodec: audioCodec,
-          videoCodec: videoCodec,
-          sampleRate: audioSampleRate,
-          channels: audioChannels ?? (audioChannelCount != null ? '${audioChannelCount}ch' : null),
-          audioBitrate: audioBitrate?.round(),
-          videoBitrate: videoBitrate?.round(),
-          width: width,
-          height: height,
-          fps: fps,
-          audioFormat: audioFormat,
-        );
+          newInfo = cam.streamInfo.merge(
+            audioCodec: audioCodec,
+            videoCodec: videoCodec,
+            sampleRate: audioSampleRate,
+            channels: audioChannels ?? (audioChannelCount != null ? '${audioChannelCount}ch' : null),
+            audioBitrate: audioBitrate?.round(),
+            videoBitrate: videoBitrate?.round(),
+            width: width,
+            height: height,
+            fps: fps,
+            audioFormat: audioFormat,
+          );
+        } else {
+          newInfo = cam.streamInfo.merge(audioBitrate: audioBitrate?.round());
+        }
 
         // Always emit for a live camera: appending a history sample makes
-        // the state unequal every tick anyway, so the old change-gating on
-        // audioLevel/activity/silence is dead logic (2 emissions/s for 2
-        // cameras is negligible; the notification update below keeps its
-        // own text-diff guard, so no notification churn).
+        // the state unequal every tick anyway (4 emissions/s per camera is
+        // negligible; the notification update below keeps its own text-diff
+        // guard, so no notification churn).
         updated = updated.copyWithCamera(
           i,
           cam.copyWith(
             audioLevel: level,
-            audioActivity: activity,
+            levelSource: db == null ? LevelSource.none : source,
+            levelDb: db,
             silenceDuration: newSilence,
             streamInfo: newInfo,
             levelHistory: newHistory,
@@ -1132,6 +1242,81 @@ class AudioPlayerNotifier extends AsyncNotifier<MonitoringState> {
     } catch (e) {
       appLog('FGS', 'Failed to update notification: $e');
     }
+  }
+
+  /// Read this tick's PCM loudness for [cam], managing the tap's lifecycle
+  /// on the way: a tap for a stale URL, a failed tap, one that never
+  /// delivered within [_tapOpenDeadline], or one that stalled for
+  /// [_tapStaleAfter] is dropped (and recreated after the cooldown); a
+  /// missing tap is started. Returns null whenever there is no fresh
+  /// reading. Never throws.
+  double? _sampleTap(CameraAudioState cam) {
+    if (!PcmFifo.isSupported) return null;
+    final id = cam.cameraId;
+    final url = cam.activeStreamUrl;
+    try {
+      var tap = _levelTaps[id];
+      if (tap != null) {
+        String? drop;
+        if (tap.url != url) {
+          drop = 'stream URL changed';
+        } else if (tap.isFailed) {
+          drop = tap.failure;
+        } else if (!tap.hasDelivered &&
+            DateTime.now().difference(tap.startedAt) > _tapOpenDeadline) {
+          drop = 'no PCM within ${_tapOpenDeadline.inSeconds}s of start';
+        } else if (tap.hasDelivered && tap.sinceData > _tapStaleAfter) {
+          drop = 'PCM stalled for ${tap.sinceData.inSeconds}s';
+        }
+        if (drop != null) {
+          _disposeTap(id, drop);
+          tap = null;
+        }
+      }
+      if (tap == null) {
+        if (url == null || url.isEmpty) return null;
+        final last = _lastTapAttempt[id];
+        if (last != null &&
+            DateTime.now().difference(last) < _tapRetryCooldown) {
+          return null;
+        }
+        _lastTapAttempt[id] = DateTime.now();
+        final fresh = PcmLevelTap(
+          cameraId: id,
+          cameraName: cam.cameraName,
+          url: url,
+          tune: _applyPlaybackTuning,
+        );
+        _levelTaps[id] = fresh;
+        appLog('PCMTAP', '${cam.cameraName}: starting level tap');
+        // Fire and forget: sample() returns null until PCM arrives, and
+        // start() reports its own failure through tap.failure.
+        unawaited(fresh.start());
+        return null;
+      }
+      return tap.sample();
+    } catch (e) {
+      appLog('PCMTAP', '${cam.cameraName}: tap sampling error (non-fatal): $e');
+      return null;
+    }
+  }
+
+  /// Drop [cameraId]'s tap, if any, disposing it in the background. Never
+  /// throws.
+  void _disposeTap(String cameraId, String? reason) {
+    final tap = _levelTaps.remove(cameraId);
+    if (tap == null) return;
+    appLog('PCMTAP', '${tap.cameraName}: dropping level tap — $reason');
+    unawaited(tap.dispose().catchError((Object e) {
+      appLog('PCMTAP', '${tap.cameraName}: tap dispose error: $e');
+    }));
+  }
+
+  void _disposeAllTaps(String reason) {
+    for (final id in _levelTaps.keys.toList()) {
+      _disposeTap(id, reason);
+    }
+    _lastTapAttempt.clear();
   }
 
   Future<String?> _tryGetProperty(NativePlayer np, String name) async {
@@ -1357,12 +1542,12 @@ class AudioPlayerNotifier extends AsyncNotifier<MonitoringState> {
       idx,
       cam.copyWith(
         connectionStatus: newStatus,
-        // On a successful reconnect, clear the level history so a stale
-        // pre-outage waveform doesn't misrepresent the fresh stream, and
-        // zero the variation-based activity with it. Passing null keeps
-        // the existing values for the reconnecting case.
+        // On a successful reconnect, clear the level history and the level
+        // so a stale pre-outage waveform doesn't misrepresent the fresh
+        // stream. Passing null keeps the existing values for the
+        // reconnecting case.
         levelHistory: isNowPlaying ? const <double>[] : null,
-        audioActivity: isNowPlaying ? 0.0 : null,
+        audioLevel: isNowPlaying ? 0.0 : null,
       ),
     ));
     // RELY-03: a successful reconnect zeroes the watchdog so the next
@@ -1382,6 +1567,13 @@ class AudioPlayerNotifier extends AsyncNotifier<MonitoringState> {
       // poll would otherwise compute a large negative ptsDelta against the
       // previous stream's PTS and miscount one tick of `silenceDuration`.
       _lastAudioPts.remove(cameraId);
+      // A fresh stream gets a fresh noise-floor calibration and a fresh
+      // tap (the URL may have changed and the old tap most likely died
+      // with the outage anyway).
+      _levelTrackers.remove(cameraId);
+      _levelSources.remove(cameraId);
+      _disposeTap(cameraId, 'stream reconnected');
+      _lastTapAttempt.remove(cameraId);
     }
     // RELY-01 D-04: alert-timer lifecycle on supervisor-driven status changes.
     final cameraName = _findCameraName(cameraId) ?? cameraId;
@@ -1717,6 +1909,9 @@ class AudioPlayerNotifier extends AsyncNotifier<MonitoringState> {
       appLog('DRIFT', 'resetAll threw during stopMonitoring: $e');
     }
     _lastAudioPts.clear();
+    _levelTrackers.clear();
+    _levelSources.clear();
+    _disposeAllTaps('monitoring stopped');
     _lastNotificationText = '';
     _lastNotificationTitle = '';
     for (final sub in _subscriptions) {
@@ -1832,6 +2027,9 @@ class AudioPlayerNotifier extends AsyncNotifier<MonitoringState> {
     final player = _players.remove(cameraId);
     _videoControllers.remove(cameraId);
     _lastAudioPts.remove(cameraId);
+    _levelTrackers.remove(cameraId);
+    _levelSources.remove(cameraId);
+    _disposeTap(cameraId, 'camera removed');
     if (player != null) {
       try {
         await player.stop();

@@ -13,7 +13,7 @@ void main() {
       cameraId: 'c',
       cameraName: 'Nursery',
       connectionStatus: CameraConnectionStatus.playing,
-      audioActivity: 0.8,
+      audioLevel: 0.8,
       levelHistory: [0.2, 0.7, 0.4],
       availableQualities: {'high': 'a', 'low': 'b'},
       activeQuality: 'high',

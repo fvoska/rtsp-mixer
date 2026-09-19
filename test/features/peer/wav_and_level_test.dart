@@ -35,6 +35,15 @@ void main() {
     });
   });
 
+  group('pcm16Dbfs', () {
+    test('silence clamps at the floor, full-scale sine is about -3 dBFS', () {
+      expect(pcm16Dbfs(Uint8List(3200)), kPeerSilenceDbfs);
+      expect(pcm16Dbfs(_sine(1.0)), closeTo(-3.0, 0.2));
+      expect(pcm16Dbfs(_sine(0.1)), closeTo(-23.0, 0.2));
+      expect(pcm16Dbfs(Uint8List(0)), kPeerSilenceDbfs);
+    });
+  });
+
   group('pcm16Level', () {
     test('silence is 0 and full-scale is 1', () {
       expect(pcm16Level(Uint8List(3200)), 0.0);

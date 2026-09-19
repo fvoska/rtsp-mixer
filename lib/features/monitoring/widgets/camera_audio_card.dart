@@ -14,21 +14,31 @@ import '../helpers/audio_level_meter.dart';
 import '../models/player_state.dart';
 import '../providers/audio_player_provider.dart';
 
-/// Normalised, sanitised activity intensity in `[0.15, 0.9]`, or null when the
-/// input cannot be trusted.
+/// How strongly the card should glow for a sound [level] against the user's
+/// [threshold]: a sanitised intensity in `[0.15, 1.0]`, or null when the card
+/// should not glow at all (level at or below the threshold) or when the input
+/// cannot be trusted.
 ///
-/// `audioActivity` is written by a twice-a-second poll of mpv properties. A
-/// NaN, an infinity, or a threshold of exactly 1.0 would produce an invalid
-/// `BoxShadow` and throw out of `build` — during an overnight session, with
-/// audio playing. Per CLAUDE.md a silently haloless card is the correct
-/// degraded mode; an exception is not.
-double? _activityIntensity(double activity, double threshold) {
+/// The level is the tracker's smoothed, noise-floor-relative loudness, so the
+/// border is a direct function of how loud the room is right now: it starts
+/// to show as the level crosses the threshold and reaches full strength at
+/// the top of the meter. The ramp is a smoothstep so the onset eases in
+/// instead of snapping on at the threshold.
+///
+/// `audioLevel` is written four times a second by a poll of mpv properties.
+/// A NaN, an infinity, or a threshold of exactly 1.0 would produce an
+/// invalid `BoxShadow` and throw out of `build` — during an overnight
+/// session, with audio playing. Per CLAUDE.md a silently haloless card is
+/// the correct degraded mode; an exception is not.
+double? _levelIntensity(double level, double threshold) {
   try {
-    if (!activity.isFinite || !threshold.isFinite) return null;
+    if (!level.isFinite || !threshold.isFinite) return null;
     if (threshold >= 1.0) return null;
-    final normalised = (activity - threshold) / (1.0 - threshold);
-    if (!normalised.isFinite) return null;
-    return normalised.clamp(0.15, 0.9);
+    final normalised = (level - threshold) / (1.0 - threshold);
+    if (!normalised.isFinite || normalised <= 0.0) return null;
+    final t = normalised.clamp(0.0, 1.0);
+    final eased = t * t * (3.0 - 2.0 * t);
+    return 0.15 + 0.85 * eased;
   } catch (e) {
     _warnHaloOnce(e);
     return null;
@@ -56,7 +66,9 @@ class CameraAudioCard extends ConsumerStatefulWidget {
   final int cameraIndex;
   final bool showVideoPreview;
   final bool showDebugInfo;
-  final double activityThreshold;
+
+  /// Sound level (0..1, noise-floor-relative) above which the card glows.
+  final double levelThreshold;
   final bool showSourceBadge;
   final VoidCallback? onToggleVideo;
   final VoidCallback? onRemove;
@@ -67,7 +79,7 @@ class CameraAudioCard extends ConsumerStatefulWidget {
     required this.cameraIndex,
     this.showVideoPreview = false,
     this.showDebugInfo = false,
-    this.activityThreshold = 0.05,
+    this.levelThreshold = 0.25,
     this.showSourceBadge = false,
     this.onToggleVideo,
     this.onRemove,
@@ -164,14 +176,14 @@ class _CameraAudioCardState extends ConsumerState<CameraAudioCard> {
 
     final videoCtrl = widget.showVideoPreview ? _videoController : null;
 
-    // Google Meet-style highlight on recent VARIATION in pseudo-SPL
-    // (peak-to-trough of the level history over ~5 s). A baby crying means
-    // big swings, so the card lights up on change bursts — not on steady
-    // loudness and not on deviation-from-baseline.
-    final hasActivity = cs.isLive && cs.audioActivity > widget.activityThreshold;
-    final intensity = hasActivity
-        ? _activityIntensity(cs.audioActivity, widget.activityThreshold)
-        : null;
+    // The card glows with the CURRENT sound level: the same smoothed,
+    // noise-floor-relative number the level bar and the waveform draw. The
+    // level rises instantly and releases over ~1 s, and the AnimatedContainer
+    // tweens between the 250 ms samples, so a cry brightens the card as it
+    // starts and the glow fades as the room settles — no flicker, no
+    // switching off mid-cry.
+    final intensity =
+        cs.isLive ? _levelIntensity(cs.audioLevel, widget.levelThreshold) : null;
     final borderColor =
         intensity != null ? status.live.withValues(alpha: intensity) : null;
 
@@ -179,6 +191,9 @@ class _CameraAudioCardState extends ConsumerState<CameraAudioCard> {
       duration: const Duration(milliseconds: 300),
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(Radii.card),
+        // Width stays constant: Container pads its child by the border, so a
+        // width that followed the level would nudge the card's layout every
+        // tick. Alpha and the halo carry the level instead.
         border: Border.all(
           color: borderColor ?? Colors.transparent,
           width: 2.0,
@@ -358,7 +373,10 @@ class _CameraAudioCardState extends ConsumerState<CameraAudioCard> {
                 silenceDuration: cs.silenceDuration,
               ),
               const SizedBox(height: Spacing.sm),
-              _WaveformChart(history: cs.levelHistory),
+              _WaveformChart(
+                history: cs.levelHistory,
+                threshold: widget.levelThreshold,
+              ),
             ],
 
             // Quality selector + stream URL debug info
@@ -808,27 +826,42 @@ class _AudioLevelIndicator extends StatelessWidget {
   }
 }
 
-/// Audacity-style mirrored waveform of the rolling pseudo-SPL history
-/// (10 s / [kLevelHistoryCapacity] samples). Newest sample is always the
-/// rightmost bar, oldest left, matching a scrolling recorder. Wrapped in a
-/// [RepaintBoundary] so its twice-a-second repaints don't invalidate the
-/// rest of the card.
+/// Mirrored waveform of the last [kLevelHistorySeconds] seconds of the
+/// level series — the very same samples that drive the card border, so the
+/// chart is a literal record of when and how strongly the card glowed.
+///
+/// Newest sample is always the rightmost slot, oldest left, like a scrolling
+/// recorder. Samples above the trigger threshold are drawn in the live
+/// colour — green means "the card was glowing" — the rest in a muted surface
+/// tint so ambient noise reads as background, and faint mirrored guide lines
+/// mark the threshold itself so a parent can see why the card lit (and tune
+/// the trigger in Settings). Wrapped in a [RepaintBoundary] so its
+/// four-times-a-second repaints don't invalidate the rest of the card.
 class _WaveformChart extends StatelessWidget {
   final List<double> history;
+  final double threshold;
 
-  const _WaveformChart({required this.history});
+  const _WaveformChart({required this.history, required this.threshold});
 
   @override
   Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    final status = context.statusColors;
     return RepaintBoundary(
       child: CustomPaint(
         key: const ValueKey('waveform-chart'),
-        size: const Size(double.infinity, 40),
+        size: const Size(double.infinity, 48),
         painter: _WaveformPainter(
           history: history,
-          centerLineColor: scheme.onSurface.withValues(alpha: 0.15),
-          barColor: scheme.primary.withValues(alpha: 0.8),
+          threshold: threshold,
+          guideColor: scheme.onSurface.withValues(alpha: 0.15),
+          quietColor: scheme.onSurface.withValues(alpha: 0.35),
+          loudColor: status.live,
+          captionStyle: AppTypography.numericSmall.copyWith(
+            fontSize: 10,
+            color: scheme.onSurface.withValues(alpha: 0.4),
+          ),
         ),
       ),
     );
@@ -837,51 +870,112 @@ class _WaveformChart extends StatelessWidget {
 
 class _WaveformPainter extends CustomPainter {
   final List<double> history;
-  final Color centerLineColor;
-  final Color barColor;
+  final double threshold;
+  final Color guideColor;
+  final Color quietColor;
+  final Color loudColor;
+  final TextStyle captionStyle;
 
   const _WaveformPainter({
     required this.history,
-    required this.centerLineColor,
-    required this.barColor,
+    required this.threshold,
+    required this.guideColor,
+    required this.quietColor,
+    required this.loudColor,
+    required this.captionStyle,
   });
+
+  /// Slots between time ticks: one tick every 10 s.
+  static const _tickEverySlots = 10 * 1000 ~/ 250;
 
   @override
   void paint(Canvas canvas, Size size) {
+    // A painter that throws takes the whole card's frame down with it. Per
+    // CLAUDE.md a blank chart is the correct degraded mode.
+    try {
+      _paint(canvas, size);
+    } catch (e) {
+      _warnHaloOnce(e);
+    }
+  }
+
+  void _paint(Canvas canvas, Size size) {
+    if (!size.width.isFinite || size.width <= 0 || size.height <= 0) return;
     final centerY = size.height / 2;
+    final maxHalfHeight = centerY - 1;
+    final guidePaint = Paint()..color = guideColor;
 
     // 1 px horizontal center line across the full width.
     canvas.drawRect(
       Rect.fromLTWH(0, centerY - 0.5, size.width, 1),
-      Paint()..color = centerLineColor,
+      guidePaint,
     );
-
-    if (history.isEmpty || size.width <= 0) return;
-
-    // Defensive: never draw more samples than the fixed slot grid holds.
-    final samples = history.length > kLevelHistoryCapacity
-        ? history.sublist(history.length - kLevelHistoryCapacity)
-        : history;
 
     // Fixed slot grid so a partially-filled history grows from the RIGHT
     // edge: the newest sample is always rightmost (scrolling recorder).
     final slotWidth = size.width / kLevelHistoryCapacity;
-    final firstSlot = kLevelHistoryCapacity - samples.length;
-    final maxHalfHeight = centerY - 1;
-    final barPaint = Paint()..color = barColor;
-    final barWidth = math.max(slotWidth - 2.0, 1.0); // ~2 px gap between bars
 
-    for (var i = 0; i < samples.length; i++) {
-      final sample = samples[i].clamp(0.0, 1.0);
-      // Mirrored bar around the center line; minimum 1 px half-height so
-      // silence still shows a tick.
-      final halfHeight = math.max(1.0, sample * maxHalfHeight);
-      final left = (firstSlot + i) * slotWidth + 1.0;
+    // Time ticks every 10 s along the bottom edge, counted from the right so
+    // they stay put as the history scrolls.
+    for (var slot = kLevelHistoryCapacity - _tickEverySlots;
+        slot > 0;
+        slot -= _tickEverySlots) {
+      final x = slot * slotWidth;
+      canvas.drawRect(Rect.fromLTWH(x - 0.5, size.height - 3, 1, 3), guidePaint);
+    }
+
+    // Mirrored threshold guides — only when the threshold is meaningful.
+    final hasGuide = threshold.isFinite && threshold > 0.0 && threshold < 1.0;
+    if (hasGuide) {
+      final guideY = threshold * maxHalfHeight;
       canvas.drawRect(
-        Rect.fromLTWH(left, centerY - halfHeight, barWidth, halfHeight * 2),
-        barPaint,
+        Rect.fromLTWH(0, centerY - guideY - 0.5, size.width, 1),
+        guidePaint,
+      );
+      canvas.drawRect(
+        Rect.fromLTWH(0, centerY + guideY - 0.5, size.width, 1),
+        guidePaint,
       );
     }
+
+    if (history.isNotEmpty) {
+      // Defensive: never draw more samples than the fixed slot grid holds.
+      final samples = history.length > kLevelHistoryCapacity
+          ? history.sublist(history.length - kLevelHistoryCapacity)
+          : history;
+      final firstSlot = kLevelHistoryCapacity - samples.length;
+
+      // Adjacent slots are unioned inside one Path per colour so sub-pixel
+      // slot widths render as a solid envelope, not a picket fence of
+      // anti-aliasing seams.
+      final quiet = Path();
+      final loud = Path();
+      for (var i = 0; i < samples.length; i++) {
+        final raw = samples[i];
+        final sample = raw.isFinite ? raw.clamp(0.0, 1.0) : 0.0;
+        // Mirrored bar around the center line; minimum 1 px half-height so
+        // silence still shows a tick.
+        final halfHeight = math.max(1.0, sample * maxHalfHeight);
+        final left = (firstSlot + i) * slotWidth;
+        final rect = Rect.fromLTWH(
+          left,
+          centerY - halfHeight,
+          slotWidth,
+          halfHeight * 2,
+        );
+        (hasGuide && sample >= threshold ? loud : quiet).addRect(rect);
+      }
+      canvas.drawPath(quiet, Paint()..color = quietColor);
+      canvas.drawPath(loud, Paint()..color = loudColor);
+    }
+
+    // Window caption in the top-left corner, over the OLDEST samples so it
+    // never covers the newest ones.
+    final caption = TextPainter(
+      text: TextSpan(text: '${kLevelHistorySeconds}s', style: captionStyle),
+      textDirection: TextDirection.ltr,
+    )..layout();
+    caption.paint(canvas, const Offset(2, 0));
   }
 
   @override
@@ -889,8 +983,15 @@ class _WaveformPainter extends CustomPainter {
       // Each poll tick produces a NEW history list instance, so identity
       // comparison is correct and cheap (no per-sample equality walk).
       !identical(history, oldDelegate.history) ||
-      centerLineColor != oldDelegate.centerLineColor ||
-      barColor != oldDelegate.barColor;
+      threshold != oldDelegate.threshold ||
+      guideColor != oldDelegate.guideColor ||
+      quietColor != oldDelegate.quietColor ||
+      loudColor != oldDelegate.loudColor ||
+      captionStyle != oldDelegate.captionStyle;
+
+  @override
+  String toString() =>
+      '_WaveformPainter(threshold: $threshold, samples: ${history.length})';
 }
 
 class _StreamInfoPanel extends StatelessWidget {
@@ -908,6 +1009,21 @@ class _StreamInfoPanel extends StatelessWidget {
     if (bps == null || bps <= 0) return '?';
     if (bps > 1000000) return '${(bps / 1000000).toStringAsFixed(1)} Mbps';
     return '${(bps / 1000).toStringAsFixed(0)} kbps';
+  }
+
+  static String _describeMeter(CameraAudioState cs) {
+    final db = cs.levelDb;
+    final reading = db == null || !db.isFinite ? null : db.toStringAsFixed(1);
+    switch (cs.levelSource) {
+      case LevelSource.pcm:
+        return 'PCM tap${reading == null ? '' : ' · $reading dBFS'}';
+      case LevelSource.bitrate:
+        return 'bitrate proxy${reading == null ? '' : ' · $reading dB'}';
+      case LevelSource.host:
+        return 'phone mic${reading == null ? '' : ' · $reading dBFS'}';
+      case LevelSource.none:
+        return 'no reading';
+    }
   }
 
   String? _extractHost(String? url) {
@@ -953,6 +1069,9 @@ class _StreamInfoPanel extends StatelessWidget {
     if (si.channels != null) audioParts.add(si.channels!);
     audioParts.add(_formatBitrate(si.audioBitrate));
     rows.add(_row('Audio', audioParts.join(' · '), labelStyle, dimStyle));
+
+    // Level meter provenance: which signal the glow is built on right now.
+    rows.add(_row('Meter', _describeMeter(cameraState), labelStyle, dimStyle));
 
     // Video section (only when video preview is active)
     if (showVideoInfo) {

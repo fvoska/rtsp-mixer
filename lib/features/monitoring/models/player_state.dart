@@ -3,6 +3,24 @@ import '../../cameras/models/protect_camera.dart';
 /// Connection status for a single camera's RTSP stream.
 enum CameraConnectionStatus { idle, connecting, playing, reconnecting, error }
 
+/// Where the level meter's reading comes from right now.
+enum LevelSource {
+  /// No reading yet (not live, or the tap and bitrate are both silent).
+  none,
+
+  /// Real dBFS from decoded PCM via the second-player tap.
+  pcm,
+
+  /// Encoded-bitrate proxy — the tap is unavailable or still connecting.
+  bitrate,
+
+  /// dBFS measured by a paired phone on its own microphone and reported
+  /// over its status endpoint. Used for phone cameras when the tap is not
+  /// delivering: their PCM stream has a constant bitrate, so the bitrate
+  /// proxy would read flat.
+  host,
+}
+
 /// Stream technical info collected from player events.
 class StreamInfo {
   final String? audioCodec;
@@ -86,13 +104,24 @@ class CameraAudioState {
   /// Unifi cameras and manual cameras without a remote URL.
   final Map<String, String> overrideQualities;
   final StreamInfo streamInfo;
-  final double audioLevel; // 0.0..1.0 absolute pseudo-SPL, log-mapped from AAC encoded bitrate
-  final double audioActivity; // 0.0..1.0 recent variation — peak-to-trough of levelHistory over ~5 s
+  /// Current sound level in 0.0..1.0, relative to the room's noise floor
+  /// (see `AudioLevelTracker`): 0 is as quiet as the stream has been in the
+  /// last few minutes, 1 is the loudest. Smoothed with a fast attack and a
+  /// slow release. This one number drives the card border, the level bar
+  /// AND the waveform history — they are never allowed to disagree.
+  final double audioLevel;
+
+  /// Which signal produced [audioLevel] this tick.
+  final LevelSource levelSource;
+
+  /// The raw reading behind [audioLevel]: dBFS for [LevelSource.pcm],
+  /// 10·log10(bitrate) for [LevelSource.bitrate], null when there was no
+  /// reading. Shown in the details panel.
+  final double? levelDb;
   final double silenceDuration; // seconds of continuous silence
 
-  /// Rolling pseudo-SPL samples, oldest first, capacity
-  /// `kLevelHistoryCapacity` — feeds the waveform chart and the variation
-  /// statistic.
+  /// Rolling samples of [audioLevel], oldest first, one per poll tick,
+  /// capacity `kLevelHistoryCapacity` (60 s) — feeds the waveform chart.
   final List<double> levelHistory;
 
   // Camera device info from Unifi API.
@@ -120,7 +149,8 @@ class CameraAudioState {
     this.overrideQualities = const {},
     this.streamInfo = const StreamInfo(),
     this.audioLevel = 0.0,
-    this.audioActivity = 0.0,
+    this.levelSource = LevelSource.none,
+    this.levelDb,
     this.silenceDuration = 0.0,
     this.levelHistory = const [],
     this.mac,
@@ -145,7 +175,8 @@ class CameraAudioState {
     Map<String, String>? overrideQualities,
     StreamInfo? streamInfo,
     double? audioLevel,
-    double? audioActivity,
+    LevelSource? levelSource,
+    Object? levelDb = _keep,
     double? silenceDuration,
     List<double>? levelHistory,
   }) =>
@@ -165,7 +196,9 @@ class CameraAudioState {
         overrideQualities: overrideQualities ?? this.overrideQualities,
         streamInfo: streamInfo ?? this.streamInfo,
         audioLevel: audioLevel ?? this.audioLevel,
-        audioActivity: audioActivity ?? this.audioActivity,
+        levelSource: levelSource ?? this.levelSource,
+        // Sentinel so a caller can clear the reading with an explicit null.
+        levelDb: identical(levelDb, _keep) ? this.levelDb : levelDb as double?,
         silenceDuration: silenceDuration ?? this.silenceDuration,
         // Passing `const []` explicitly clears the history (the reconnect
         // path relies on this); passing null keeps the existing samples.
@@ -181,6 +214,8 @@ class CameraAudioState {
 
   /// True when this camera is a paired phone running Roomtone host mode.
   bool get isPeer => source == CameraSource.peer;
+
+  static const Object _keep = Object();
 
   double get effectiveVolume => isMuted ? 0.0 : volume;
   bool get isLive => connectionStatus == CameraConnectionStatus.playing;

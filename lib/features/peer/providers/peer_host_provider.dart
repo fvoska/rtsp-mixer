@@ -66,6 +66,7 @@ class PeerHostNotifier extends Notifier<PeerHostState> {
   Timer? _micRestartTimer;
   int _micRestartAttempt = 0;
   double _level = 0.0;
+  double _levelDb = kPeerSilenceDbfs;
   bool _micStarting = false;
 
   /// Resolves once the persisted config has been read.
@@ -203,6 +204,7 @@ class PeerHostNotifier extends Notifier<PeerHostState> {
         issueToken: _issueToken,
         audio: audio.stream,
         currentLevel: () => _level,
+        currentLevelDb: () => _levelDb,
         onListenersChanged: (n) {
           if (n != state.listeners) _publish(state.copyWith(listeners: n));
         },
@@ -338,6 +340,7 @@ class PeerHostNotifier extends Notifier<PeerHostState> {
     } catch (_) {}
     _audio = null;
     _level = 0;
+    _levelDb = kPeerSilenceDbfs;
     if (_options.useForegroundService) {
       try {
         await ForegroundServiceManager.stopHost();
@@ -387,8 +390,12 @@ class PeerHostNotifier extends Notifier<PeerHostState> {
       if (audio == null || audio.isClosed) return;
       audio.add(chunk);
       // Fast attack, slow release so a short cry registers on the meter.
-      final instant = pcm16Level(chunk);
-      _level = math.max(instant, _level * 0.85);
+      // The dBFS reading is what monitors poll; the 0..1 level is derived
+      // from it for this phone's own screen.
+      final instantDb = pcm16Dbfs(chunk);
+      final releasedDb = math.max(kPeerSilenceDbfs, _levelDb - 3.0);
+      _levelDb = math.max(instantDb, releasedDb);
+      _level = dbfsToLevel(_levelDb);
     } catch (e) {
       appLog('PEER_HOST', 'pcm handling failed (chunk dropped): $e');
     }

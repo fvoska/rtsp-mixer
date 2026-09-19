@@ -66,9 +66,10 @@ Know it's working — and know why if it isn't.
 
 See sound without turning the volume up.
 
-- Absolute **SPL-style level bar** per camera.
-- **10-second rolling waveform** chart.
-- **Variation-driven card highlighting** that lights up a camera when its room gets louder.
+- A **real level meter** per camera, measured from the decoded audio itself: a second, silent decoder taps each stream and reads its true loudness. It learns how quiet the nursery normally is and shows how far above that the sound is right now — no per-camera calibration, no false glow from a noisy microphone.
+- **Cards that glow with the sound.** The border and halo brighten as the level rises and fade as the room settles, so a cry reads from across the room and a steady hum stays dark.
+- A **60-second waveform** of that same level, with the parts that lit the card drawn in green and the trigger threshold marked, so you can see what happened while you dozed.
+- One **sensitivity slider** in Settings that sets how far above the room's quiet level a card lights up.
 
 ## Connectivity flexibility
 

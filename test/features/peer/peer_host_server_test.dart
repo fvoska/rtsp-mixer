@@ -27,6 +27,7 @@ class _Harness {
       },
       audio: audio.stream,
       currentLevel: () => 0.42,
+      currentLevelDb: () => -18.5,
       onListenersChanged: (n) => listenerCounts.add(n),
       gate: gate,
     );
@@ -150,6 +151,7 @@ void main() {
     expect(res.statusCode, 200);
     final json = jsonDecode(await utf8.decoder.bind(res).join());
     expect(json['level'], 0.42);
+    expect(json['levelDb'], -18.5);
     expect(json['listeners'], 0);
   });
 
@@ -192,6 +194,24 @@ void main() {
         reason: 'server drops the disconnected listener');
     feeder.cancel();
     expect(h.listenerCounts, containsAllInOrder([1, 0]));
+  });
+
+  test('two connections from one monitor count as one listener', () async {
+    final clients = <HttpClient>[];
+    for (var i = 0; i < 2; i++) {
+      final client = HttpClient();
+      clients.add(client);
+      final req = await client.getUrl(
+          Uri.parse(peerStreamUrl('127.0.0.1', h.port, 'good')));
+      final res = await req.close();
+      res.listen((_) {}, onError: (_) {});
+    }
+    await waitFor(() => h.server.connectionCount == 2,
+        reason: 'both audio connections attach');
+    expect(h.server.listenerCount, 1);
+    for (final c in clients) {
+      c.close(force: true);
+    }
   });
 
   test('stop closes open listeners', () async {
