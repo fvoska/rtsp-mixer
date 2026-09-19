@@ -23,8 +23,8 @@ A baby monitor app that connects to Unifi Protect cameras, extracts audio from R
 ### Core Framework
 | Technology | Version | Purpose | Why |
 |------------|---------|---------|-----|
-| Flutter | 3.27+ | Cross-platform app framework | Only viable option that covers Android (primary) + web (nice-to-have) with strong native interop for audio/foreground services. React Native's RTSP ecosystem is worse. Native Android-only kills the web goal. |
-| Dart | 3.6+ | Application language | Comes with Flutter. Strong async/stream primitives fit the event-driven architecture (WebSocket listeners, audio streams). |
+| Flutter | 3.47.5 (pinned in CI and the session hook) | Cross-platform app framework | Only viable option that covers Android (primary) + web (nice-to-have) with strong native interop for audio/foreground services. React Native's RTSP ecosystem is worse. Native Android-only kills the web goal. |
+| Dart | 3.12+ | Application language | Comes with Flutter. Strong async/stream primitives fit the event-driven architecture (WebSocket listeners, audio streams). |
 ### RTSP Audio Playback
 | Technology | Version | Purpose | Why |
 |------------|---------|---------|-----|
@@ -34,14 +34,14 @@ A baby monitor app that connects to Unifi Protect cameras, extracts audio from R
 ### Background Execution
 | Technology | Version | Purpose | Why |
 |------------|---------|---------|-----|
-| flutter_foreground_task | ^9.2.2 | Android foreground service with persistent notification | Most actively maintained foreground service package. Supports two-way communication between service and UI isolate. Auto-resume on boot. Provides `mediaPlayback` foreground service type required by Android 14+. |
-| audio_service | ^0.18.15 | Media session integration (lock screen, notification controls) | Integrates with Android's MediaSession for play/pause/volume on lock screen and notification area. Provides WAKE_LOCK. Complements flutter_foreground_task for the media playback use case. |
+| flutter_foreground_task | ^11.0.3 | Android foreground service with persistent notification | Most actively maintained foreground service package. Supports two-way communication between service and UI isolate. Auto-resume on boot. Provides `mediaPlayback` foreground service type required by Android 14+. |
+| audio_service | ^0.18.19 | Media session integration (lock screen, notification controls) | Integrates with Android's MediaSession for play/pause/volume on lock screen and notification area. Provides WAKE_LOCK. Complements flutter_foreground_task for the media playback use case. |
 ### Unifi Protect API Integration
 | Technology | Version | Purpose | Why |
 |------------|---------|---------|-----|
-| dio | ^5.7+ | HTTP client for Protect API | Industry-standard Flutter HTTP client. Supports interceptors for auth token refresh, cookie management, and self-signed certificate handling (Unifi consoles use self-signed certs). |
+| dio | ^5.11+ | HTTP client for Protect API | Industry-standard Flutter HTTP client. Supports interceptors for auth token refresh, cookie management, and self-signed certificate handling (Unifi consoles use self-signed certs). |
 | web_socket_channel | ^3.0+ | WebSocket client for real-time events | Dart-native WebSocket implementation. Connects to Protect's `wss://` updates endpoint for smart detection events (baby crying). |
-| flutter_secure_storage | ^10.0+ | Credential storage | Stores Unifi Protect API key. On macOS without signing, falls back to in-memory storage (see memory note). |
+| flutter_secure_storage | ^11.2+ | Credential storage | Stores Unifi Protect API key. On macOS without signing, falls back to in-memory storage (see memory note). |
 | Endpoint | Method | Purpose |
 |----------|--------|---------|
 | `/proxy/protect/integration/v1/cameras` | GET | List cameras (X-API-Key auth) |
@@ -58,7 +58,7 @@ A baby monitor app that connects to Unifi Protect cameras, extracts audio from R
 ### State Management
 | Technology | Version | Purpose | Why |
 |------------|---------|---------|-----|
-| riverpod | ^2.6+ | Application state management | Handles async state well (stream connections, API responses). Provider-based architecture maps cleanly to this app's needs: auth state, camera list, player state, volume levels, connection status. |
+| riverpod | ^3.4+ | Application state management | Handles async state well (stream connections, API responses). Provider-based architecture maps cleanly to this app's needs: auth state, camera list, player state, volume levels, connection status. |
 ### Audio Level Metering
 | Technology | Version | Purpose | Why |
 |------------|---------|---------|-----|
@@ -66,8 +66,8 @@ A baby monitor app that connects to Unifi Protect cameras, extracts audio from R
 ### Supporting Libraries
 | Library | Version | Purpose | When to Use |
 |---------|---------|---------|-------------|
-| connectivity_plus | ^6.1+ | Network connectivity monitoring | Detect WiFi disconnection for auto-reconnect logic |
-| flutter_local_notifications | ^18.0+ | Push notifications | Cry detection alerts when app is in background |
+| connectivity_plus | ^7.3+ | Network connectivity monitoring | Detect WiFi disconnection for auto-reconnect logic |
+| flutter_local_notifications | ^22.3+ | Push notifications | Cry detection alerts when app is in background |
 | wakelock_plus | ^1.2+ | Keep CPU awake | Prevent deep sleep during audio playback overnight |
 | logging | ^1.3+ | Structured logging | Debug overnight connection issues after the fact |
 ## Alternatives Considered
@@ -90,12 +90,11 @@ A baby monitor app that connects to Unifi Protect cameras, extracts audio from R
 ## Key Version Constraints
 | Constraint | Reason |
 |------------|--------|
-| Flutter >= 3.22.0 | Required by flutter_foreground_task 9.x |
-| Dart >= 3.4.0 | Required by flutter_foreground_task 9.x |
-| Kotlin >= 1.9.10 | Required by flutter_foreground_task 9.x |
+| Flutter >= 3.44.0 / Dart >= 3.12.0 | Required by flutter_foreground_task 11.x, go_router 18.x and record 7.x |
+| Kotlin Gradle plugin 2.3.20 | Flutter 3.47's template version; configured in `android/settings.gradle.kts`. Kotlin 2.2+ removed the `kotlinOptions {}` block — `android/app/build.gradle.kts` uses `kotlin { compilerOptions { jvmTarget } }` |
 | Gradle >= 8.14.0 | Required by the Flutter 3.47+ Gradle plugin (the release runner tracks Flutter `stable`; 8.13 broke the v1.13.0 APK build). Wrapper pinned in `android/gradle/wrapper/gradle-wrapper.properties`. |
-| AGP >= 8.11.1, Kotlin Gradle plugin >= 2.2.20 | Hard minimums of the Flutter 3.47+ Gradle plugin; also needed by the `record` and `mobile_scanner` plugins. Set in `android/settings.gradle.kts`. |
-| Android minSdk >= 21 | Required by media_kit |
+| AGP 8.11.1 | Hard minimum of the Flutter 3.47+ Gradle plugin. Deliberately NOT yet on AGP 9 (Flutter's template default): AGP 9 switches to built-in Kotlin and the new DSL, a migration that must be verified with a real Android build. Set in `android/settings.gradle.kts`. |
+| Android minSdk >= 24 | Flutter default; also required by record_android, flutter_secure_storage 11 and flutter_local_notifications 22 |
 | Android targetSdk >= 34 | Required for foreground service type declarations |
 ## Sources
 - [media_kit on pub.dev](https://pub.dev/packages/media_kit) -- v1.2.6, verified 2026-04-01

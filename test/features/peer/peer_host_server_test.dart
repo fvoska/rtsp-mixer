@@ -13,11 +13,11 @@ import '../../support/async.dart';
 
 /// Loopback harness around [PeerHostServer] with an injectable PCM source.
 class _Harness {
-  _Harness({String code = '123456', PairingGate? gate}) : _code = code {
+  _Harness({PairingGate? gate}) {
     server = PeerHostServer(
       hostId: 'host-1',
       hostName: () => 'Nursery phone',
-      pairingCode: () => _code,
+      pairingCode: () => code,
       isTokenValid: (t) => validTokens.contains(t),
       issueToken: (id, name) async {
         issued.add((id: id, name: name));
@@ -33,7 +33,8 @@ class _Harness {
     );
   }
 
-  final String _code;
+  /// The pairing code the fake host expects.
+  final String code = '123456';
   final audio = StreamController<Uint8List>.broadcast();
   final validTokens = <String>{'good'};
   final issued = <({String id, String name})>[];

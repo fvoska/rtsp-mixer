@@ -27,10 +27,6 @@ android {
         isCoreLibraryDesugaringEnabled = true
     }
 
-    kotlinOptions {
-        jvmTarget = JavaVersion.VERSION_17.toString()
-    }
-
     defaultConfig {
         applicationId = "tech.voska.rtsp_mixer"
         minSdk = flutter.minSdkVersion
@@ -58,6 +54,14 @@ android {
                 signingConfigs.getByName("debug")
             }
         }
+    }
+}
+
+// Kotlin 2.x deprecates the `kotlinOptions {}` block; this is the form the
+// Flutter app template uses.
+kotlin {
+    compilerOptions {
+        jvmTarget = org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17
     }
 }
 
