@@ -62,7 +62,7 @@ A baby monitor app that connects to Unifi Protect cameras, extracts audio from R
 ### Audio Level Metering
 | Technology | Version | Purpose | Why |
 |------------|---------|---------|-----|
-| Bitrate-based activity detection | -- | Visual audio activity indicator | The prebuilt media_kit FFmpeg does NOT include audio analysis filters (`ebur128`, `astats`, `aformat`, `stereotools` all missing). Audio activity is estimated by polling `audio-bitrate` changes via mpv properties. `audio-pts` tracks stream flow (silence detection). |
+| Bitrate-based level metering | -- | Visual audio activity indicator | The prebuilt media_kit FFmpeg does NOT include audio analysis filters (`ebur128`, `astats`, `aformat`, `stereotools` all missing). The loudness proxy is the mpv `audio-bitrate` property (VBR AAC) polled at 250 ms, turned into a noise-floor-relative 0..1 level by `AudioLevelTracker` (`lib/features/monitoring/helpers/audio_level_meter.dart`): dB-domain smoothing, a rolling 5-min floor/ceiling calibration, and a fast-attack/slow-release envelope. That one level drives the card border, the level bar and the 60 s waveform. `audio-pts` tracks stream flow (silence detection). |
 ### Supporting Libraries
 | Library | Version | Purpose | When to Use |
 |---------|---------|---------|-------------|
