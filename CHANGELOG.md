@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.14.0](https://github.com/fvoska/rtsp-mixer/compare/v1.13.1...v1.14.0) (2026-09-19)
+
+
+### Features
+
+* **monitoring:** catch up to the live edge with a speed nudge and add Realtime/Buffered stream modes ([#57](https://github.com/fvoska/rtsp-mixer/issues/57)) ([1245006](https://github.com/fvoska/rtsp-mixer/commit/12450065504b00c0697870e6af95c04f00ba66dd))
+* **settings:** add battery saver mode toggle ([#49](https://github.com/fvoska/rtsp-mixer/issues/49)) ([b6e4008](https://github.com/fvoska/rtsp-mixer/commit/b6e40084ae11b42427e4b72b4db2d8f4e6e11cdc))
+
 ## [1.13.1](https://github.com/fvoska/rtsp-mixer/compare/v1.13.0...v1.13.1) (2026-09-19)
 
 
