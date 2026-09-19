@@ -6,6 +6,7 @@ import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter_foreground_task/flutter_foreground_task.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 
 import '../../../core/logging/app_logger.dart';
 import '../../../core/providers/settings_provider.dart';
@@ -912,6 +913,9 @@ Future<void> _showAddManualCameraDialog(
   }
 }
 
+/// What the picker's "+" menu can add.
+enum _AddCameraKind { rtsp, phone }
+
 /// Idle state: pick cameras to monitor + Start Monitoring.
 class _IdleCameraPicker extends ConsumerWidget {
   const _IdleCameraPicker({required this.onStart});
@@ -957,9 +961,11 @@ class _IdleCameraPicker extends ConsumerWidget {
                   const SizedBox(height: Spacing.sm),
                   Text(
                     isManualMode
-                        ? 'Add a camera by entering its RTSP stream URL.'
-                        : 'Add an RTSP URL manually, or enable RTSP on a '
-                            'Protect camera and refresh.',
+                        ? 'Add a camera by entering its RTSP stream URL, or '
+                            'pair a spare phone as a camera.'
+                        : 'Add an RTSP URL manually, pair a spare phone as a '
+                            'camera, or enable RTSP on a Protect camera and '
+                            'refresh.',
                     textAlign: TextAlign.center,
                     style: theme.textTheme.bodyMedium?.copyWith(
                       color: theme.colorScheme.onSurfaceVariant,
@@ -971,6 +977,12 @@ class _IdleCameraPicker extends ConsumerWidget {
                         _showAddManualCameraDialog(context, ref),
                     icon: const Icon(Icons.add),
                     label: const Text('Add RTSP camera'),
+                  ),
+                  const SizedBox(height: Spacing.sm),
+                  OutlinedButton.icon(
+                    onPressed: () => context.push('/pair'),
+                    icon: const Icon(Icons.phone_android),
+                    label: const Text('Add phone camera'),
                   ),
                   if (canRefresh) ...[
                     const SizedBox(height: Spacing.sm),
@@ -998,11 +1010,32 @@ class _IdleCameraPicker extends ConsumerWidget {
                       style: theme.textTheme.bodyLarge,
                     ),
                   ),
-                  IconButton(
+                  PopupMenuButton<_AddCameraKind>(
                     icon: const Icon(Icons.add),
-                    tooltip: 'Add RTSP camera',
-                    onPressed: () =>
+                    tooltip: 'Add camera',
+                    onSelected: (kind) => switch (kind) {
+                      _AddCameraKind.rtsp =>
                         _showAddManualCameraDialog(context, ref),
+                      _AddCameraKind.phone => context.push('/pair'),
+                    },
+                    itemBuilder: (_) => const [
+                      PopupMenuItem(
+                        value: _AddCameraKind.rtsp,
+                        child: ListTile(
+                          leading: Icon(Icons.link),
+                          title: Text('Add RTSP camera'),
+                          contentPadding: EdgeInsets.zero,
+                        ),
+                      ),
+                      PopupMenuItem(
+                        value: _AddCameraKind.phone,
+                        child: ListTile(
+                          leading: Icon(Icons.phone_android),
+                          title: Text('Add phone camera'),
+                          contentPadding: EdgeInsets.zero,
+                        ),
+                      ),
+                    ],
                   ),
                   if (canRefresh)
                     IconButton(

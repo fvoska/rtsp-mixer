@@ -9,6 +9,7 @@ import '../../auth/providers/auth_provider.dart';
 import '../../cameras/models/protect_camera.dart';
 import '../../cameras/providers/camera_provider.dart';
 import '../../monitoring/providers/audio_player_provider.dart';
+import '../../peer/providers/peer_host_provider.dart';
 
 class SettingsScreen extends ConsumerWidget {
   const SettingsScreen({super.key});
@@ -28,6 +29,7 @@ class SettingsScreen extends ConsumerWidget {
         .where((c) => c.isManual)
         .toList();
     final showConnectionSection = isUnifiMode || manualCameras.isNotEmpty;
+    final hostState = ref.watch(peerHostProvider);
 
     return Scaffold(
       appBar: AppBar(title: const Text('Settings')),
@@ -220,11 +222,46 @@ class SettingsScreen extends ConsumerWidget {
             ],
           ],
           const Divider(height: 1),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(
+              Spacing.lg,
+              Spacing.md,
+              Spacing.lg,
+              0,
+            ),
+            child: Text(
+              'Phone cameras',
+              style: theme.textTheme.labelLarge?.copyWith(
+                color: theme.colorScheme.primary,
+              ),
+            ),
+          ),
+          ListTile(
+            leading: const Icon(Icons.phone_android),
+            title: const Text('Use this phone as a camera'),
+            subtitle: Text(
+              hostState.isRunning
+                  ? 'Sharing microphone as "${hostState.name}"'
+                  : 'Share this phone\'s microphone with another phone.',
+              style: theme.textTheme.bodySmall,
+            ),
+            onTap: () => context.push('/host'),
+          ),
+          ListTile(
+            leading: const Icon(Icons.qr_code_scanner),
+            title: const Text('Pair with a phone camera'),
+            subtitle: Text(
+              'Find a phone sharing its microphone and add it as a camera.',
+              style: theme.textTheme.bodySmall,
+            ),
+            onTap: () => context.push('/pair'),
+          ),
+          const Divider(height: 1),
           ListTile(
             leading: const Icon(Icons.help_outline),
             title: const Text('Help & setup guides'),
             subtitle: const Text(
-              'UniFi API keys, RTSP for Reolink, Tapo, and more.',
+              'UniFi API keys, RTSP for Reolink, Tapo, phone cameras, and more.',
             ),
             onTap: () => context.push('/help'),
           ),

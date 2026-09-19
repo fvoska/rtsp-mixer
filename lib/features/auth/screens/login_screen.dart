@@ -5,6 +5,7 @@ import 'package:go_router/go_router.dart';
 import '../../../core/logging/app_logger.dart';
 import '../../../core/models/app_error.dart';
 import '../../../core/theme/spacing.dart';
+import '../../peer/providers/peer_host_provider.dart';
 import '../providers/auth_provider.dart';
 
 class LoginScreen extends ConsumerStatefulWidget {
@@ -86,6 +87,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
     final authState = ref.watch(authNotifierProvider);
     final isLoading = authState.isLoading;
     final logs = AppLogger.instance.lines;
+    final hostState = ref.watch(peerHostProvider);
 
     return Scaffold(
       body: SingleChildScrollView(
@@ -97,6 +99,19 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
                 Text('Connect to Protect', style: theme.textTheme.headlineMedium),
+                if (hostState.isRunning) ...[
+                  const SizedBox(height: Spacing.md),
+                  Card.filled(
+                    margin: EdgeInsets.zero,
+                    child: ListTile(
+                      leading: const Icon(Icons.mic),
+                      title: Text('Sharing microphone as "${hostState.name}"'),
+                      subtitle: const Text('This phone is a camera. Tap to manage.'),
+                      trailing: const Icon(Icons.chevron_right),
+                      onTap: () => context.push('/host'),
+                    ),
+                  ),
+                ],
                 const SizedBox(height: Spacing.xl),
                 Form(
                   key: _formKey,
@@ -174,6 +189,23 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                 Text(
                   'No UniFi console? Enter camera RTSP stream URLs yourself. '
                   'You can add UniFi later by signing out.',
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: theme.colorScheme.onSurfaceVariant,
+                  ),
+                ),
+                const SizedBox(height: Spacing.md),
+                SizedBox(
+                  height: 48,
+                  child: OutlinedButton.icon(
+                    onPressed: () => context.push('/host'),
+                    icon: const Icon(Icons.phone_android),
+                    label: const Text('Use this phone as a camera'),
+                  ),
+                ),
+                const SizedBox(height: Spacing.sm),
+                Text(
+                  'Put a spare phone in the nursery: it shares its microphone '
+                  'over Wi‑Fi and pairs with the phone you monitor from.',
                   style: theme.textTheme.bodySmall?.copyWith(
                     color: theme.colorScheme.onSurfaceVariant,
                   ),

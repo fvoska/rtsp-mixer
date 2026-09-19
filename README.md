@@ -10,6 +10,17 @@ Point it at whatever cameras you already have.
 
 - **UniFi Protect** via the official integration API (`X-API-Key`) — automatic camera discovery and per-camera RTSPS stream URLs, no manual copy-paste.
 - **Manual RTSP/RTSPS cameras** for everyone else — Reolink, Tapo, or any generic RTSP source. A skip-UniFi setup path lets non-UniFi users go straight to adding their own stream URLs.
+- **A spare phone as a camera** — run Roomtone on the phone in the nursery, tap "Use this phone as a camera", and it shares its microphone over Wi‑Fi. See *Phone-to-phone* below.
+
+## Phone-to-phone
+
+No camera at all? Two phones are enough.
+
+- **Host mode** turns any phone running Roomtone into a camera: it captures its microphone and serves it on the local network, and keeps doing so overnight with the screen off (foreground service, wake + Wi‑Fi lock, automatic microphone recovery).
+- **Auto-discovery** — the monitoring phone finds hosts on the same Wi‑Fi by itself; no IP addresses to type.
+- **Pairing by code or QR** — the host shows a one-time 6-digit code and a QR code; type the code or scan it once, and the pairing is remembered on both ends. Wrong-code guessing is throttled, each code is spent after use, and the host lists paired monitors and can unpair them any time.
+- **Same pipeline as every other camera** — a paired phone is just another camera in the mix: per-camera volume, reconnect-forever, zombie detection, alerts, and session history all apply. If the host's Wi‑Fi address changes, the monitor finds it again by id.
+- Everything stays on your LAN; nothing is relayed through the cloud.
 
 ## Listening & mixing
 
