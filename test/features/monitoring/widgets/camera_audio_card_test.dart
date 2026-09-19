@@ -9,7 +9,7 @@ import 'package:rtsp_mixer/features/monitoring/widgets/camera_audio_card.dart';
 Future<void> _pumpCard(
   WidgetTester tester,
   CameraAudioState state, {
-  double activityThreshold = 0.1,
+  double levelThreshold = 0.1,
 }) async {
   await tester.pumpWidget(
     ProviderScope(
@@ -21,7 +21,7 @@ Future<void> _pumpCard(
             cameraIndex: 0,
             showVideoPreview: false,
             showDebugInfo: false,
-            activityThreshold: activityThreshold,
+            levelThreshold: levelThreshold,
             onToggleVideo: () {},
           ),
         ),
@@ -184,6 +184,22 @@ void main() {
       expect(waveformFinder, findsOneWidget);
     });
 
+    testWidgets('the chart is fed the card\'s own level threshold so its '
+        'guide lines match the glow', (tester) async {
+      await _pumpCard(tester, playingWithHistory, levelThreshold: 0.33);
+      final paint = tester.widget<CustomPaint>(waveformFinder);
+      // The painter is private; its debug description carries the fields.
+      expect(paint.painter.toString(), contains('threshold: 0.33'));
+    });
+
+    testWidgets('a history longer than the slot grid paints without throwing',
+        (tester) async {
+      final long = List<double>.generate(400, (i) => (i % 10) / 10.0);
+      await _pumpCard(tester, playing.copyWith(levelHistory: long));
+      expect(tester.takeException(), isNull);
+      expect(waveformFinder, findsOneWidget);
+    });
+
     testWidgets('non-live (connecting) camera renders NO waveform chart',
         (tester) async {
       await _pumpCard(tester, connecting);
@@ -224,19 +240,19 @@ void main() {
       cameraId: 'cam1',
       cameraName: 'Nursery',
       connectionStatus: CameraConnectionStatus.playing,
-      audioActivity: 0.85,
+      audioLevel: 0.85,
     );
     const belowThreshold = CameraAudioState(
       cameraId: 'cam1',
       cameraName: 'Nursery',
       connectionStatus: CameraConnectionStatus.playing,
-      audioActivity: 0.02,
+      audioLevel: 0.02,
     );
     const notLive = CameraAudioState(
       cameraId: 'cam1',
       cameraName: 'Nursery',
       connectionStatus: CameraConnectionStatus.connecting,
-      audioActivity: 0.85,
+      audioLevel: 0.85,
     );
 
     testWidgets('card corners are 20px', (tester) async {
@@ -246,7 +262,7 @@ void main() {
       expect(radius.bottomRight.x, 20);
     });
 
-    testWidgets('activity above threshold produces a teal border AND a halo',
+    testWidgets('level above threshold produces a teal border AND a halo',
         (tester) async {
       await _pumpCard(tester, loud);
       final decoration = decorationOf(tester);
@@ -264,7 +280,7 @@ void main() {
       expect(decoration.border!.top.color.a, greaterThan(0));
     });
 
-    testWidgets('activity below threshold produces no halo and no border',
+    testWidgets('level below threshold produces no halo and no border',
         (tester) async {
       await _pumpCard(tester, belowThreshold);
       final decoration = decorationOf(tester);
@@ -277,31 +293,31 @@ void main() {
       expect(decorationOf(tester).boxShadow, anyOf(isNull, isEmpty));
     });
 
-    testWidgets('halo intensity rises with the activity value', (tester) async {
-      await _pumpCard(tester, belowThreshold.copyWith(audioActivity: 0.3));
+    testWidgets('halo intensity rises with the level', (tester) async {
+      await _pumpCard(tester, belowThreshold.copyWith(audioLevel: 0.3));
       final quiet = decorationOf(tester).boxShadow!.first.blurRadius;
       await _pumpCard(tester, loud);
       final loudBlur = decorationOf(tester).boxShadow!.first.blurRadius;
       expect(loudBlur, greaterThan(quiet));
     });
 
-    testWidgets('a NaN activity degrades to no halo instead of throwing',
+    testWidgets('a NaN level degrades to no halo instead of throwing',
         (tester) async {
-      // audioActivity is written by a twice-a-second property poll; a bad
+      // audioLevel is written by a four-times-a-second property poll; a bad
       // value must not throw out of build during an overnight session.
-      await _pumpCard(tester, playing.copyWith(audioActivity: double.nan));
+      await _pumpCard(tester, playing.copyWith(audioLevel: double.nan));
       expect(tester.takeException(), isNull);
       expect(decorationOf(tester).boxShadow, anyOf(isNull, isEmpty));
     });
 
-    testWidgets('an infinite activity degrades to no halo', (tester) async {
-      await _pumpCard(tester, playing.copyWith(audioActivity: double.infinity));
+    testWidgets('an infinite level degrades to no halo', (tester) async {
+      await _pumpCard(tester, playing.copyWith(audioLevel: double.infinity));
       expect(tester.takeException(), isNull);
       expect(decorationOf(tester).boxShadow, anyOf(isNull, isEmpty));
     });
 
     testWidgets('a threshold of 1.0 cannot divide by zero', (tester) async {
-      await _pumpCard(tester, loud, activityThreshold: 1.0);
+      await _pumpCard(tester, loud, levelThreshold: 1.0);
       expect(tester.takeException(), isNull);
       expect(decorationOf(tester).boxShadow, anyOf(isNull, isEmpty));
     });

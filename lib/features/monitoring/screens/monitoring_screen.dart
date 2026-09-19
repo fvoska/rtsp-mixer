@@ -357,8 +357,8 @@ class _LiveMonitoringView extends ConsumerWidget {
       loading: () => const Center(child: CircularProgressIndicator()),
       error: (e, _) => Center(child: Text('Error: $e')),
       data: (state) {
-        final activityThreshold =
-            ref.watch(settingsProvider).activityThreshold;
+        final levelThreshold =
+            ref.watch(settingsProvider).levelThreshold;
         if (state.cameras.isEmpty) {
           // Resuming or just-finished-stop transient — keep the chrome stable
           // while the new state lands.
@@ -430,7 +430,7 @@ class _LiveMonitoringView extends ConsumerWidget {
                             showVideoPreview:
                                 isVideoOn(state.cameras[i].cameraId),
                             showDebugInfo: showDetails,
-                            activityThreshold: activityThreshold,
+                            levelThreshold: levelThreshold,
                             showSourceBadge: showSourceBadge,
                             onToggleVideo: () => onToggleCameraVideo(
                                 state.cameras[i].cameraId),

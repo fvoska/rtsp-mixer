@@ -4,42 +4,59 @@ import 'package:rtsp_mixer/core/providers/settings_provider.dart';
 
 void main() {
   group('AppSettings', () {
-    test('default activityThreshold is 0.05', () {
+    test('default levelThreshold is 0.25', () {
       const s = AppSettings();
-      expect(s.activityThreshold, 0.05);
+      expect(s.levelThreshold, kDefaultLevelThreshold);
+      expect(s.levelThreshold, 0.25);
     });
 
-    test('copyWith updates activityThreshold without touching other fields',
+    test('copyWith updates levelThreshold without touching other fields',
         () {
       const s = AppSettings(useRtsp: true, audioBufferSeconds: 0.3);
-      final next = s.copyWith(activityThreshold: 0.2);
-      expect(next.activityThreshold, 0.2);
+      final next = s.copyWith(levelThreshold: 0.2);
+      expect(next.levelThreshold, 0.2);
       expect(next.useRtsp, true);
       expect(next.audioBufferSeconds, 0.3);
     });
 
-    test('JSON round-trip preserves activityThreshold', () {
-      const s = AppSettings(activityThreshold: 0.17);
+    test('JSON round-trip preserves levelThreshold', () {
+      const s = AppSettings(levelThreshold: 0.17);
       final round = AppSettings.fromJson(s.toJson());
-      expect(round.activityThreshold, 0.17);
+      expect(round.levelThreshold, 0.17);
     });
 
-    test('fromJson falls back to default when activityThreshold is missing',
+    test('fromJson falls back to default when levelThreshold is missing',
         () {
       // Simulates settings files written before this field existed.
       final s = AppSettings.fromJson({
         'useRtsp': true,
         'audioBufferSeconds': 0.7,
       });
-      expect(s.activityThreshold, 0.05);
+      expect(s.levelThreshold, 0.25);
       expect(s.useRtsp, true);
       expect(s.audioBufferSeconds, 0.7);
     });
 
-    test('equality covers activityThreshold', () {
-      const a = AppSettings(activityThreshold: 0.1);
-      const b = AppSettings(activityThreshold: 0.1);
-      const c = AppSettings(activityThreshold: 0.11);
+    test('fromJson ignores the legacy variation-era activityThreshold key',
+        () {
+      // 0.05 was the old default for a peak-to-trough variation threshold;
+      // on the noise-floor-relative level scale it would light the border
+      // on every jitter. It must not be carried over.
+      final s = AppSettings.fromJson({'activityThreshold': 0.05});
+      expect(s.levelThreshold, kDefaultLevelThreshold);
+    });
+
+    test('toJson persists under levelThreshold, not activityThreshold', () {
+      const s = AppSettings(levelThreshold: 0.3);
+      final json = s.toJson();
+      expect(json['levelThreshold'], 0.3);
+      expect(json.containsKey('activityThreshold'), isFalse);
+    });
+
+    test('equality covers levelThreshold', () {
+      const a = AppSettings(levelThreshold: 0.1);
+      const b = AppSettings(levelThreshold: 0.1);
+      const c = AppSettings(levelThreshold: 0.11);
       expect(a, b);
       expect(a, isNot(c));
     });
@@ -59,13 +76,13 @@ void main() {
       const s = AppSettings(
         useRtsp: true,
         audioBufferSeconds: 0.3,
-        activityThreshold: 0.2,
+        levelThreshold: 0.2,
       );
       final next = s.copyWith(themeMode: ThemeMode.dark);
       expect(next.themeMode, ThemeMode.dark);
       expect(next.useRtsp, true);
       expect(next.audioBufferSeconds, 0.3);
-      expect(next.activityThreshold, 0.2);
+      expect(next.levelThreshold, 0.2);
     });
 
     test('copyWith without themeMode preserves the current mode', () {
@@ -135,14 +152,14 @@ void main() {
       const s = AppSettings(
         useRtsp: true,
         audioBufferSeconds: 0.3,
-        activityThreshold: 0.2,
+        levelThreshold: 0.2,
         themeMode: ThemeMode.dark,
       );
       final next = s.copyWith(oledDark: true);
       expect(next.oledDark, isTrue);
       expect(next.useRtsp, true);
       expect(next.audioBufferSeconds, 0.3);
-      expect(next.activityThreshold, 0.2);
+      expect(next.levelThreshold, 0.2);
       expect(next.themeMode, ThemeMode.dark);
     });
 

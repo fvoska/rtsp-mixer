@@ -84,13 +84,16 @@ class CameraAudioState {
   /// Unifi cameras and manual cameras without a remote URL.
   final Map<String, String> overrideQualities;
   final StreamInfo streamInfo;
-  final double audioLevel; // 0.0..1.0 absolute pseudo-SPL, log-mapped from AAC encoded bitrate
-  final double audioActivity; // 0.0..1.0 recent variation — peak-to-trough of levelHistory over ~5 s
+  /// Current sound level in 0.0..1.0, relative to the room's noise floor
+  /// (see `AudioLevelTracker`): 0 is as quiet as the stream has been in the
+  /// last few minutes, 1 is the loudest. Smoothed with a fast attack and a
+  /// slow release. This one number drives the card border, the level bar
+  /// AND the waveform history — they are never allowed to disagree.
+  final double audioLevel;
   final double silenceDuration; // seconds of continuous silence
 
-  /// Rolling pseudo-SPL samples, oldest first, capacity
-  /// `kLevelHistoryCapacity` — feeds the waveform chart and the variation
-  /// statistic.
+  /// Rolling samples of [audioLevel], oldest first, one per poll tick,
+  /// capacity `kLevelHistoryCapacity` (60 s) — feeds the waveform chart.
   final List<double> levelHistory;
 
   // Camera device info from Unifi API.
@@ -118,7 +121,6 @@ class CameraAudioState {
     this.overrideQualities = const {},
     this.streamInfo = const StreamInfo(),
     this.audioLevel = 0.0,
-    this.audioActivity = 0.0,
     this.silenceDuration = 0.0,
     this.levelHistory = const [],
     this.mac,
@@ -141,7 +143,6 @@ class CameraAudioState {
     Map<String, String>? overrideQualities,
     StreamInfo? streamInfo,
     double? audioLevel,
-    double? audioActivity,
     double? silenceDuration,
     List<double>? levelHistory,
   }) =>
@@ -161,7 +162,6 @@ class CameraAudioState {
         overrideQualities: overrideQualities ?? this.overrideQualities,
         streamInfo: streamInfo ?? this.streamInfo,
         audioLevel: audioLevel ?? this.audioLevel,
-        audioActivity: audioActivity ?? this.audioActivity,
         silenceDuration: silenceDuration ?? this.silenceDuration,
         // Passing `const []` explicitly clears the history (the reconnect
         // path relies on this); passing null keeps the existing samples.

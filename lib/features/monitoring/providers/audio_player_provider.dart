@@ -38,6 +38,24 @@ class AudioPlayerNotifier extends AsyncNotifier<MonitoringState> {
   final List<StreamSubscription<dynamic>> _subscriptions = [];
   Timer? _levelPollTimer;
   final Map<String, double> _lastAudioPts = {};
+
+  /// Per-camera loudness trackers. Lifecycle mirrors [_lastAudioPts]
+  /// exactly: created lazily on the first poll of a live stream, dropped on
+  /// stop / dispose / camera removal / successful reconnect so a new stream
+  /// always calibrates from scratch.
+  final Map<String, AudioLevelTracker> _levelTrackers = {};
+
+  /// Poll tick counter; the slow metadata reads run every
+  /// [_metadataEveryNthTick] ticks.
+  int _pollTick = 0;
+
+  /// Re-entrancy guard for [_pollAudioLevels]: the body awaits property
+  /// reads, and the periodic timer does not wait for the previous tick. If
+  /// a tick ever overruns the 250 ms cadence (mpv busy, device throttled),
+  /// the next one is skipped rather than racing it for the state — two
+  /// overlapping ticks would each append a sample to the same history and
+  /// the last writer would drop the other's.
+  bool _polling = false;
   String _lastNotificationText = '';
   String _lastNotificationTitle = '';
 
@@ -157,6 +175,7 @@ class AudioPlayerNotifier extends AsyncNotifier<MonitoringState> {
       }
       _players.clear();
       _lastAudioPts.clear();
+      _levelTrackers.clear();
     });
 
     // Auto-restart streams when RTSP or audio buffer settings change.
@@ -885,7 +904,8 @@ class AudioPlayerNotifier extends AsyncNotifier<MonitoringState> {
     // Update foreground notification with camera status
     await _refreshNotification();
 
-    // Start polling audio-pts to detect silence / estimate activity.
+    // Start polling audio-pts / audio-bitrate for the level meter, silence
+    // detection and the watchdogs.
     _startLevelPolling();
 
     // RELY-01 D-03 trigger c: subscribe to connectivity events for WiFi reconnect.
@@ -896,19 +916,41 @@ class AudioPlayerNotifier extends AsyncNotifier<MonitoringState> {
     }
   }
 
-  static const _pollInterval = Duration(milliseconds: 500);
+  /// Level meter cadence (4 Hz). Every tick reads `audio-pts`,
+  /// `audio-bitrate` and `demuxer-cache-duration` — three synchronous
+  /// property reads per camera. The nine stream-metadata properties only
+  /// change on (re)open, so they are read every [_metadataEveryNthTick]
+  /// ticks (2 s) to keep the fast path cheap enough to run all night.
+  static const _pollInterval = kLevelPollInterval;
+  static const _metadataEveryNthTick = 8;
 
   void _startLevelPolling() {
     _levelPollTimer?.cancel();
+    _pollTick = 0;
     _levelPollTimer = Timer.periodic(_pollInterval, (_) => _pollAudioLevels());
   }
 
   Future<void> _pollAudioLevels() async {
+    if (_polling) return;
+    _polling = true;
+    try {
+      await _pollAudioLevelsOnce();
+    } catch (e) {
+      // Nothing in here may kill the timer: log and let the next tick run.
+      appLog('AUDIO', 'level poll error (non-fatal): $e');
+    } finally {
+      _polling = false;
+    }
+  }
+
+  Future<void> _pollAudioLevelsOnce() async {
     final current = state.value;
     if (current == null || current.cameras.isEmpty) return;
 
     var changed = false;
     var updated = current;
+    _pollTick++;
+    final readMetadata = _pollTick % _metadataEveryNthTick == 0;
 
     for (int i = 0; i < updated.cameras.length; i++) {
       final cam = updated.cameras[i];
@@ -938,11 +980,10 @@ class AudioPlayerNotifier extends AsyncNotifier<MonitoringState> {
           appLog('ZOMBIE', 'pts feed error (non-fatal): $e');
         }
 
-        // Loudness proxy: encoded VBR AAC bitrate (bits/sec). Read here —
-        // not in the metadata block below — because it now drives the level
-        // rather than just debug info. This FFmpeg build has no audio
-        // analysis filters, so encoded bitrate is the only loudness signal
-        // available without touching lavfi (CLAUDE.md hard rule).
+        // Loudness proxy: encoded VBR AAC bitrate (bits/sec). This FFmpeg
+        // build has no audio analysis filters, so encoded bitrate is the
+        // only loudness signal available without touching lavfi (CLAUDE.md
+        // hard rule). The tracker turns it into a noise-floor-relative level.
         final audioBitrate =
             double.tryParse(await _tryGetProperty(np, 'audio-bitrate') ?? '');
         // RELY-03: feed watchdog with bitrate>0 positive signal.
@@ -954,66 +995,68 @@ class AudioPlayerNotifier extends AsyncNotifier<MonitoringState> {
           appLog('ZOMBIE', 'bitrate feed error (non-fatal): $e');
         }
 
-        // Level: absolute pseudo-SPL on a fixed log scale. PTS flow keeps
-        // its silence/zombie role unchanged — no flow means level 0. When
-        // the stream flows but mpv hasn't published a bitrate yet (~1 s
-        // after open), carry the previous level so a live stream doesn't
-        // flash as silent.
-        final double level;
-        if (!flowing) {
-          level = 0.0;
-        } else if (audioBitrate != null && audioBitrate > 0) {
-          level = bitrateToLevel(audioBitrate);
-        } else {
-          level = cam.audioLevel;
-        }
+        // Level: how far above the room's quiet floor the stream is right
+        // now, smoothed (see AudioLevelTracker). PTS flow keeps its
+        // silence/zombie role unchanged — no flow decays the level to 0;
+        // flowing without a published bitrate yet (~1 s after open) holds
+        // the previous level so a live stream doesn't flash as silent.
+        // The tracker never throws, but it sits inside this try anyway.
+        final tracker =
+            _levelTrackers.putIfAbsent(cam.cameraId, AudioLevelTracker.new);
+        final level = tracker.update(
+          bps: audioBitrate,
+          flowing: flowing,
+          dtSeconds: _pollInterval.inMilliseconds / 1000.0,
+        );
 
-        // Activity: peak-to-trough variation of the rolling history (~5 s).
-        // No peak-hold decay — the sliding window IS the decay (a spike
-        // ages out of the border after ~5 s).
+        // The waveform history is the SAME series the border shows: one
+        // sample of the display level per tick, 60 s deep.
         final newHistory = appendLevel(cam.levelHistory, level);
-        final activity = recentVariation(newHistory);
 
         final newSilence = !flowing
             ? cam.silenceDuration + _pollInterval.inMilliseconds / 1000.0
             : 0.0;
 
-        // Poll mpv properties for stream metadata (track events are sparse for RTSP).
-        final audioCodec = await _tryGetProperty(np, 'audio-codec-name');
-        final videoCodec = await _tryGetProperty(np, 'video-codec-name');
-        final audioFormat = await _tryGetProperty(np, 'audio-params/format');
-        final audioSampleRate = int.tryParse(await _tryGetProperty(np, 'audio-params/samplerate') ?? '');
-        final audioChannelCount = int.tryParse(await _tryGetProperty(np, 'audio-params/channel-count') ?? '');
-        final audioChannels = await _tryGetProperty(np, 'audio-params/hr-channels');
-        final width = int.tryParse(await _tryGetProperty(np, 'video-params/w') ?? '');
-        final height = int.tryParse(await _tryGetProperty(np, 'video-params/h') ?? '');
-        final fps = double.tryParse(await _tryGetProperty(np, 'container-fps') ?? '');
-        // audio-bitrate is read above (it drives the level now).
-        final videoBitrate = double.tryParse(await _tryGetProperty(np, 'video-bitrate') ?? '');
+        // Stream metadata (track events are sparse for RTSP). Slow path:
+        // only every Nth tick. The audio bitrate is refreshed every tick
+        // since it was read above anyway and the details panel shows it.
+        StreamInfo newInfo;
+        if (readMetadata) {
+          final audioCodec = await _tryGetProperty(np, 'audio-codec-name');
+          final videoCodec = await _tryGetProperty(np, 'video-codec-name');
+          final audioFormat = await _tryGetProperty(np, 'audio-params/format');
+          final audioSampleRate = int.tryParse(await _tryGetProperty(np, 'audio-params/samplerate') ?? '');
+          final audioChannelCount = int.tryParse(await _tryGetProperty(np, 'audio-params/channel-count') ?? '');
+          final audioChannels = await _tryGetProperty(np, 'audio-params/hr-channels');
+          final width = int.tryParse(await _tryGetProperty(np, 'video-params/w') ?? '');
+          final height = int.tryParse(await _tryGetProperty(np, 'video-params/h') ?? '');
+          final fps = double.tryParse(await _tryGetProperty(np, 'container-fps') ?? '');
+          final videoBitrate = double.tryParse(await _tryGetProperty(np, 'video-bitrate') ?? '');
 
-        final newInfo = cam.streamInfo.merge(
-          audioCodec: audioCodec,
-          videoCodec: videoCodec,
-          sampleRate: audioSampleRate,
-          channels: audioChannels ?? (audioChannelCount != null ? '${audioChannelCount}ch' : null),
-          audioBitrate: audioBitrate?.round(),
-          videoBitrate: videoBitrate?.round(),
-          width: width,
-          height: height,
-          fps: fps,
-          audioFormat: audioFormat,
-        );
+          newInfo = cam.streamInfo.merge(
+            audioCodec: audioCodec,
+            videoCodec: videoCodec,
+            sampleRate: audioSampleRate,
+            channels: audioChannels ?? (audioChannelCount != null ? '${audioChannelCount}ch' : null),
+            audioBitrate: audioBitrate?.round(),
+            videoBitrate: videoBitrate?.round(),
+            width: width,
+            height: height,
+            fps: fps,
+            audioFormat: audioFormat,
+          );
+        } else {
+          newInfo = cam.streamInfo.merge(audioBitrate: audioBitrate?.round());
+        }
 
         // Always emit for a live camera: appending a history sample makes
-        // the state unequal every tick anyway, so the old change-gating on
-        // audioLevel/activity/silence is dead logic (2 emissions/s for 2
-        // cameras is negligible; the notification update below keeps its
-        // own text-diff guard, so no notification churn).
+        // the state unequal every tick anyway (4 emissions/s per camera is
+        // negligible; the notification update below keeps its own text-diff
+        // guard, so no notification churn).
         updated = updated.copyWithCamera(
           i,
           cam.copyWith(
             audioLevel: level,
-            audioActivity: activity,
             silenceDuration: newSilence,
             streamInfo: newInfo,
             levelHistory: newHistory,
@@ -1263,12 +1306,12 @@ class AudioPlayerNotifier extends AsyncNotifier<MonitoringState> {
       idx,
       cam.copyWith(
         connectionStatus: newStatus,
-        // On a successful reconnect, clear the level history so a stale
-        // pre-outage waveform doesn't misrepresent the fresh stream, and
-        // zero the variation-based activity with it. Passing null keeps
-        // the existing values for the reconnecting case.
+        // On a successful reconnect, clear the level history and the level
+        // so a stale pre-outage waveform doesn't misrepresent the fresh
+        // stream. Passing null keeps the existing values for the
+        // reconnecting case.
         levelHistory: isNowPlaying ? const <double>[] : null,
-        audioActivity: isNowPlaying ? 0.0 : null,
+        audioLevel: isNowPlaying ? 0.0 : null,
       ),
     ));
     // RELY-03: a successful reconnect zeroes the watchdog so the next
@@ -1288,6 +1331,8 @@ class AudioPlayerNotifier extends AsyncNotifier<MonitoringState> {
       // poll would otherwise compute a large negative ptsDelta against the
       // previous stream's PTS and miscount one tick of `silenceDuration`.
       _lastAudioPts.remove(cameraId);
+      // A fresh stream gets a fresh noise-floor calibration too.
+      _levelTrackers.remove(cameraId);
     }
     // RELY-01 D-04: alert-timer lifecycle on supervisor-driven status changes.
     final cameraName = _findCameraName(cameraId) ?? cameraId;
@@ -1620,6 +1665,7 @@ class AudioPlayerNotifier extends AsyncNotifier<MonitoringState> {
       appLog('DRIFT', 'resetAll threw during stopMonitoring: $e');
     }
     _lastAudioPts.clear();
+    _levelTrackers.clear();
     _lastNotificationText = '';
     _lastNotificationTitle = '';
     for (final sub in _subscriptions) {
@@ -1734,6 +1780,7 @@ class AudioPlayerNotifier extends AsyncNotifier<MonitoringState> {
     final player = _players.remove(cameraId);
     _videoControllers.remove(cameraId);
     _lastAudioPts.remove(cameraId);
+    _levelTrackers.remove(cameraId);
     if (player != null) {
       try {
         await player.stop();
