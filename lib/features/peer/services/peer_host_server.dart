@@ -140,27 +140,36 @@ class PeerHostServer {
     }
   }
 
+  // Every return inside the try is awaited so a failing handler is caught
+  // HERE and answered with a 500, rather than becoming an unhandled future
+  // (and so the newer analyzer's unawaited_return_in_try_block is quiet).
   Future<void> _dispatch(HttpRequest req) async {
     try {
       final path = req.uri.path;
       final method = req.method;
       if (path == kPeerInfoPath && method == 'GET') {
-        return _json(req, 200, _infoBody());
+        return await _json(req, 200, _infoBody());
       }
       if (path == kPeerPairPath) {
-        if (method != 'POST') return _json(req, 405, {'error': 'method'});
-        return _handlePair(req);
+        if (method != 'POST') {
+          return await _json(req, 405, {'error': 'method'});
+        }
+        return await _handlePair(req);
       }
       if (path == kPeerStatusPath || path == kPeerAudioPath) {
-        if (method != 'GET') return _json(req, 405, {'error': 'method'});
+        if (method != 'GET') {
+          return await _json(req, 405, {'error': 'method'});
+        }
         final token = req.uri.queryParameters[kPeerTokenParam];
         if (token == null || token.isEmpty || !_tokenOk(token)) {
-          return _json(req, 401, {'error': 'unauthorized'});
+          return await _json(req, 401, {'error': 'unauthorized'});
         }
-        if (path == kPeerStatusPath) return _json(req, 200, _statusBody());
-        return _serveAudio(req);
+        if (path == kPeerStatusPath) {
+          return await _json(req, 200, _statusBody());
+        }
+        return await _serveAudio(req);
       }
-      return _json(req, 404, {'error': 'not_found'});
+      return await _json(req, 404, {'error': 'not_found'});
     } catch (e, st) {
       appLog('PEER_HOST', 'request ${req.uri.path} failed: $e\n$st');
       try {
