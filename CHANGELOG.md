@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.13.0](https://github.com/fvoska/rtsp-mixer/compare/v1.12.1...v1.13.0) (2026-09-19)
+
+
+### Features
+
+* **monitoring:** real loudness meter from a PCM tap, level-driven card glow and 60 s waveform ([#50](https://github.com/fvoska/rtsp-mixer/issues/50)) ([8af2016](https://github.com/fvoska/rtsp-mixer/commit/8af2016db3eaffab3157a72b5037da2f2849e29c))
+* **peer:** use a spare phone as a camera — host mode, LAN discovery, code/QR pairing ([#52](https://github.com/fvoska/rtsp-mixer/issues/52)) ([c9eb5d7](https://github.com/fvoska/rtsp-mixer/commit/c9eb5d793d76e4c12af8285f5aa5991854733c64))
+
 ## [1.12.1](https://github.com/fvoska/rtsp-mixer/compare/v1.12.0...v1.12.1) (2026-07-26)
 
 
