@@ -1356,7 +1356,7 @@ class AudioPlayerNotifier extends AsyncNotifier<MonitoringState> {
           cameraId: id,
           cameraName: cam.cameraName,
           url: url,
-          tune: _applyPlaybackTuning,
+          tune: (np) => _applyPlaybackTuning(np, forTap: true),
         );
         _levelTaps[id] = fresh;
         appLog('PCMTAP', '${cam.cameraName}: starting level tap');
@@ -1420,9 +1420,17 @@ class AudioPlayerNotifier extends AsyncNotifier<MonitoringState> {
   ///   `bufferedDelaySeconds` before the first sample (`cache-pause-initial`)
   ///   and rebuffer to the same depth after an underrun (`cache-pause-wait`).
   ///   The watchdog trims anything that grows beyond that depth.
-  Future<void> _applyPlaybackTuning(NativePlayer nativePlayer) async {
+  ///
+  /// The PCM level tap ([PcmLevelTap]) passes `forTap: true` and always gets
+  /// the realtime tuning: it feeds a meter, not the parent's ears, and a
+  /// buffered-mode prebuffer or rebuffer pause would only stall the meter
+  /// and trip the tap's own no-data deadlines for nothing.
+  Future<void> _applyPlaybackTuning(
+    NativePlayer nativePlayer, {
+    bool forTap = false,
+  }) async {
     final settings = ref.read(settingsProvider);
-    final buffered = settings.streamMode == StreamMode.buffered;
+    final buffered = !forTap && settings.streamMode == StreamMode.buffered;
     // TCP transport for reliable delivery over LAN. `nobuffer` (from mpv's
     // own low-latency profile) stops lavf from holding packets during probe.
     await nativePlayer.setProperty(
