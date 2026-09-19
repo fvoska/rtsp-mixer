@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.13.1](https://github.com/fvoska/rtsp-mixer/compare/v1.13.0...v1.13.1) (2026-09-19)
+
+
+### Bug Fixes
+
+* **build:** bump the Gradle wrapper to 8.14.3 so the release APK builds on Flutter 3.47 ([#53](https://github.com/fvoska/rtsp-mixer/issues/53)) ([f347814](https://github.com/fvoska/rtsp-mixer/commit/f3478141b535a79529763ea9ac60147b4ceb6b71))
+* **build:** replace the removed kotlinOptions DSL, upgrade all dependencies, pin Flutter 3.47.5 ([#55](https://github.com/fvoska/rtsp-mixer/issues/55)) ([3350025](https://github.com/fvoska/rtsp-mixer/commit/3350025895b34030a6265438319fd96dc34de966))
+
 ## [1.13.0](https://github.com/fvoska/rtsp-mixer/compare/v1.12.1...v1.13.0) (2026-09-19)
 
 
