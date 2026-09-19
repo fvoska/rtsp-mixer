@@ -111,6 +111,69 @@ class SettingsScreen extends ConsumerWidget {
           ),
           const Divider(height: 1),
           ListTile(
+            title: const Text('Stream mode'),
+            subtitle: Text(
+              settings.streamMode == StreamMode.realtime
+                  ? 'Realtime — lowest delay. Plays straight through WiFi '
+                      'jitter and quietly speeds up to stay at the live edge.'
+                  : 'Buffered — holds ${_delayLabel(settings.bufferedDelaySeconds)} '
+                      'of audio so a flaky WiFi never interrupts; always that '
+                      'far behind live.',
+              style: theme.textTheme.bodySmall,
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(
+              Spacing.lg,
+              0,
+              Spacing.lg,
+              Spacing.md,
+            ),
+            child: SegmentedButton<StreamMode>(
+              showSelectedIcon: false,
+              segments: const [
+                ButtonSegment(
+                  value: StreamMode.realtime,
+                  label: Text('Realtime'),
+                ),
+                ButtonSegment(
+                  value: StreamMode.buffered,
+                  label: Text('Buffered'),
+                ),
+              ],
+              selected: {settings.streamMode},
+              onSelectionChanged: (selection) {
+                if (selection.isEmpty) return;
+                notifier.setStreamMode(selection.first);
+              },
+            ),
+          ),
+          if (settings.streamMode == StreamMode.buffered) ...[
+            ListTile(
+              title: const Text('Buffer delay'),
+              subtitle: Text(
+                '${_delayLabel(settings.bufferedDelaySeconds)} behind live — '
+                'the stream pauses to refill this much after a dropout',
+                style: theme.textTheme.bodySmall,
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: Spacing.lg),
+              child: Slider(
+                value: settings.bufferedDelaySeconds,
+                min: kMinBufferedDelaySeconds,
+                max: kMaxBufferedDelaySeconds,
+                // 0.5 s steps from 0.5 s to 5 s.
+                divisions: 9,
+                label: _delayLabel(settings.bufferedDelaySeconds),
+                onChanged: (v) => notifier.setBufferedDelaySeconds(
+                  (v * 2).round() / 2.0,
+                ),
+              ),
+            ),
+          ],
+          const Divider(height: 1),
+          ListTile(
             title: const Text('Audio buffer'),
             subtitle: Text(
               '${(settings.audioBufferSeconds * 1000).round()} ms — '
@@ -327,6 +390,8 @@ class SettingsScreen extends ConsumerWidget {
   /// The threshold is a fraction of the level meter, which measures sound
   /// relative to the room's own quiet level — so the copy talks about how
   /// far above quiet a card lights, not about absolute loudness.
+  String _delayLabel(double seconds) => '${seconds.toStringAsFixed(1)} s';
+
   String _levelLabel(double v) {
     final pct = (v * 100).round();
     if (v < 0.2) {
