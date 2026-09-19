@@ -162,6 +162,41 @@ class StorageService {
     }
   }
 
+  /// Paired phone cameras (Roomtone host mode peers). Persisted separately
+  /// from manual cameras so the two lists evolve independently. Each entry is
+  /// a ProtectCamera JSON map (source = peer) whose stream URL carries the
+  /// bearer token — secure storage is the right home for it.
+  Future<void> savePeerCameras(List<Map<String, dynamic>> cameras) async {
+    await write('peer_cameras', jsonEncode(cameras));
+  }
+
+  Future<List<Map<String, dynamic>>> loadPeerCameras() async {
+    final raw = await read('peer_cameras');
+    if (raw == null) return [];
+    try {
+      return (jsonDecode(raw) as List<dynamic>).cast<Map<String, dynamic>>();
+    } catch (_) {
+      return [];
+    }
+  }
+
+  /// Host-mode configuration for THIS phone (its host id, display name,
+  /// paired monitors' token hashes, auto-resume flag). Opaque JSON owned by
+  /// PeerHostNotifier.
+  Future<void> savePeerHostConfig(Map<String, dynamic> config) async {
+    await write('peer_host_config', jsonEncode(config));
+  }
+
+  Future<Map<String, dynamic>?> loadPeerHostConfig() async {
+    final raw = await read('peer_host_config');
+    if (raw == null) return null;
+    try {
+      return jsonDecode(raw) as Map<String, dynamic>;
+    } catch (_) {
+      return null;
+    }
+  }
+
   /// Setup mode: 'unifi' (logged in via API key) or 'manual' (user skipped
   /// Unifi login and uses manual RTSP URLs only). Absent → not yet set up.
   Future<void> saveAuthMode(String mode) async => write('auth_mode', mode);

@@ -9,6 +9,7 @@ import '../../../core/theme/app_typography.dart';
 import '../../../core/theme/spacing.dart';
 import '../../../core/theme/status_colors.dart';
 import '../../cameras/widgets/camera_source_badge.dart';
+import '../../peer/helpers/peer_urls.dart';
 import '../helpers/audio_level_meter.dart';
 import '../models/player_state.dart';
 import '../providers/audio_player_provider.dart';
@@ -274,7 +275,7 @@ class _CameraAudioCardState extends ConsumerState<CameraAudioCard> {
                       ),
                       if (widget.showSourceBadge) ...[
                         const SizedBox(width: Spacing.sm),
-                        CameraSourceBadge(isManual: cs.isManual),
+                        CameraSourceBadge(source: cs.source),
                       ],
                     ],
                   ),
@@ -965,9 +966,16 @@ class _StreamInfoPanel extends StatelessWidget {
       }
     }
 
-    // Stream URL
-    if (cameraState.activeStreamUrl != null) {
-      rows.add(_row('URL', cameraState.activeStreamUrl!, labelStyle, dimStyle));
+    // Stream URL. A paired phone's URL carries its bearer token, so only the
+    // host:port is shown for peer cameras.
+    final activeUrl = cameraState.activeStreamUrl;
+    if (activeUrl != null) {
+      rows.add(_row(
+        'URL',
+        cameraState.isPeer ? peerAddressLabel(activeUrl) : activeUrl,
+        labelStyle,
+        dimStyle,
+      ));
     }
 
     if (rows.isEmpty) {

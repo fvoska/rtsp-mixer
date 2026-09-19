@@ -1,3 +1,5 @@
+import '../../cameras/models/protect_camera.dart';
+
 /// Connection status for a single camera's RTSP stream.
 enum CameraConnectionStatus { idle, connecting, playing, reconnecting, error }
 
@@ -98,9 +100,9 @@ class CameraAudioState {
   final String? modelKey;
   final int? micVolume;
 
-  /// True when this camera came from a manually-entered RTSP URL rather than
-  /// the Unifi API. Drives the source badge in the UI.
-  final bool isManual;
+  /// Where the camera came from (Unifi API, manual URL, paired phone).
+  /// Drives the source badge and which URL rewrites apply.
+  final CameraSource source;
 
   const CameraAudioState({
     required this.cameraId,
@@ -124,8 +126,10 @@ class CameraAudioState {
     this.mac,
     this.modelKey,
     this.micVolume,
-    this.isManual = false,
-  });
+    bool isManual = false,
+    CameraSource? source,
+  }) : source = source ??
+            (isManual ? CameraSource.manual : CameraSource.unifi);
 
   CameraAudioState copyWith({
     double? volume,
@@ -169,8 +173,14 @@ class CameraAudioState {
         mac: mac,
         modelKey: modelKey,
         micVolume: micVolume,
-        isManual: isManual,
+        source: source,
       );
+
+  /// True when this camera came from a manually-entered RTSP URL.
+  bool get isManual => source == CameraSource.manual;
+
+  /// True when this camera is a paired phone running Roomtone host mode.
+  bool get isPeer => source == CameraSource.peer;
 
   double get effectiveVolume => isMuted ? 0.0 : volume;
   bool get isLive => connectionStatus == CameraConnectionStatus.playing;
