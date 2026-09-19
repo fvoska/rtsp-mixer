@@ -6,6 +6,7 @@ import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter_foreground_task/flutter_foreground_task.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 
 import '../../../core/logging/app_logger.dart';
 import '../../../core/providers/settings_provider.dart';
@@ -17,6 +18,7 @@ import '../../auth/providers/auth_provider.dart';
 import '../../cameras/models/protect_camera.dart';
 import '../../cameras/providers/camera_provider.dart';
 import '../../cameras/widgets/camera_source_badge.dart';
+import '../../peer/helpers/peer_urls.dart';
 import '../helpers/session_status.dart';
 import '../helpers/uptime_format.dart';
 import '../models/player_state.dart';
@@ -357,8 +359,8 @@ class _LiveMonitoringView extends ConsumerWidget {
       loading: () => const Center(child: CircularProgressIndicator()),
       error: (e, _) => Center(child: Text('Error: $e')),
       data: (state) {
-        final activityThreshold =
-            ref.watch(settingsProvider).activityThreshold;
+        final levelThreshold =
+            ref.watch(settingsProvider).levelThreshold;
         final batterySaverMode =
             ref.watch(settingsProvider).batterySaverMode;
         if (state.cameras.isEmpty) {
@@ -366,9 +368,9 @@ class _LiveMonitoringView extends ConsumerWidget {
           // while the new state lands.
           return const Center(child: CircularProgressIndicator());
         }
-        // Only distinguish sources when both types are actually being monitored.
-        final showSourceBadge = state.cameras.any((c) => c.isManual) &&
-            state.cameras.any((c) => !c.isManual);
+        // Only distinguish sources when more than one type is being monitored.
+        final showSourceBadge =
+            state.cameras.map((c) => c.source).toSet().length > 1;
 
         // Open a picker of cameras that exist but aren't in the mix yet, and
         // add the chosen one to the LIVE session (never restarts the others).
@@ -432,7 +434,7 @@ class _LiveMonitoringView extends ConsumerWidget {
                             showVideoPreview:
                                 isVideoOn(state.cameras[i].cameraId),
                             showDebugInfo: showDetails,
-                            activityThreshold: activityThreshold,
+                            levelThreshold: levelThreshold,
                             batterySaverMode: batterySaverMode,
                             showSourceBadge: showSourceBadge,
                             onToggleVideo: () => onToggleCameraVideo(
@@ -743,11 +745,9 @@ class _AddCameraSheet extends StatelessWidget {
                 itemCount: cameras.length,
                 itemBuilder: (_, i) {
                   final cam = cameras[i];
-                  final subtitle = cam.isManual
-                      ? (cam.defaultStreamUrl ?? 'RTSP stream')
-                      : cam.state;
+                  final subtitle = _cameraSubtitle(cam);
                   return ListTile(
-                    leading: cam.isManual
+                    leading: cam.isLocallyManaged
                         ? null
                         : Container(
                             width: 8,
@@ -769,7 +769,7 @@ class _AddCameraSheet extends StatelessWidget {
                         ),
                         if (showSource) ...[
                           const SizedBox(width: Spacing.sm),
-                          CameraSourceBadge(isManual: cam.isManual),
+                          CameraSourceBadge(source: cam.source),
                         ],
                       ],
                     ),
@@ -789,6 +789,16 @@ class _AddCameraSheet extends StatelessWidget {
     );
   }
 }
+
+/// Picker/list subtitle per source: Unifi reports the console's connection
+/// state, manual cameras show their URL, paired phones show host:port (the
+/// stream URL carries the bearer token and must never be rendered).
+String _cameraSubtitle(ProtectCamera cam) => switch (cam.source) {
+      CameraSource.unifi => cam.state,
+      CameraSource.manual => cam.defaultStreamUrl ?? 'RTSP stream',
+      CameraSource.peer =>
+        'Phone camera · ${peerAddressLabel(cam.defaultStreamUrl)}',
+    };
 
 /// Validate a manually-entered RTSP/RTSPS URL. Returns an error string for an
 /// invalid form field, or null when acceptable.
@@ -906,6 +916,9 @@ Future<void> _showAddManualCameraDialog(
   }
 }
 
+/// What the picker's "+" menu can add.
+enum _AddCameraKind { rtsp, phone }
+
 /// Idle state: pick cameras to monitor + Start Monitoring.
 class _IdleCameraPicker extends ConsumerWidget {
   const _IdleCameraPicker({required this.onStart});
@@ -951,9 +964,11 @@ class _IdleCameraPicker extends ConsumerWidget {
                   const SizedBox(height: Spacing.sm),
                   Text(
                     isManualMode
-                        ? 'Add a camera by entering its RTSP stream URL.'
-                        : 'Add an RTSP URL manually, or enable RTSP on a '
-                            'Protect camera and refresh.',
+                        ? 'Add a camera by entering its RTSP stream URL, or '
+                            'pair a spare phone as a camera.'
+                        : 'Add an RTSP URL manually, pair a spare phone as a '
+                            'camera, or enable RTSP on a Protect camera and '
+                            'refresh.',
                     textAlign: TextAlign.center,
                     style: theme.textTheme.bodyMedium?.copyWith(
                       color: theme.colorScheme.onSurfaceVariant,
@@ -965,6 +980,12 @@ class _IdleCameraPicker extends ConsumerWidget {
                         _showAddManualCameraDialog(context, ref),
                     icon: const Icon(Icons.add),
                     label: const Text('Add RTSP camera'),
+                  ),
+                  const SizedBox(height: Spacing.sm),
+                  OutlinedButton.icon(
+                    onPressed: () => context.push('/pair'),
+                    icon: const Icon(Icons.phone_android),
+                    label: const Text('Add phone camera'),
                   ),
                   if (canRefresh) ...[
                     const SizedBox(height: Spacing.sm),
@@ -992,11 +1013,32 @@ class _IdleCameraPicker extends ConsumerWidget {
                       style: theme.textTheme.bodyLarge,
                     ),
                   ),
-                  IconButton(
+                  PopupMenuButton<_AddCameraKind>(
                     icon: const Icon(Icons.add),
-                    tooltip: 'Add RTSP camera',
-                    onPressed: () =>
+                    tooltip: 'Add camera',
+                    onSelected: (kind) => switch (kind) {
+                      _AddCameraKind.rtsp =>
                         _showAddManualCameraDialog(context, ref),
+                      _AddCameraKind.phone => context.push('/pair'),
+                    },
+                    itemBuilder: (_) => const [
+                      PopupMenuItem(
+                        value: _AddCameraKind.rtsp,
+                        child: ListTile(
+                          leading: Icon(Icons.link),
+                          title: Text('Add RTSP camera'),
+                          contentPadding: EdgeInsets.zero,
+                        ),
+                      ),
+                      PopupMenuItem(
+                        value: _AddCameraKind.phone,
+                        child: ListTile(
+                          leading: Icon(Icons.phone_android),
+                          title: Text('Add phone camera'),
+                          contentPadding: EdgeInsets.zero,
+                        ),
+                      ),
+                    ],
                   ),
                   if (canRefresh)
                     IconButton(
@@ -1018,7 +1060,6 @@ class _IdleCameraPicker extends ConsumerWidget {
                       itemBuilder: (_, i) {
                         final cam = state.cameras[i];
                         final selected = state.selectedIds.contains(cam.id);
-                        final url = cam.defaultStreamUrl;
                         return CheckboxListTile(
                           value: selected,
                           onChanged: (_) => ref
@@ -1034,16 +1075,16 @@ class _IdleCameraPicker extends ConsumerWidget {
                               ),
                               if (state.hasMixedSources) ...[
                                 const SizedBox(width: Spacing.sm),
-                                CameraSourceBadge(isManual: cam.isManual),
+                                CameraSourceBadge(source: cam.source),
                               ],
                             ],
                           ),
                           subtitle: Text(
-                            cam.isManual ? (url ?? 'RTSP stream') : cam.state,
+                            _cameraSubtitle(cam),
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
                           ),
-                          secondary: cam.isManual
+                          secondary: cam.isLocallyManaged
                               ? IconButton(
                                   icon: Icon(
                                     Icons.delete_outline,
@@ -1052,7 +1093,7 @@ class _IdleCameraPicker extends ConsumerWidget {
                                   tooltip: 'Remove camera',
                                   onPressed: () => ref
                                       .read(cameraNotifierProvider.notifier)
-                                      .removeManualCamera(cam.id),
+                                      .removeLocalCamera(cam.id),
                                 )
                               : Container(
                                   width: 8,
@@ -1092,10 +1133,10 @@ class _IdleCameraPicker extends ConsumerWidget {
                               onToggle: () => ref
                                   .read(cameraNotifierProvider.notifier)
                                   .toggleCamera(cam.id),
-                              onDelete: cam.isManual
+                              onDelete: cam.isLocallyManaged
                                   ? () => ref
                                       .read(cameraNotifierProvider.notifier)
-                                      .removeManualCamera(cam.id)
+                                      .removeLocalCamera(cam.id)
                                   : null,
                             ),
                           ),
@@ -1175,8 +1216,7 @@ class _CameraPickerTile extends StatelessWidget {
     final borderColor = selected
         ? theme.colorScheme.primary
         : theme.colorScheme.outlineVariant;
-    final subtitle =
-        camera.isManual ? (camera.defaultStreamUrl ?? 'RTSP stream') : camera.state;
+    final subtitle = _cameraSubtitle(camera);
     return Material(
       color: selected
           ? theme.colorScheme.primaryContainer.withValues(alpha: 0.4)
@@ -1219,14 +1259,14 @@ class _CameraPickerTile extends StatelessWidget {
                         ),
                         if (showSource) ...[
                           const SizedBox(width: Spacing.xs),
-                          CameraSourceBadge(isManual: camera.isManual),
+                          CameraSourceBadge(source: camera.source),
                         ],
                       ],
                     ),
                     const SizedBox(height: 2),
                     Row(
                       children: [
-                        if (!camera.isManual) ...[
+                        if (camera.isUnifi) ...[
                           Container(
                             width: 8,
                             height: 8,

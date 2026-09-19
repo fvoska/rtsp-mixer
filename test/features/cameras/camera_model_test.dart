@@ -118,4 +118,47 @@ void main() {
       expect(updated.source, CameraSource.manual);
     });
   });
+  peerCameraTests();
+}
+
+void peerCameraTests() {
+  group('ProtectCamera peer', () {
+    test('peer factory sets source, host id, single stream URL, mic on', () {
+      final cam = ProtectCamera.peer(
+        id: 'peer-1',
+        url: 'http://192.168.1.20:47831/roomtone/v1/audio.wav?token=t',
+        hostId: 'host-abc',
+        name: 'Nursery phone',
+      );
+      expect(cam.isPeer, true);
+      expect(cam.isManual, false);
+      expect(cam.isUnifi, false);
+      expect(cam.isLocallyManaged, true);
+      expect(cam.source, CameraSource.peer);
+      expect(cam.peerHostId, 'host-abc');
+      expect(cam.isMicEnabled, true);
+      expect(cam.defaultQuality, 'stream');
+    });
+
+    test('peer camera round-trips through JSON', () {
+      final cam = ProtectCamera.peer(
+          id: 'peer-1', url: 'http://h:1/roomtone/v1/audio.wav?token=t', hostId: 'x');
+      final restored = ProtectCamera.fromJson(cam.toJson());
+      expect(restored.source, CameraSource.peer);
+      expect(restored.peerHostId, 'x');
+      expect(restored.defaultStreamUrl, cam.defaultStreamUrl);
+    });
+
+    test('copyWith keeps the peer host id', () {
+      final cam = ProtectCamera.peer(id: 'p', url: 'http://a/x', hostId: 'h');
+      expect(cam.copyWith(rtspsStreamUrls: {'stream': 'http://b/x'}).peerHostId,
+          'h');
+    });
+
+    test('unknown source names decode to unifi rather than throwing', () {
+      final cam = ProtectCamera.fromJson(
+          {'id': 'x', 'state': 'CONNECTED', 'source': 'hologram'});
+      expect(cam.source, CameraSource.unifi);
+    });
+  });
 }

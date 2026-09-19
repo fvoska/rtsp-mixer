@@ -12,6 +12,7 @@ import 'core/services/foreground_service.dart';
 import 'core/theme/app_theme.dart';
 import 'features/monitoring/helpers/session_status.dart';
 import 'features/monitoring/providers/audio_player_provider.dart';
+import 'features/peer/providers/peer_host_provider.dart';
 
 class App extends ConsumerStatefulWidget {
   const App({super.key});
@@ -73,6 +74,12 @@ class _AppState extends ConsumerState<App> {
         notifier.stopMonitoringAndCleanup();
       } catch (e) {
         appLog('FGS', 'Error handling stop: $e');
+      }
+    } else if (data == 'stop_host') {
+      try {
+        ref.read(peerHostProvider.notifier).stop();
+      } catch (e) {
+        appLog('FGS', 'Error handling stop_host: $e');
       }
     }
   }

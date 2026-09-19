@@ -28,8 +28,9 @@ class HelpScreen extends StatelessWidget {
                 Text(
                   'This app plays audio (and optional video) from cameras on '
                   'your local network. Connect a UniFi Protect console with an '
-                  'API key, or add rtsp:// stream URLs from any camera brand '
-                  'manually — or both.',
+                  'API key, add rtsp:// stream URLs from any camera brand '
+                  'manually, or turn a spare phone into a camera — or all '
+                  'three.',
                   style: theme.textTheme.bodyMedium?.copyWith(
                     color: theme.colorScheme.onSurfaceVariant,
                   ),
@@ -61,6 +62,44 @@ class HelpScreen extends StatelessWidget {
                     _Note('The API key only works on your local network — '
                         'this app connects directly to the console, not '
                         'through UniFi\'s cloud.'),
+                  ],
+                ),
+                const SizedBox(height: Spacing.md),
+                const _HelpSection(
+                  icon: Icons.phone_android,
+                  title: 'Use a spare phone as a camera',
+                  children: [
+                    _Note('Any phone that runs Roomtone can be the camera: it '
+                        'shares its microphone over your Wi‑Fi and the phone '
+                        'you monitor from listens to it like any other '
+                        'camera — same mixing, reconnects and alerts.'),
+                    SizedBox(height: Spacing.sm),
+                    _Step(1, 'On the nursery phone, open Roomtone and choose '
+                        '"Use this phone as a camera" (on the setup screen, '
+                        'or in Settings → Phone cameras). Give it a name, '
+                        'then tap "Start sharing microphone" and allow the '
+                        'microphone and notification prompts.'),
+                    _Step(2, 'It shows a 6-digit pairing code and a QR '
+                        'code. Leave that screen open for a moment.'),
+                    _Step(3, 'On the monitoring phone: Monitor tab → "+" → '
+                        '"Add phone camera". The nursery phone appears in '
+                        'the list — tap it and type the code, or tap "Scan '
+                        'QR code" and point the camera at the host\'s QR.'),
+                    _Step(4, 'Select the new camera and start monitoring as '
+                        'usual. The pairing is remembered on both phones; '
+                        'it reconnects on its own, even if the nursery '
+                        'phone gets a new Wi‑Fi address.'),
+                    SizedBox(height: Spacing.sm),
+                    _Note('Both phones must be on the same Wi‑Fi network. '
+                        'If the nursery phone does not appear in the list, '
+                        'use the QR code or "Enter address and code '
+                        'manually" with the address shown under the QR.'),
+                    _Note('Keep the nursery phone plugged in. Sharing keeps '
+                        'running with the screen off; a notification shows '
+                        'while it does, with a "Stop sharing" button.'),
+                    _Note('Each pairing code works once. Paired monitors are '
+                        'listed on the host screen and can be removed there '
+                        'at any time.'),
                   ],
                 ),
                 const SizedBox(height: Spacing.md),

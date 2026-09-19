@@ -29,6 +29,10 @@ ThemeMode _themeModeFromName(Object? raw) {
 /// Tolerant bool decode: anything that is not a real `true` reads as false.
 bool _boolOrFalse(Object? raw) => raw is bool && raw;
 
+/// Default [AppSettings.levelThreshold]: a quarter of the way up the meter,
+/// comfortably above poll jitter on a calm night, well below a cry.
+const kDefaultLevelThreshold = 0.25;
+
 class AppSettings {
   /// Use plain RTSP (port 7447) instead of RTSPS (port 7441 + SRTP).
   final bool useRtsp;
@@ -36,9 +40,15 @@ class AppSettings {
   /// Audio output buffer in seconds. Higher = smoother, more latency.
   final double audioBufferSeconds;
 
-  /// Activity-trigger sensitivity for the highlight border on camera cards.
-  /// 0.01 = most sensitive (any sound), 0.5 = least.
-  final double activityThreshold;
+  /// Sound level (0..1, relative to the room's noise floor — see
+  /// `AudioLevelTracker`) above which a camera card lights up its border.
+  /// 0.05 = most sensitive (almost any sound), 0.6 = least (loud sounds only).
+  ///
+  /// Persisted under the key `levelThreshold`. The previous meter stored a
+  /// peak-to-trough *variation* threshold under `activityThreshold` with a
+  /// default of 0.05; that value means something else on this scale, so it
+  /// is deliberately not read back.
+  final double levelThreshold;
 
   /// System / Light / Dark, chosen by the user in Settings.
   final ThemeMode themeMode;
@@ -62,7 +72,7 @@ class AppSettings {
   const AppSettings({
     this.useRtsp = false,
     this.audioBufferSeconds = 0.5,
-    this.activityThreshold = 0.05,
+    this.levelThreshold = kDefaultLevelThreshold,
     this.themeMode = ThemeMode.system,
     this.oledDark = false,
     this.batterySaverMode = false,
@@ -71,7 +81,7 @@ class AppSettings {
   AppSettings copyWith({
     bool? useRtsp,
     double? audioBufferSeconds,
-    double? activityThreshold,
+    double? levelThreshold,
     ThemeMode? themeMode,
     bool? oledDark,
     bool? batterySaverMode,
@@ -79,7 +89,7 @@ class AppSettings {
       AppSettings(
         useRtsp: useRtsp ?? this.useRtsp,
         audioBufferSeconds: audioBufferSeconds ?? this.audioBufferSeconds,
-        activityThreshold: activityThreshold ?? this.activityThreshold,
+        levelThreshold: levelThreshold ?? this.levelThreshold,
         themeMode: themeMode ?? this.themeMode,
         oledDark: oledDark ?? this.oledDark,
         batterySaverMode: batterySaverMode ?? this.batterySaverMode,
@@ -91,7 +101,7 @@ class AppSettings {
       other is AppSettings &&
           useRtsp == other.useRtsp &&
           audioBufferSeconds == other.audioBufferSeconds &&
-          activityThreshold == other.activityThreshold &&
+          levelThreshold == other.levelThreshold &&
           themeMode == other.themeMode &&
           oledDark == other.oledDark &&
           batterySaverMode == other.batterySaverMode;
@@ -100,7 +110,7 @@ class AppSettings {
   int get hashCode => Object.hash(
         useRtsp,
         audioBufferSeconds,
-        activityThreshold,
+        levelThreshold,
         themeMode,
         oledDark,
         batterySaverMode,
@@ -109,7 +119,7 @@ class AppSettings {
   Map<String, dynamic> toJson() => {
         'useRtsp': useRtsp,
         'audioBufferSeconds': audioBufferSeconds,
-        'activityThreshold': activityThreshold,
+        'levelThreshold': levelThreshold,
         'themeMode': _themeModeToName(themeMode),
         'oledDark': oledDark,
         'batterySaverMode': batterySaverMode,
@@ -119,8 +129,8 @@ class AppSettings {
         useRtsp: json['useRtsp'] as bool? ?? false,
         audioBufferSeconds:
             (json['audioBufferSeconds'] as num?)?.toDouble() ?? 0.5,
-        activityThreshold:
-            (json['activityThreshold'] as num?)?.toDouble() ?? 0.05,
+        levelThreshold:
+            (json['levelThreshold'] as num?)?.toDouble() ?? kDefaultLevelThreshold,
         themeMode: _themeModeFromName(json['themeMode']),
         // Same tolerance as themeMode, and for the same reason: a cast here
         // would throw out of the whole decode, and _loadFromStorage swallows
@@ -146,7 +156,7 @@ class SettingsNotifier extends Notifier<AppSettings> {
         final settings = AppSettings.fromJson(jsonDecode(raw) as Map<String, dynamic>);
         state = settings;
         appLog('SETTINGS',
-            'Loaded: rtsp=${settings.useRtsp} buffer=${settings.audioBufferSeconds}s activity=${settings.activityThreshold}');
+            'Loaded: rtsp=${settings.useRtsp} buffer=${settings.audioBufferSeconds}s activity=${settings.levelThreshold}');
       }
     } catch (e) {
       appLog('SETTINGS', 'Failed to load settings: $e');
@@ -183,9 +193,9 @@ class SettingsNotifier extends Notifier<AppSettings> {
     _save();
   }
 
-  void setActivityThreshold(double value) {
-    state = state.copyWith(activityThreshold: value);
-    appLog('SETTINGS', 'Activity threshold: $value');
+  void setLevelThreshold(double value) {
+    state = state.copyWith(levelThreshold: value);
+    appLog('SETTINGS', 'Level threshold: $value');
     _save();
   }
 

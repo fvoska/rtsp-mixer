@@ -9,6 +9,7 @@ import '../../auth/providers/auth_provider.dart';
 import '../../cameras/models/protect_camera.dart';
 import '../../cameras/providers/camera_provider.dart';
 import '../../monitoring/providers/audio_player_provider.dart';
+import '../../peer/providers/peer_host_provider.dart';
 
 class SettingsScreen extends ConsumerWidget {
   const SettingsScreen({super.key});
@@ -28,6 +29,7 @@ class SettingsScreen extends ConsumerWidget {
         .where((c) => c.isManual)
         .toList();
     final showConnectionSection = isUnifiMode || manualCameras.isNotEmpty;
+    final hostState = ref.watch(peerHostProvider);
 
     return Scaffold(
       appBar: AppBar(title: const Text('Settings')),
@@ -133,17 +135,19 @@ class SettingsScreen extends ConsumerWidget {
           ListTile(
             title: const Text('Activity trigger'),
             subtitle: Text(
-              _activityLabel(settings.activityThreshold),
+              _levelLabel(settings.levelThreshold),
               style: theme.textTheme.bodySmall,
             ),
           ),
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: Spacing.lg),
             child: Slider(
-              value: settings.activityThreshold,
-              min: 0.01,
-              max: 0.5,
-              onChanged: notifier.setActivityThreshold,
+              value: settings.levelThreshold.clamp(0.05, 0.6),
+              min: 0.05,
+              max: 0.6,
+              divisions: 11,
+              label: '${(settings.levelThreshold * 100).round()}%',
+              onChanged: notifier.setLevelThreshold,
             ),
           ),
           const Padding(
@@ -233,11 +237,46 @@ class SettingsScreen extends ConsumerWidget {
             ],
           ],
           const Divider(height: 1),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(
+              Spacing.lg,
+              Spacing.md,
+              Spacing.lg,
+              0,
+            ),
+            child: Text(
+              'Phone cameras',
+              style: theme.textTheme.labelLarge?.copyWith(
+                color: theme.colorScheme.primary,
+              ),
+            ),
+          ),
+          ListTile(
+            leading: const Icon(Icons.phone_android),
+            title: const Text('Use this phone as a camera'),
+            subtitle: Text(
+              hostState.isRunning
+                  ? 'Sharing microphone as "${hostState.name}"'
+                  : 'Share this phone\'s microphone with another phone.',
+              style: theme.textTheme.bodySmall,
+            ),
+            onTap: () => context.push('/host'),
+          ),
+          ListTile(
+            leading: const Icon(Icons.qr_code_scanner),
+            title: const Text('Pair with a phone camera'),
+            subtitle: Text(
+              'Find a phone sharing its microphone and add it as a camera.',
+              style: theme.textTheme.bodySmall,
+            ),
+            onTap: () => context.push('/pair'),
+          ),
+          const Divider(height: 1),
           ListTile(
             leading: const Icon(Icons.help_outline),
             title: const Text('Help & setup guides'),
             subtitle: const Text(
-              'UniFi API keys, RTSP for Reolink, Tapo, and more.',
+              'UniFi API keys, RTSP for Reolink, Tapo, phone cameras, and more.',
             ),
             onTap: () => context.push('/help'),
           ),
@@ -285,10 +324,18 @@ class SettingsScreen extends ConsumerWidget {
   // The threshold gates the card-border highlight on recent VARIATION in
   // sound level (how much the level swung over the last few seconds), not
   // on absolute loudness.
-  String _activityLabel(double v) {
-    if (v < 0.05) return 'High sensitivity — highlight even small changes in sound level';
-    if (v < 0.15) return 'Medium sensitivity — highlight moderate changes in sound level';
-    return 'Low sensitivity — highlight only large swings, like crying';
+  /// The threshold is a fraction of the level meter, which measures sound
+  /// relative to the room's own quiet level — so the copy talks about how
+  /// far above quiet a card lights, not about absolute loudness.
+  String _levelLabel(double v) {
+    final pct = (v * 100).round();
+    if (v < 0.2) {
+      return 'High sensitivity ($pct%) — lights up on small sounds above the room\'s quiet level';
+    }
+    if (v < 0.4) {
+      return 'Medium sensitivity ($pct%) — lights up on clear sounds like fussing or talking';
+    }
+    return 'Low sensitivity ($pct%) — lights up only on loud sounds like crying';
   }
 
   Future<void> _editLocalHost(

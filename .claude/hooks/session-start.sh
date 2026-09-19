@@ -15,10 +15,11 @@ if [ "${CLAUDE_CODE_REMOTE:-}" != "true" ]; then
   exit 0
 fi
 
-# Pinned to match the Dart SDK constraint in pubspec.yaml (sdk: ^3.9.2).
-# Flutter 3.44.7 bundles Dart 3.12.2. Bump this when the project needs a newer
-# Dart/Flutter; keep it pinned for reproducible cloud sessions.
-FLUTTER_VERSION="3.44.7"
+# Pinned to the SAME version as `flutter-version` in .github/workflows/*.yml so
+# a cloud session analyses and tests with exactly the toolchain CI uses (the
+# analyzer gains lints and the Gradle plugin raises floors between releases;
+# 3.44 → 3.47 did both). Bump both together.
+FLUTTER_VERSION="3.47.5"
 FLUTTER_HOME="${HOME}/flutter"
 FLUTTER_BIN="${FLUTTER_HOME}/bin"
 DART_BIN="${FLUTTER_HOME}/bin/cache/dart-sdk/bin"

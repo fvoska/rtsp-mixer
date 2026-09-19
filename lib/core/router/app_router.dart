@@ -11,6 +11,9 @@ import '../../features/monitoring/screens/health_summary_screen.dart';
 import '../../features/monitoring/screens/log_screen.dart';
 import '../../features/monitoring/screens/monitoring_screen.dart';
 import '../../features/monitoring/screens/sessions_list_screen.dart';
+import '../../features/peer/screens/host_screen.dart';
+import '../../features/peer/screens/pair_screen.dart';
+import '../../features/peer/screens/qr_scan_screen.dart';
 import '../../features/settings/screens/settings_screen.dart';
 import '../widgets/main_shell.dart';
 
@@ -29,9 +32,12 @@ final appRouterProvider = Provider<GoRouter>((ref) {
       if (auth.isLoading && !auth.hasValue) return null;
 
       // Not authenticated — go to login. /help stays reachable so setup
-      // instructions are available before any credentials exist.
+      // instructions are available before any credentials exist, and /host
+      // so an old phone can be turned into a camera without ever signing in.
       if (!authenticated) {
-        return (location == '/login' || location == '/help')
+        return (location == '/login' ||
+                location == '/help' ||
+                location == '/host')
             ? null
             : '/login';
       }
@@ -60,6 +66,20 @@ final appRouterProvider = Provider<GoRouter>((ref) {
       // About lives ABOVE the shell (like /help) so it stacks as a normal
       // detail page with its own AppBar + back button.
       GoRoute(path: '/about', builder: (_, _) => const AboutScreen()),
+      // Phone-as-camera host mode. ABOVE the shell and reachable before
+      // login (see redirect) — the nursery phone needs no console.
+      GoRoute(path: '/host', builder: (_, _) => const HostScreen()),
+      // Monitor side of phone pairing: discovery list, QR scan, manual entry.
+      GoRoute(
+        path: '/pair',
+        builder: (_, _) => const PairScreen(),
+        routes: [
+          GoRoute(
+            path: 'scan',
+            builder: (_, _) => const QrScanScreen(),
+          ),
+        ],
+      ),
       // Session detail lives ABOVE the shell so it stacks like a normal
       // detail page (its own AppBar + back button, no tab bar — standard
       // mobile pattern). Keeping it inside the ShellRoute hid it because

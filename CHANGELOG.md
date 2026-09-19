@@ -1,5 +1,21 @@
 # Changelog
 
+## [1.13.1](https://github.com/fvoska/rtsp-mixer/compare/v1.13.0...v1.13.1) (2026-09-19)
+
+
+### Bug Fixes
+
+* **build:** bump the Gradle wrapper to 8.14.3 so the release APK builds on Flutter 3.47 ([#53](https://github.com/fvoska/rtsp-mixer/issues/53)) ([f347814](https://github.com/fvoska/rtsp-mixer/commit/f3478141b535a79529763ea9ac60147b4ceb6b71))
+* **build:** replace the removed kotlinOptions DSL, upgrade all dependencies, pin Flutter 3.47.5 ([#55](https://github.com/fvoska/rtsp-mixer/issues/55)) ([3350025](https://github.com/fvoska/rtsp-mixer/commit/3350025895b34030a6265438319fd96dc34de966))
+
+## [1.13.0](https://github.com/fvoska/rtsp-mixer/compare/v1.12.1...v1.13.0) (2026-09-19)
+
+
+### Features
+
+* **monitoring:** real loudness meter from a PCM tap, level-driven card glow and 60 s waveform ([#50](https://github.com/fvoska/rtsp-mixer/issues/50)) ([8af2016](https://github.com/fvoska/rtsp-mixer/commit/8af2016db3eaffab3157a72b5037da2f2849e29c))
+* **peer:** use a spare phone as a camera — host mode, LAN discovery, code/QR pairing ([#52](https://github.com/fvoska/rtsp-mixer/issues/52)) ([c9eb5d7](https://github.com/fvoska/rtsp-mixer/commit/c9eb5d793d76e4c12af8285f5aa5991854733c64))
+
 ## [1.12.1](https://github.com/fvoska/rtsp-mixer/compare/v1.12.0...v1.12.1) (2026-07-26)
 
 

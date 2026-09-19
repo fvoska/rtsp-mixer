@@ -10,6 +10,17 @@ Point it at whatever cameras you already have.
 
 - **UniFi Protect** via the official integration API (`X-API-Key`) — automatic camera discovery and per-camera RTSPS stream URLs, no manual copy-paste.
 - **Manual RTSP/RTSPS cameras** for everyone else — Reolink, Tapo, or any generic RTSP source. A skip-UniFi setup path lets non-UniFi users go straight to adding their own stream URLs.
+- **A spare phone as a camera** — run Roomtone on the phone in the nursery, tap "Use this phone as a camera", and it shares its microphone over Wi‑Fi. See *Phone-to-phone* below.
+
+## Phone-to-phone
+
+No camera at all? Two phones are enough.
+
+- **Host mode** turns any phone running Roomtone into a camera: it captures its microphone and serves it on the local network, and keeps doing so overnight with the screen off (foreground service, wake + Wi‑Fi lock, automatic microphone recovery).
+- **Auto-discovery** — the monitoring phone finds hosts on the same Wi‑Fi by itself; no IP addresses to type.
+- **Pairing by code or QR** — the host shows a one-time 6-digit code and a QR code; type the code or scan it once, and the pairing is remembered on both ends. Wrong-code guessing is throttled, each code is spent after use, and the host lists paired monitors and can unpair them any time.
+- **Same pipeline as every other camera** — a paired phone is just another camera in the mix: per-camera volume, reconnect-forever, zombie detection, alerts, and session history all apply. If the host's Wi‑Fi address changes, the monitor finds it again by id.
+- Everything stays on your LAN; nothing is relayed through the cloud.
 
 ## Listening & mixing
 
@@ -55,9 +66,10 @@ Know it's working — and know why if it isn't.
 
 See sound without turning the volume up.
 
-- Absolute **SPL-style level bar** per camera.
-- **10-second rolling waveform** chart.
-- **Variation-driven card highlighting** that lights up a camera when its room gets louder.
+- A **real level meter** per camera, measured from the decoded audio itself: a second, silent decoder taps each stream and reads its true loudness. It learns how quiet the nursery normally is and shows how far above that the sound is right now — no per-camera calibration, no false glow from a noisy microphone.
+- **Cards that glow with the sound.** The border and halo brighten as the level rises and fade as the room settles, so a cry reads from across the room and a steady hum stays dark.
+- A **60-second waveform** of that same level, with the parts that lit the card drawn in green and the trigger threshold marked, so you can see what happened while you dozed.
+- One **sensitivity slider** in Settings that sets how far above the room's quiet level a card lights up.
 
 ## Connectivity flexibility
 

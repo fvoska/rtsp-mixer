@@ -41,6 +41,11 @@ jobs:
       - uses: subosito/flutter-action@v2
         with:
           channel: stable
+          # Pinned (and mirrored in .claude/hooks/session-start.sh) so a new
+          # Flutter stable cannot break an unchanged repo: 3.47 added analyzer
+          # lints and raised the Gradle floor, which failed the v1.13.0 build.
+          # Bump deliberately, together with the hook.
+          flutter-version: 3.47.5
           cache: true
 
       - run: flutter pub get
@@ -144,6 +149,11 @@ jobs:
       - uses: subosito/flutter-action@v2
         with:
           channel: stable
+          # Pinned (and mirrored in .claude/hooks/session-start.sh) so a new
+          # Flutter stable cannot break an unchanged repo: 3.47 added analyzer
+          # lints and raised the Gradle floor, which failed the v1.13.0 build.
+          # Bump deliberately, together with the hook.
+          flutter-version: 3.47.5
           cache: true
 
       - run: flutter pub get
@@ -186,6 +196,11 @@ jobs:
       - uses: subosito/flutter-action@v2
         with:
           channel: stable
+          # Pinned (and mirrored in .claude/hooks/session-start.sh) so a new
+          # Flutter stable cannot break an unchanged repo: 3.47 added analyzer
+          # lints and raised the Gradle floor, which failed the v1.13.0 build.
+          # Bump deliberately, together with the hook.
+          flutter-version: 3.47.5
           cache: true
 
       - run: flutter pub get
