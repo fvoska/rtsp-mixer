@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.15.0](https://github.com/fvoska/rtsp-mixer/compare/v1.14.0...v1.15.0) (2026-09-20)
+
+
+### Features
+
+* **peer:** show the host phone's battery level on the monitor ([#58](https://github.com/fvoska/rtsp-mixer/issues/58)) ([71f0f58](https://github.com/fvoska/rtsp-mixer/commit/71f0f5898ec461b3de5524364958a98ace264289))
+
 ## [1.14.0](https://github.com/fvoska/rtsp-mixer/compare/v1.13.1...v1.14.0) (2026-09-19)
 
 
