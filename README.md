@@ -88,6 +88,7 @@ See sound without turning the volume up.
 - A dedicated **Settings** tab.
 - In-app **Help & Setup** guides — UniFi API key, Reolink, Tapo, VPN/Tailscale, and general RTSP tips.
 - An **About** page with the app version, changelog, and open-source licenses.
+- An **update check on launch** — when a newer release is published on GitHub, a dismissible strip offers the download in one tap.
 
 ## Platforms
 
