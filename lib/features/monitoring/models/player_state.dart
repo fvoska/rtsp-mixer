@@ -1,4 +1,5 @@
 import '../../cameras/models/protect_camera.dart';
+import '../../peer/models/battery_status.dart';
 
 /// Connection status for a single camera's RTSP stream.
 enum CameraConnectionStatus { idle, connecting, playing, reconnecting, error }
@@ -133,6 +134,11 @@ class CameraAudioState {
   /// Drives the source badge and which URL rewrites apply.
   final CameraSource source;
 
+  /// Battery of the paired phone behind a [CameraSource.peer] camera, as
+  /// last reported over its status endpoint. Null for every other source,
+  /// for hosts that do not report one, and while the reading is stale.
+  final BatteryStatus? hostBattery;
+
   const CameraAudioState({
     required this.cameraId,
     required this.cameraName,
@@ -156,6 +162,7 @@ class CameraAudioState {
     this.mac,
     this.modelKey,
     this.micVolume,
+    this.hostBattery,
     bool isManual = false,
     CameraSource? source,
   }) : source = source ??
@@ -179,6 +186,7 @@ class CameraAudioState {
     Object? levelDb = _keep,
     double? silenceDuration,
     List<double>? levelHistory,
+    Object? hostBattery = _keep,
   }) =>
       CameraAudioState(
         cameraId: cameraId,
@@ -207,6 +215,10 @@ class CameraAudioState {
         modelKey: modelKey,
         micVolume: micVolume,
         source: source,
+        // Same sentinel as levelDb: explicit null clears the reading.
+        hostBattery: identical(hostBattery, _keep)
+            ? this.hostBattery
+            : hostBattery as BatteryStatus?,
       );
 
   /// True when this camera came from a manually-entered RTSP URL.

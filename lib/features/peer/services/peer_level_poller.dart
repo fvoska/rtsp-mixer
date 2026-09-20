@@ -3,8 +3,10 @@ import 'dart:convert';
 import 'dart:io';
 
 import '../../../core/logging/app_logger.dart';
+import '../models/battery_status.dart';
 
-/// Polls a paired phone's `/status` endpoint for its microphone level.
+/// Polls a paired phone's `/status` endpoint for its microphone level and
+/// battery.
 ///
 /// The monitor's loudness proxy is the encoded audio bitrate, which is
 /// constant for a PCM stream — so a phone camera reports its own RMS level
@@ -71,6 +73,16 @@ class PeerLevelPoller {
   /// Latest listener count reported by the host, if known.
   int? listenersFor(String cameraId) => _entries[cameraId]?.listeners;
 
+  /// The host phone's battery, or null when it did not report one (older
+  /// build, no battery) or the last poll is stale — a reading from a phone
+  /// that stopped answering would be misleading.
+  BatteryStatus? batteryFor(String cameraId) {
+    final e = _entries[cameraId];
+    if (e == null || e.lastOk == null || e.battery == null) return null;
+    if (DateTime.now().difference(e.lastOk!) > staleAfter) return null;
+    return e.battery;
+  }
+
   Future<void> _tick(String cameraId, _Entry entry) async {
     if (entry.inFlight) return;
     entry.inFlight = true;
@@ -86,6 +98,7 @@ class PeerLevelPoller {
       entry.levelDb = db is num && db.isFinite ? db.toDouble() : null;
       final listeners = json['listeners'];
       if (listeners is int) entry.listeners = listeners;
+      entry.battery = BatteryStatus.tryFromJson(json['battery']);
     } catch (e) {
       // Logged sparsely: this runs twice a second per phone camera.
       if (entry.failures++ % 20 == 0) {
@@ -122,6 +135,7 @@ class _Entry {
   double level = 0.0;
   double? levelDb;
   int? listeners;
+  BatteryStatus? battery;
   DateTime? lastOk;
   bool inFlight = false;
   int failures = 0;

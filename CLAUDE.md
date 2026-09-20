@@ -149,7 +149,7 @@ Do NOT attempt to use lavfi audio filters without first verifying they exist in 
 
 Anything that needs decoded audio (metering, analysis) goes through a separate, disposable `Player` (see `PcmLevelTap`), never the one the parent is listening to — a failure there costs a feature, not the stream.
 
-Paired phone cameras (`CameraSource.peer`, `lib/features/peer/`) stream constant-bitrate PCM16 WAV over HTTP, so the bitrate proxy is blind for them: the tap is their primary meter as well, and the fallback is the dBFS the host phone measures on its own microphone (`/roomtone/v1/status` → `LevelSource.host`), never the bitrate.
+Paired phone cameras (`CameraSource.peer`, `lib/features/peer/`) stream constant-bitrate PCM16 WAV over HTTP, so the bitrate proxy is blind for them: the tap is their primary meter as well, and the fallback is the dBFS the host phone measures on its own microphone (`/roomtone/v1/status` → `LevelSource.host`), never the bitrate. The same status poll carries the host's battery (`battery: {percent, plugged}`, read via `battery_plus` on the host, optional on the wire so older hosts still pair) into `CameraAudioState.hostBattery` for the card's chip and low-battery warning; it is a courtesy readout and must never affect the stream.
 
 ### Live edge, latency and stream modes
 

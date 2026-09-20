@@ -5,7 +5,7 @@ milestone_name: milestone
 status: executing
 stopped_at: Phase 4 UI-SPEC approved
 last_updated: "2026-04-24T10:25:55.850Z"
-last_activity: 2026-09-19 -- Quick task 260919-p2p (phone-to-phone host mode + pairing)
+last_activity: 2026-09-20 -- Quick task 260920-bat (host phone battery on the monitor)
 progress:
   total_phases: 4
   completed_phases: 3
@@ -28,7 +28,7 @@ See: .planning/PROJECT.md (updated 2026-04-01)
 Phase: 04 (reliability-overnight-monitoring) — EXECUTING
 Plan: 1 of 5
 Status: Executing Phase 04
-Last activity: 2026-09-19 -- Completed quick task 260919-p7d (live-edge speed catch-up + Realtime/Buffered stream modes)
+Last activity: 2026-09-20 -- Completed quick task 260920-bat (host phone battery shown on the monitor's card)
 
 Progress: [█████░░░░░] 50%
 

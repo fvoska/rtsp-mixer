@@ -1215,6 +1215,10 @@ class AudioPlayerNotifier extends AsyncNotifier<MonitoringState> {
             silenceDuration: newSilence,
             streamInfo: newInfo,
             levelHistory: newHistory,
+            // Courtesy readout from a paired phone's status poll; null for
+            // every other source and whenever the poll has gone stale.
+            hostBattery:
+                cam.isPeer ? _peerLevels.batteryFor(cam.cameraId) : null,
           ),
         );
         changed = true;
@@ -1663,6 +1667,10 @@ class AudioPlayerNotifier extends AsyncNotifier<MonitoringState> {
         // reconnecting case.
         levelHistory: isNowPlaying ? const <double>[] : null,
         audioLevel: isNowPlaying ? 0.0 : null,
+        // A phone that dropped may have been unplugged or died: don't show
+        // a pre-outage battery as if it were current. The next poll tick
+        // after reconnect fills it in again.
+        hostBattery: isNowPlaying ? null : cam.hostBattery,
       ),
     ));
     // RELY-03: a successful reconnect zeroes the watchdog so the next

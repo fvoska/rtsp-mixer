@@ -1,5 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rtsp_mixer/features/monitoring/models/player_state.dart';
+import 'package:rtsp_mixer/features/peer/models/battery_status.dart';
 
 void main() {
   group('CameraAudioState', () {
@@ -44,6 +45,22 @@ void main() {
       expect(updated.cameraName, 'Nursery');
       expect(updated.volume, 50.0);
       expect(updated.pan, -0.5);
+    });
+
+    test('copyWith keeps hostBattery unless explicitly cleared', () {
+      const battery = BatteryStatus(percent: 42, plugged: false);
+      const original = CameraAudioState(
+        cameraId: 'cam1',
+        cameraName: 'Nursery',
+        hostBattery: battery,
+      );
+      expect(original.copyWith(volume: 10).hostBattery, battery);
+      expect(original.copyWith(hostBattery: null).hostBattery, isNull);
+      const other = BatteryStatus(percent: 41, plugged: true);
+      expect(original.copyWith(hostBattery: other).hostBattery, other);
+      expect(
+          const CameraAudioState(cameraId: 'c', cameraName: 'n').hostBattery,
+          isNull);
     });
 
     test('isLive returns true only when playing', () {

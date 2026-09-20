@@ -20,6 +20,7 @@ No camera at all? Two phones are enough.
 - **Auto-discovery** — the monitoring phone finds hosts on the same Wi‑Fi by itself; no IP addresses to type.
 - **Pairing by code or QR** — the host shows a one-time 6-digit code and a QR code; type the code or scan it once, and the pairing is remembered on both ends. Wrong-code guessing is throttled, each code is spent after use, and the host lists paired monitors and can unpair them any time.
 - **Same pipeline as every other camera** — a paired phone is just another camera in the mix: per-camera volume, reconnect-forever, zombie detection, alerts, and session history all apply. If the host's Wi‑Fi address changes, the monitor finds it again by id.
+- **Host battery on the monitor** — the phone in the nursery reports its battery level and whether it is plugged in; the monitoring phone shows it on that camera's card and warns before you fall asleep if the host is running down unplugged.
 - Everything stays on your LAN; nothing is relayed through the cloud.
 
 ## Listening & mixing
