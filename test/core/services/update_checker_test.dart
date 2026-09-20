@@ -5,7 +5,7 @@ import 'dart:typed_data';
 import 'package:dio/dio.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:rtsp_mixer/core/services/storage_service.dart';
+import 'package:rtsp_mixer/core/storage/storage_service.dart';
 import 'package:rtsp_mixer/core/services/update_checker.dart';
 
 import '../../support/logging.dart';
