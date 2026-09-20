@@ -10,6 +10,8 @@ import '../../../core/theme/spacing.dart';
 import '../../../core/theme/status_colors.dart';
 import '../../cameras/widgets/camera_source_badge.dart';
 import '../../peer/helpers/peer_urls.dart';
+import '../../peer/models/battery_status.dart';
+import '../../peer/widgets/battery_icon.dart';
 import '../helpers/audio_level_meter.dart';
 import '../models/player_state.dart';
 import '../providers/audio_player_provider.dart';
@@ -294,6 +296,13 @@ class _CameraAudioCardState extends ConsumerState<CameraAudioCard> {
                         const SizedBox(width: Spacing.sm),
                         CameraSourceBadge(source: cs.source),
                       ],
+                      // A paired phone's battery, while its stream is up.
+                      // Only for live streams: a reading from a phone that
+                      // has stopped answering is a guess, not a status.
+                      if (cs.isLive && cs.hostBattery != null) ...[
+                        const SizedBox(width: Spacing.sm),
+                        _HostBatteryChip(battery: cs.hostBattery!),
+                      ],
                     ],
                   ),
                 ),
@@ -365,6 +374,13 @@ class _CameraAudioCardState extends ConsumerState<CameraAudioCard> {
               clipBehavior: Clip.hardEdge,
               child: _StatusLine(status: cs.connectionStatus),
             ),
+
+            // A phone camera running down is the one failure the reconnect
+            // loop cannot fix — say so while the parent is still awake.
+            if (cs.isLive && (cs.hostBattery?.isLow ?? false)) ...[
+              const SizedBox(height: Spacing.sm),
+              _HostBatteryWarning(battery: cs.hostBattery!),
+            ],
 
             // Audio level indicator + rolling waveform — replaced by a
             // lightweight notice in battery saver mode, since the poll no
@@ -1134,6 +1150,12 @@ class _StreamInfoPanel extends StatelessWidget {
     // Level meter provenance: which signal the glow is built on right now.
     rows.add(_row('Meter', _describeMeter(cameraState), labelStyle, dimStyle));
 
+    // Paired phone's battery, as it last reported it.
+    final battery = cameraState.hostBattery;
+    if (battery != null) {
+      rows.add(_row('Battery', battery.label, labelStyle, dimStyle));
+    }
+
     // Video section (only when video preview is active)
     if (showVideoInfo) {
       final videoParts = <String>[];
@@ -1185,6 +1207,83 @@ class _StreamInfoPanel extends StatelessWidget {
           ),
         ],
       ),
+    );
+  }
+}
+
+/// Compact "73%" chip with a battery glyph, in the card header of a paired
+/// phone camera. Tinted amber when the phone is running down and red when
+/// it may not last the night; neutral (and with a bolt) when plugged in.
+class _HostBatteryChip extends StatelessWidget {
+  const _HostBatteryChip({required this.battery});
+  final BatteryStatus battery;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final status = context.statusColors;
+    final Color fg = battery.isCritical
+        ? status.offline
+        : battery.isLow
+            ? status.warning
+            : theme.colorScheme.onSecondaryContainer;
+    final Color bg = battery.isLow
+        ? fg.withValues(alpha: 0.16)
+        : theme.colorScheme.secondaryContainer;
+    return Tooltip(
+      message: 'Phone battery ${battery.label}',
+      child: Container(
+        key: const ValueKey('host-battery-chip'),
+        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+        decoration: BoxDecoration(
+          color: bg,
+          borderRadius: BorderRadius.circular(6),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(batteryIcon(battery), size: 12, color: fg),
+            const SizedBox(width: 2),
+            Text(
+              '${battery.percent}%',
+              style: AppTypography.numericSmall.copyWith(color: fg),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// Full-width line under the status line: the paired phone is unplugged and
+/// low. Worded as the action to take, not as a number to interpret.
+class _HostBatteryWarning extends StatelessWidget {
+  const _HostBatteryWarning({required this.battery});
+  final BatteryStatus battery;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final status = context.statusColors;
+    final color = battery.isCritical ? status.offline : status.warning;
+    final text = battery.isCritical
+        ? 'Phone battery ${battery.percent}% and not charging — it may not last the night'
+        : 'Phone battery ${battery.percent}% and not charging — plug it in';
+    return Row(
+      key: const ValueKey('host-battery-warning'),
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Icon(Icons.battery_alert, size: 16, color: color),
+        const SizedBox(width: Spacing.xs),
+        Expanded(
+          child: Text(
+            text,
+            style: theme.textTheme.bodySmall?.copyWith(color: color),
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+          ),
+        ),
+      ],
     );
   }
 }

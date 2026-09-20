@@ -5,6 +5,7 @@ import 'dart:typed_data';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rtsp_mixer/features/peer/helpers/peer_urls.dart';
+import 'package:rtsp_mixer/features/peer/models/battery_status.dart';
 import 'package:rtsp_mixer/features/peer/peer_protocol.dart';
 import 'package:rtsp_mixer/features/peer/services/pairing_code.dart';
 import 'package:rtsp_mixer/features/peer/services/peer_host_server.dart';
@@ -28,6 +29,7 @@ class _Harness {
       audio: audio.stream,
       currentLevel: () => 0.42,
       currentLevelDb: () => -18.5,
+      currentBattery: () => battery,
       onListenersChanged: (n) => listenerCounts.add(n),
       gate: gate,
     );
@@ -37,6 +39,9 @@ class _Harness {
   final String code = '123456';
   final audio = StreamController<Uint8List>.broadcast();
   final validTokens = <String>{'good'};
+
+  /// What the fake host reports as its battery; null omits the field.
+  BatteryStatus? battery = const BatteryStatus(percent: 73, plugged: true);
   final issued = <({String id, String name})>[];
   final listenerCounts = <int>[];
   late final PeerHostServer server;
@@ -154,6 +159,16 @@ void main() {
     expect(json['level'], 0.42);
     expect(json['levelDb'], -18.5);
     expect(json['listeners'], 0);
+    expect(json['battery'], {'percent': 73, 'plugged': true});
+  });
+
+  test('status omits the battery when the host has no reading', () async {
+    h.battery = null;
+    final res = await h.get(kPeerStatusPath, token: 'good');
+    expect(res.statusCode, 200);
+    final json = jsonDecode(await utf8.decoder.bind(res).join());
+    expect(json.containsKey('battery'), isFalse);
+    expect(json['level'], 0.42);
   });
 
   test('audio streams a WAV header followed by live PCM, and tracks listeners',

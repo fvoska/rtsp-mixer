@@ -4,6 +4,7 @@ import 'dart:io';
 import 'dart:typed_data';
 
 import '../../../core/logging/app_logger.dart';
+import '../models/battery_status.dart';
 import '../peer_protocol.dart';
 import 'pairing_code.dart';
 import 'wav_stream.dart';
@@ -14,7 +15,7 @@ import 'wav_stream.dart';
 /// Endpoints (all under [kPeerApiPrefix]):
 ///  - `GET  /info`              identity, unauthenticated
 ///  - `POST /pair`              `{code, clientId, clientName}` → `{token,…}`
-///  - `GET  /status?token=`     `{level, listeners, uptimeSeconds}`
+///  - `GET  /status?token=`     `{level, listeners, uptimeSeconds, battery?}`
 ///  - `GET  /audio.wav?token=`  endless PCM16 WAV
 ///
 /// Defensive by contract (CLAUDE.md): a bad request, a slow or vanished
@@ -30,6 +31,7 @@ class PeerHostServer {
     required this.audio,
     required this.currentLevel,
     this.currentLevelDb,
+    this.currentBattery,
     this.onListenersChanged,
     this.onPairingAttempt,
     PairingGate? gate,
@@ -56,6 +58,10 @@ class PeerHostServer {
   /// Raw dBFS behind [currentLevel], for monitors that want to run their
   /// own noise-floor calibration on it. Optional.
   final double Function()? currentLevelDb;
+
+  /// This phone's battery, for the monitor's card. Optional; null (or a
+  /// throwing callback) simply omits the field.
+  final BatteryStatus? Function()? currentBattery;
 
   /// Reports the number of distinct monitors (see [listenerCount]).
   final void Function(int listeners)? onListenersChanged;
@@ -213,10 +219,17 @@ class PeerHostServer {
     } catch (_) {
       levelDb = null;
     }
+    BatteryStatus? battery;
+    try {
+      battery = currentBattery?.call();
+    } catch (_) {
+      battery = null;
+    }
     final started = _startedAt;
     return {
       'level': level.clamp(0.0, 1.0),
       'levelDb': ?levelDb,
+      'battery': ?battery?.toJson(),
       'listeners': listenerCount,
       'uptimeSeconds':
           started == null ? 0 : DateTime.now().difference(started).inSeconds,

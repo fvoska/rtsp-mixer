@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
 
@@ -6,8 +7,10 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rtsp_mixer/core/storage/storage_service.dart';
 import 'package:rtsp_mixer/features/auth/providers/auth_provider.dart';
+import 'package:rtsp_mixer/features/peer/models/battery_status.dart';
 import 'package:rtsp_mixer/features/peer/models/peer_host_state.dart';
 import 'package:rtsp_mixer/features/peer/providers/peer_host_provider.dart';
+import 'package:rtsp_mixer/features/peer/services/battery_monitor.dart';
 import 'package:rtsp_mixer/features/peer/services/mic_capture.dart';
 import 'package:rtsp_mixer/features/peer/services/peer_pairing_client.dart';
 
@@ -40,10 +43,39 @@ class _FakeMic implements AudioCaptureSource {
   Future<void> dispose() async {}
 }
 
-ProviderContainer _container(StorageService storage, _FakeMic mic) =>
+/// Battery reader with a settable reading and a manual change trigger.
+class _FakeBattery implements BatterySource {
+  BatteryStatus? reading = const BatteryStatus(percent: 64, plugged: false);
+  final _changes = StreamController<void>.broadcast();
+  int reads = 0;
+  bool throwOnRead = false;
+
+  @override
+  Future<BatteryStatus?> read() async {
+    reads++;
+    if (throwOnRead) throw StateError('no battery service');
+    return reading;
+  }
+
+  @override
+  Stream<void> get changes => _changes.stream;
+
+  void plugged(bool value) {
+    final r = reading;
+    if (r != null) reading = BatteryStatus(percent: r.percent, plugged: value);
+    _changes.add(null);
+  }
+
+  @override
+  Future<void> dispose() async => _changes.close();
+}
+
+ProviderContainer _container(StorageService storage, _FakeMic mic,
+        {BatterySource? battery}) =>
     ProviderContainer(overrides: [
       storageProvider.overrideWithValue(storage),
       audioCaptureSourceProvider.overrideWithValue(mic),
+      batterySourceProvider.overrideWithValue(battery ?? _FakeBattery()),
       peerHostOptionsProvider.overrideWithValue(PeerHostOptions(
         bindAddress: InternetAddress.loopbackIPv4,
         httpPort: 0,
@@ -154,6 +186,52 @@ void main() {
         reason: 'microphone capture restarted after the stream ended',
         timeout: const Duration(seconds: 5));
     await c.read(peerHostProvider.notifier).stop();
+  });
+
+  test('battery is read while hosting, served over /status, cleared on stop',
+      () async {
+    final battery = _FakeBattery();
+    final c = _container(storage, mic, battery: battery);
+    addTearDown(c.dispose);
+    expect(c.read(peerHostProvider).battery, isNull);
+    await c.read(peerHostProvider.notifier).start();
+    final s = await _waitRunning(c);
+    await waitFor(
+        () => c.read(peerHostProvider).battery ==
+            const BatteryStatus(percent: 64, plugged: false),
+        reason: 'first battery reading published');
+
+    // A plug-in event refreshes the reading ahead of the periodic poll.
+    battery.plugged(true);
+    await waitFor(() => c.read(peerHostProvider).battery?.plugged == true,
+        reason: 'plug event refreshes the battery');
+
+    // Monitors get the same reading from the status endpoint.
+    final paired = await PeerPairingClient().pair(
+        address: '127.0.0.1',
+        port: s.port!,
+        code: s.code,
+        clientId: 'mon-1',
+        clientName: 'Pixel');
+    expect(paired.isSuccess, isTrue);
+    final http = HttpClient();
+    final req = await http.getUrl(Uri.parse(
+        'http://127.0.0.1:${s.port}/roomtone/v1/status?token=${paired.token}'));
+    final res = await req.close();
+    final json = jsonDecode(await utf8.decoder.bind(res).join());
+    http.close(force: true);
+    expect(json['battery'], {'percent': 64, 'plugged': true});
+
+    // A failing reader is logged, never fatal: hosting continues and the
+    // last good reading stays until the next successful read.
+    battery.throwOnRead = true;
+    battery.plugged(false);
+    await waitFor(() => battery.reads >= 3, reason: 'read attempted');
+    expect(c.read(peerHostProvider).isRunning, isTrue);
+    expect(c.read(peerHostProvider).battery?.percent, 64);
+
+    await c.read(peerHostProvider.notifier).stop();
+    expect(c.read(peerHostProvider).battery, isNull);
   });
 
   test('denied microphone permission yields an error state, not a throw',

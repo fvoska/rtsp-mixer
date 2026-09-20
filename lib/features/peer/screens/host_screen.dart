@@ -9,11 +9,13 @@ import '../../../core/logging/app_logger.dart';
 import '../../../core/theme/app_typography.dart';
 import '../../../core/theme/spacing.dart';
 import '../../../core/theme/status_colors.dart';
+import '../models/battery_status.dart';
 import '../models/paired_client.dart';
 import '../models/pairing_payload.dart';
 import '../models/peer_host_state.dart';
 import '../providers/peer_host_provider.dart';
 import '../services/pairing_code.dart';
+import '../widgets/battery_icon.dart';
 import '../widgets/pairing_qr.dart';
 
 /// "Use this phone as a camera." Reachable before any login (an old phone
@@ -403,6 +405,10 @@ class _LiveCard extends StatelessWidget {
                 ),
               ],
             ),
+            if (state.battery != null) ...[
+              const SizedBox(height: Spacing.xs),
+              _BatteryLine(battery: state.battery!),
+            ],
             const SizedBox(height: Spacing.md),
             ClipRRect(
               borderRadius: BorderRadius.circular(Radii.control),
@@ -426,6 +432,46 @@ class _LiveCard extends StatelessWidget {
           ],
         ),
       ),
+    );
+  }
+}
+
+
+/// "Battery 73% · charging" on the host's own screen — the same reading
+/// monitors see, so the parent can check it from either phone.
+class _BatteryLine extends StatelessWidget {
+  const _BatteryLine({required this.battery});
+  final BatteryStatus battery;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final status = context.statusColors;
+    final Color? color = battery.isCritical
+        ? status.offline
+        : battery.isLow
+            ? status.warning
+            : null;
+    final text = battery.isLow
+        ? 'Battery ${battery.percent}% and not charging — plug this phone in'
+        : 'Battery ${battery.label}';
+    return Row(
+      children: [
+        Icon(
+          batteryIcon(battery),
+          size: 18,
+          color: color ?? theme.colorScheme.onSurfaceVariant,
+        ),
+        const SizedBox(width: Spacing.xs),
+        Expanded(
+          child: Text(
+            text,
+            style: theme.textTheme.bodySmall?.copyWith(color: color),
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+          ),
+        ),
+      ],
     );
   }
 }

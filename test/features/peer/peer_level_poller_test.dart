@@ -1,4 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
+import 'package:rtsp_mixer/features/peer/models/battery_status.dart';
 import 'package:rtsp_mixer/features/peer/services/peer_level_poller.dart';
 
 import '../../support/async.dart';
@@ -48,6 +49,43 @@ void main() {
     payload = {'level': 'loud'};
     await Future<void>.delayed(const Duration(milliseconds: 60));
     expect(poller.levelFor('cam'), 1.0); // last good value retained
+  });
+
+  test('reports the host battery, drops it when absent or stale', () async {
+    Map<String, dynamic> payload = {
+      'level': 0.2,
+      'battery': {'percent': 42, 'plugged': false},
+    };
+    var fail = false;
+    final poller = PeerLevelPoller(
+      interval: const Duration(milliseconds: 20),
+      staleAfter: const Duration(milliseconds: 150),
+      fetch: (_, _) async {
+        if (fail) throw Exception('down');
+        return payload;
+      },
+    );
+    addTearDown(poller.stopAll);
+    expect(poller.batteryFor('cam'), isNull);
+    poller.start('cam', 'http://h/status');
+    await waitFor(
+        () => poller.batteryFor('cam') ==
+            const BatteryStatus(percent: 42, plugged: false),
+        reason: 'battery parsed from the first poll');
+    payload = {'level': 0.2, 'battery': {'percent': 43, 'plugged': true}};
+    await waitFor(() => poller.batteryFor('cam')?.plugged == true,
+        reason: 'battery follows the host');
+    // An older host that stops sending the field: no reading, no crash.
+    payload = {'level': 0.2};
+    await waitFor(() => poller.batteryFor('cam') == null,
+        reason: 'battery cleared when the host omits it');
+    expect(poller.levelFor('cam'), 0.2);
+    payload = {'level': 0.2, 'battery': {'percent': 40, 'plugged': false}};
+    await waitFor(() => poller.batteryFor('cam') != null,
+        reason: 'battery back');
+    fail = true;
+    await waitFor(() => poller.batteryFor('cam') == null,
+        reason: 'battery goes stale with the level when polls fail');
   });
 
   test('start with an empty url is a no-op', () {

@@ -1,3 +1,4 @@
+import 'battery_status.dart';
 import 'paired_client.dart';
 
 enum PeerHostStatus { idle, starting, running, error }
@@ -21,6 +22,7 @@ class PeerHostState {
     this.errorMessage,
     this.lastPairingNote,
     this.startedAt,
+    this.battery,
   });
 
   final PeerHostStatus status;
@@ -54,6 +56,10 @@ class PeerHostState {
   final String? lastPairingNote;
   final DateTime? startedAt;
 
+  /// This phone's battery while hosting; null when unknown or idle. Served
+  /// to monitors over `/status` and shown on the host screen.
+  final BatteryStatus? battery;
+
   bool get isRunning => status == PeerHostStatus.running;
   bool get isBusy => status == PeerHostStatus.starting;
   String? get primaryAddress => addresses.isEmpty ? null : addresses.first;
@@ -77,6 +83,7 @@ class PeerHostState {
     Object? errorMessage = _unset,
     Object? lastPairingNote = _unset,
     Object? startedAt = _unset,
+    Object? battery = _unset,
   }) =>
       PeerHostState(
         status: status ?? this.status,
@@ -100,5 +107,7 @@ class PeerHostState {
             : lastPairingNote as String?,
         startedAt:
             identical(startedAt, _unset) ? this.startedAt : startedAt as DateTime?,
+        battery:
+            identical(battery, _unset) ? this.battery : battery as BatteryStatus?,
       );
 }

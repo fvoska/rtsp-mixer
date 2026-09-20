@@ -3,8 +3,10 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rtsp_mixer/core/theme/app_theme.dart';
 import 'package:rtsp_mixer/core/theme/status_colors.dart';
+import 'package:rtsp_mixer/features/cameras/models/protect_camera.dart';
 import 'package:rtsp_mixer/features/monitoring/models/player_state.dart';
 import 'package:rtsp_mixer/features/monitoring/widgets/camera_audio_card.dart';
+import 'package:rtsp_mixer/features/peer/models/battery_status.dart';
 
 Future<void> _pumpCard(
   WidgetTester tester,
@@ -342,6 +344,77 @@ void main() {
       expect(waveformFinder, findsOneWidget);
       expect(find.text('Live'), findsOneWidget);
       expect(find.text('Nursery'), findsOneWidget);
+    });
+  });
+
+  group('CameraAudioCard paired-phone battery', () {
+    final chip = find.byKey(const ValueKey('host-battery-chip'));
+    final warning = find.byKey(const ValueKey('host-battery-warning'));
+    const livePhone = CameraAudioState(
+      cameraId: 'phone1',
+      cameraName: 'Nursery phone',
+      connectionStatus: CameraConnectionStatus.playing,
+      source: CameraSource.peer,
+      hostBattery: BatteryStatus(percent: 73, plugged: true),
+    );
+
+    testWidgets('shows the percentage chip for a live phone, no warning',
+        (tester) async {
+      await _pumpCard(tester, livePhone);
+      expect(chip, findsOneWidget);
+      expect(find.text('73%'), findsOneWidget);
+      expect(warning, findsNothing);
+    });
+
+    testWidgets('warns in amber when the phone is low and unplugged',
+        (tester) async {
+      await _pumpCard(
+        tester,
+        livePhone.copyWith(
+            hostBattery: const BatteryStatus(percent: 18, plugged: false)),
+      );
+      expect(chip, findsOneWidget);
+      expect(warning, findsOneWidget);
+      expect(find.textContaining('plug it in'), findsOneWidget);
+      final text = tester.widget<Text>(
+          find.descendant(of: warning, matching: find.byType(Text)));
+      expect(text.style?.color, StatusColors.dark.warning);
+    });
+
+    testWidgets('escalates to red copy when it may not last the night',
+        (tester) async {
+      await _pumpCard(
+        tester,
+        livePhone.copyWith(
+            hostBattery: const BatteryStatus(percent: 7, plugged: false)),
+      );
+      expect(find.textContaining('may not last the night'), findsOneWidget);
+      final text = tester.widget<Text>(
+          find.descendant(of: warning, matching: find.byType(Text)));
+      expect(text.style?.color, StatusColors.dark.offline);
+    });
+
+    testWidgets('a low but charging phone gets no warning', (tester) async {
+      await _pumpCard(
+        tester,
+        livePhone.copyWith(
+            hostBattery: const BatteryStatus(percent: 7, plugged: true)),
+      );
+      expect(chip, findsOneWidget);
+      expect(warning, findsNothing);
+    });
+
+    testWidgets('nothing is shown without a reading or off-air',
+        (tester) async {
+      await _pumpCard(tester, livePhone.copyWith(hostBattery: null));
+      expect(chip, findsNothing);
+      await _pumpCard(
+        tester,
+        livePhone.copyWith(
+            connectionStatus: CameraConnectionStatus.reconnecting),
+      );
+      expect(chip, findsNothing);
+      expect(warning, findsNothing);
     });
   });
 

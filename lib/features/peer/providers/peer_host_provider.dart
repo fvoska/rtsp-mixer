@@ -11,6 +11,7 @@ import '../../auth/providers/auth_provider.dart';
 import '../models/paired_client.dart';
 import '../models/peer_host_state.dart';
 import '../peer_protocol.dart';
+import '../services/battery_monitor.dart';
 import '../services/discovery.dart';
 import '../services/mic_capture.dart';
 import '../services/pairing_code.dart';
@@ -20,6 +21,10 @@ import '../services/peer_host_server.dart';
 /// Injectable microphone source (tests substitute a fake PCM stream).
 final audioCaptureSourceProvider =
     Provider<AudioCaptureSource>((_) => MicrophoneCapture());
+
+/// Injectable battery reader (tests substitute a fixed reading).
+final batterySourceProvider =
+    Provider<BatterySource>((_) => DeviceBatterySource());
 
 /// Knobs that differ between the app and tests (bind loopback, ephemeral
 /// ports, no foreground service). Production uses the defaults.
@@ -64,6 +69,8 @@ class PeerHostNotifier extends Notifier<PeerHostState> {
   StreamController<Uint8List>? _audio;
   Timer? _levelTimer;
   Timer? _micRestartTimer;
+  Timer? _batteryTimer;
+  StreamSubscription<void>? _batterySub;
   int _micRestartAttempt = 0;
   double _level = 0.0;
   double _levelDb = kPeerSilenceDbfs;
@@ -75,7 +82,12 @@ class PeerHostNotifier extends Notifier<PeerHostState> {
   /// Captured in build(): onDispose may not touch `ref`, and both providers
   /// are constant for the container's lifetime.
   late final AudioCaptureSource _mic;
+  late final BatterySource _battery;
   late final PeerHostOptions _options;
+
+  /// How often the battery is re-read while hosting. Plug/unplug events
+  /// refresh it sooner; the level itself moves slowly.
+  static const _batteryInterval = Duration(seconds: 60);
 
   /// Serializes start/stop so a double tap can't interleave them.
   Future<void>? _lifecycleOp;
@@ -83,10 +95,12 @@ class PeerHostNotifier extends Notifier<PeerHostState> {
   @override
   PeerHostState build() {
     _mic = ref.read(audioCaptureSourceProvider);
+    _battery = ref.read(batterySourceProvider);
     _options = ref.read(peerHostOptionsProvider);
     ref.onDispose(() {
       _levelTimer?.cancel();
       _micRestartTimer?.cancel();
+      _batteryTimer?.cancel();
       // ignore: unawaited_futures
       _teardown();
     });
@@ -205,6 +219,7 @@ class PeerHostNotifier extends Notifier<PeerHostState> {
         audio: audio.stream,
         currentLevel: () => _level,
         currentLevelDb: () => _levelDb,
+        currentBattery: () => state.battery,
         onListenersChanged: (n) {
           if (n != state.listeners) _publish(state.copyWith(listeners: n));
         },
@@ -257,6 +272,7 @@ class PeerHostNotifier extends Notifier<PeerHostState> {
 
       _micRestartAttempt = 0;
       await _startMic();
+      _startBattery();
       _levelTimer?.cancel();
       _levelTimer = Timer.periodic(const Duration(milliseconds: 150), (_) {
         try {
@@ -306,6 +322,7 @@ class PeerHostNotifier extends Notifier<PeerHostState> {
           micActive: false,
           startedAt: null,
           errorMessage: null,
+          battery: null,
         );
         await _saveConfig();
       });
@@ -315,6 +332,7 @@ class PeerHostNotifier extends Notifier<PeerHostState> {
     _levelTimer = null;
     _micRestartTimer?.cancel();
     _micRestartTimer = null;
+    _stopBattery();
     try {
       await _micSub?.cancel();
     } catch (_) {}
@@ -425,6 +443,53 @@ class PeerHostNotifier extends Notifier<PeerHostState> {
         // _startMic already scheduled the next attempt.
       }
     });
+  }
+
+  // --------------------------------------------------------------- battery
+
+  /// Read the battery now, then every [_batteryInterval] and on every
+  /// plug/unplug event. Purely informational: nothing here can stop the
+  /// server or the microphone.
+  void _startBattery() {
+    _stopBattery();
+    unawaited(_refreshBattery());
+    _batteryTimer = Timer.periodic(_batteryInterval, (_) {
+      unawaited(_refreshBattery());
+    });
+    try {
+      _batterySub = _battery.changes.listen(
+        (_) => unawaited(_refreshBattery()),
+        onError: (Object e) {
+          appLog('PEER_HOST', 'battery change stream error (ignored): $e');
+        },
+      );
+    } catch (e) {
+      appLog('PEER_HOST', 'battery change stream unavailable: $e');
+    }
+  }
+
+  void _stopBattery() {
+    _batteryTimer?.cancel();
+    _batteryTimer = null;
+    try {
+      unawaited(_batterySub?.cancel());
+    } catch (_) {}
+    _batterySub = null;
+  }
+
+  Future<void> _refreshBattery() async {
+    try {
+      final reading = await _battery.read();
+      if (!ref.mounted || !state.isRunning) return;
+      if (reading != state.battery) {
+        _publish(state.copyWith(battery: reading));
+        if (reading != null) {
+          appLog('PEER_HOST', 'Battery ${reading.label}');
+        }
+      }
+    } catch (e) {
+      appLog('PEER_HOST', 'battery read failed (ignored): $e');
+    }
   }
 
   // --------------------------------------------------------------- pairing
