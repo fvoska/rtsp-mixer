@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../features/monitoring/widgets/active_session_bar.dart';
+import 'update_banner.dart';
 
 /// Width at which we swap the bottom NavigationBar for a side NavigationRail.
 /// 600dp is the canonical Material 3 "compact → medium" breakpoint.
@@ -62,6 +63,14 @@ class _MainShellState extends ConsumerState<MainShell> {
     final body = Column(
       children: [
         Expanded(child: widget.navigationShell),
+        // Bottom of the column, not the top: each branch screen owns its own
+        // Scaffold/AppBar, so a top strip would float above those app bars
+        // and under the status bar in the bottom-nav layout. The bottom is
+        // already this shell's home for cross-tab furniture and needs no
+        // SafeArea handling in either the NavigationBar or the rail branch.
+        // Unlike ActiveSessionBar it shows on all four tabs, so it takes no
+        // selectedIndex. It hides itself when there is no update.
+        const UpdateBanner(),
         // ActiveSessionBar sits at the bottom of the body column. On phones it
         // visually floats just above the NavigationBar; on tablet/desktop it
         // floats at the bottom of the main content area, next to the rail.
