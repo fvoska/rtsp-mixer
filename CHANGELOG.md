@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.16.0](https://github.com/fvoska/rtsp-mixer/compare/v1.15.0...v1.16.0) (2026-09-20)
+
+
+### Features
+
+* **updates:** check GitHub releases for updates and show a download banner ([#60](https://github.com/fvoska/rtsp-mixer/issues/60)) ([2579830](https://github.com/fvoska/rtsp-mixer/commit/257983074a651d4e731b21a768ff4cc23a986167))
+
 ## [1.15.0](https://github.com/fvoska/rtsp-mixer/compare/v1.14.0...v1.15.0) (2026-09-20)
 
 
