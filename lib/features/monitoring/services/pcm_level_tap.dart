@@ -80,7 +80,7 @@ class PcmLevelTap {
     try {
       final dir = await _tempDir();
       final safeId = cameraId.replaceAll(RegExp(r'[^A-Za-z0-9_-]'), '_');
-      final fifo = PcmFifo.open('${dir.path}/roomtone-tap-$safeId.pcm');
+      final fifo = PcmFifo.open(PcmFifo.pathFor(dir.path, 'tap-$safeId'));
       if (fifo == null) {
         _fail('named pipe unavailable');
         return;
@@ -116,8 +116,8 @@ class PcmLevelTap {
       await np.setProperty('vid', 'no');
       // The whole point: decoded audio goes to a raw PCM file writer aimed
       // at our pipe instead of a sound device. media_kit set `ao=opensles`
-      // at construction; `ao` is a runtime option and this overrides it
-      // before the first audio output is created.
+      // (`wasapi` on Windows) at construction; `ao` is a runtime option and
+      // this overrides it before the first audio output is created.
       await np.setProperty('ao', 'pcm');
       await np.setProperty('ao-pcm-file', fifo.path);
       await np.setProperty('ao-pcm-waveheader', 'no');
