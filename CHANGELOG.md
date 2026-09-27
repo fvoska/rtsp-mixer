@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.16.1](https://github.com/fvoska/rtsp-mixer/compare/v1.16.0...v1.16.1) (2026-09-27)
+
+
+### Bug Fixes
+
+* **monitoring:** run the PCM level tap on Windows via a named pipe ([#62](https://github.com/fvoska/rtsp-mixer/issues/62)) ([95457fb](https://github.com/fvoska/rtsp-mixer/commit/95457fb19de787612b6f7baa67e3e9d7195e8ae4))
+
 ## [1.16.0](https://github.com/fvoska/rtsp-mixer/compare/v1.15.0...v1.16.0) (2026-09-20)
 
 
